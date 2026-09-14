@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="DRPreset" format=3]
+
+[ext_resource type="Script" path="res://addons/dot_rigger/core/preset.gd" id="1_nm87y"]
+
+[resource]
+script = ExtResource("1_nm87y")
+model_path = "res://models/UAL1.glb"
+yaw = -33.0
+pitch = 12.0
+margin = 3
+resolution = 96
+light_bands = 5
+z_auto = false
+z_order = PackedStringArray("L_Forearm", "L_UpperArm", "L_Hand", "L_Foot", "L_Calf", "L_Thigh", "Torso", "Hips", "Head", "R_Thigh", "R_Calf", "R_UpperArm", "R_Foot", "R_Forearm", "R_Hand")
+rest_anim = "Idle"
+animations = PackedStringArray("A_TPose", "Climb_Down", "Climb_Right")
+fps = 20
+apply_stretch = false
+out_dir = "res://preset_out"
