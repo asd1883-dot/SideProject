@@ -28,8 +28,10 @@ static func humanoid(split_toes: bool = false) -> DRPartProfile:
 	# 1픽셀도 안 되게 꿈틀거리기만 해서 어설펐다(09-15 실측: 키의 70~80% 가 1px 미만 움직임,
 	# 방향 전환 23키에 8~10회, 늘이기 0.62~1.6배로 튐). 발은 레스트 모양 그대로 한 장이고
 	# 발목에서 회전만 한다(발 방향은 발 뼈에 고정된 점으로 재므로 발가락 뼈가 접혀도 안 따라감).
+	# 발의 늘이기는 켜 둔다 — 끄면 레스트에서 카메라를 향해 짧게 찍힌 발이 걸을 때 못 길어져
+	# 3D 대비 발 어긋남이 2배(09-15 Walk −55°: 켬 280px · 끔 405px). 발가락만 따로 꺾을 때는 끈다.
 	# split_toes = true 면 예전처럼 발가락을 따로 꺾는다(그리기 순서 목록에서는 발 줄에 묶음).
-	var toe_rule := {"pattern": "(ball|toe)", "part": "Foot", "sided": true, "stretch": false}
+	var toe_rule := {"pattern": "(ball|toe)", "part": "Foot", "sided": true}
 	if split_toes:
 		toe_rule = {"pattern": "(ball|toe)", "part": "Toe", "sided": true, "layer": "Foot", "stretch": false}
 	p.rules = [
@@ -43,8 +45,7 @@ static func humanoid(split_toes: bool = false) -> DRPartProfile:
 		{"pattern": "(thigh|upleg|up_leg|upperleg)", "part": "Thigh", "sided": true},
 		{"pattern": "(calf|shin|lowerleg|^leg)", "part": "Calf", "sided": true},
 		toe_rule,   # 발 규칙보다 먼저
-		# 발은 늘이지 않는다 — 발이 카메라 쪽으로 틀어질 때 그림이 눌려 종이처럼 접혀 보이는 걸 막는다
-		{"pattern": "(foot|ankle)", "part": "Foot", "sided": true, "stretch": false},
+		{"pattern": "(foot|ankle)", "part": "Foot", "sided": true},
 		{"pattern": "(arm)", "part": "UpperArm", "sided": true},
 	]
 	p.default_order = PackedStringArray([

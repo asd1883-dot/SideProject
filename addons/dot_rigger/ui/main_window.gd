@@ -297,6 +297,25 @@ func _build_ui() -> void:
 	_rest_time_lbl = Label.new()
 	_rest_time_lbl.text = "t = 0%"
 	left.add_child(_rest_time_lbl)
+	# 자세 찾기는 두 범위 — "위에 고른 애니 안에서 몇 % 가 좋은지" / "6번에서 고른 동작들 중 어느 애니의 몇 % 가 좋은지".
+	# 처음엔 후자 하나만 뒀더니 레스트를 Crawl_Bwd 로 맞추고 눌렀는데 6번에 남아 있던 Walk 로 바뀌어 당황했음(09-15).
+	var frow := HBoxContainer.new()
+	var find_here := Button.new()
+	find_here.text = "이 애니에서 자세 찾기"
+	find_here.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	find_here.pressed.connect(_find_rest_pose.bind("rest"))
+	frow.add_child(find_here)
+	var find_picked := Button.new()
+	find_picked.text = "6번 동작에서 찾기"
+	find_picked.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	find_picked.pressed.connect(_find_rest_pose.bind("picked"))
+	frow.add_child(find_picked)
+	left.add_child(frow)
+	var find_tip := "지금 시점에서 팔다리가 카메라를 향하지 않고 화면과 가장 나란한 자세를 찾아 레스트에 넣습니다.\n" \
+		+ "카메라를 향해 짧게 찍힌 파트(예: −55° 의 Idle 오른발)는 그 파트가 화면과 나란해지는 동작에서 3D 와 크게 어긋납니다.\n"
+	_tip(find_here, "위에서 고른 애니메이션 **안에서** 가장 좋은 시점(%)만 찾습니다. 애니는 바뀌지 않습니다.\n" + find_tip \
+		+ "엎드리기·수영 계열을 따로 구울 때: 그 계열 애니를 여기 고르고 이 버튼.")
+	_tip(find_picked, "6번에서 고른 동작들(없으면 전체)을 훑어 **어느 애니의 몇 %** 가 가장 좋은지 찾습니다. 애니가 바뀔 수 있습니다.\n" + find_tip)
 
 	# 애니메이션
 	left.add_child(_section("6. 내보낼 애니메이션"))
@@ -796,6 +815,12 @@ func _current_opts() -> DRBaker.Options:
 	o.color_levels = int(_levels.value)
 	if _rest_anim.selected >= 0:
 		o.rest_anim = _rest_anim.get_item_text(_rest_anim.selected)
+		# 슬라이더는 0~1 비율, 베이커는 초 단위. 이걸 안 넘기면 프리뷰는 슬라이더 시점으로 찍고
+		# 베이크는 항상 0% 로 찍어 파트 그림과 애니 기준이 어긋난다(02 C10).
+		if baker != null and baker.anim_player != null:
+			var rn := baker.resolve_anim(o.rest_anim)
+			if rn != "":
+				o.rest_time = baker.anim_player.get_animation(rn).length * _rest_time.value
 	return o
 
 
@@ -1426,7 +1451,7 @@ func _render_preview_once() -> void:
 		var an := _rest_anim.get_item_text(_rest_anim.selected)
 		var res := baker.resolve_anim(an)
 		if res != "" and baker.anim_player.has_animation(res):
-			baker.set_pose(res, baker.anim_player.get_animation(res).length * _rest_time.value)
+			baker.set_pose(res, baker.opts.rest_time)   # _current_opts 가 초 단위로 환산해 둠 — 베이크와 같은 시점
 	else:
 		baker.set_rest_pose()
 	# 시점 관련 값이 바뀐 경우에만 카메라를 다시 잡는다.
@@ -1583,6 +1608,88 @@ func _current_rest_anim() -> String:
 	if baker == null or baker.anim_player == null or _rest_anim.selected <= 0:
 		return ""
 	return baker.resolve_anim(_rest_anim.get_item_text(_rest_anim.selected))
+
+
+## 레스트 자세 점수에서 빼는 파트 — 짧거나 작아서(힙 tail 16px, 머리 19px, 손) 단축률이 뜻이 없다.
+const REST_SCAN_SKIP := ["Hips", "Head", "L_Hand", "R_Hand"]
+
+
+## 한 자세의 점수 = 파트 중 가장 낮은 단축률(1 = 화면과 나란함, 0 = 카메라를 향함) 과 그 파트.
+func _rest_score() -> Array:
+	var f: Dictionary = baker.rig.foreshortening(baker.skeleton, baker.camera, float(baker.opts.view_size.y))
+	var mn := INF
+	var mp := ""
+	for pn in f.keys():
+		if String(pn) in REST_SCAN_SKIP:
+			continue
+		if float(f[pn]) < mn:
+			mn = float(f[pn])
+			mp = String(pn)
+	return [mn if mn != INF else 0.0, mp]
+
+
+## 지금 시점에서 모든 파트가 화면과 가장 나란한 프레임을 찾아 5번 레스트 포즈에 넣는다.
+## 파트 그림은 레스트 한 자세에서만 찍히므로, 거기서 카메라를 향해 짧게 찍힌 파트는
+## 그 파트가 화면과 나란해지는 동작에서 3D 와 크게 어긋난다(02 P8: −55° Idle 은 오른발 0.41).
+## scope "rest" = 5번에 고른 애니 안에서 시점만 · "picked" = 6번에서 고른 애니들(없으면 전체) 중에서.
+## 애니 길이 1초당 12프레임씩 본다.
+func _find_rest_pose(scope: String = "picked") -> void:
+	if baker == null or baker.anim_player == null or _busy:
+		return
+	var cands := PackedStringArray()
+	var scanned := ""
+	if scope == "rest":
+		if _rest_anim.selected <= 0:
+			_status.text = "먼저 5번에서 애니메이션을 고르세요."
+			return
+		cands.append(_rest_anim.get_item_text(_rest_anim.selected))
+		scanned = "%s 안에서" % cands[0]
+	else:
+		cands = _picked_anim_names()
+		scanned = "6번에서 고른 %d개 중" % cands.size()
+		if cands.is_empty():
+			cands = _all_anims
+			scanned = "전체 %d개 중" % cands.size()
+	_busy = true
+	baker.set_playback(false)
+	var before := _rest_score()
+	var best_anim := ""
+	var best_t := 0.0
+	var best_score := -1.0
+	var best_part := ""
+	var n := 0
+	for an0 in cands:
+		var an := baker.resolve_anim(String(an0))
+		if an == "":
+			continue
+		var anim := baker.anim_player.get_animation(an)
+		var steps := clampi(roundi(anim.length * 12.0), 4, 36)
+		for k in steps:
+			var frac := float(k) / float(steps)
+			baker.set_pose(an, anim.length * frac)
+			var sc := _rest_score()
+			if float(sc[0]) > best_score:
+				best_score = float(sc[0])
+				best_anim = String(an0)
+				best_t = frac
+				best_part = String(sc[1])
+			n += 1
+			if n % 24 == 0:
+				_status.text = "레스트 자세 찾는 중… %s" % an0
+				await get_tree().process_frame
+	_busy = false
+	if best_anim == "":
+		_status.text = "레스트 자세를 찾지 못했습니다(애니메이션 없음)."
+		return
+	_loading = true
+	for i in _rest_anim.item_count:
+		if _rest_anim.get_item_text(i) == best_anim:
+			_rest_anim.select(i)
+	_rest_time.value = snappedf(best_t, 0.01)
+	_loading = false
+	_status.text = "레스트 자세 → %s %d%% (%s · 가장 눌린 파트 %s %.2f · 이전 %s %.2f)" % [
+		best_anim, int(round(best_t * 100.0)), scanned, best_part, best_score, String(before[1]), float(before[0])]
+	_refresh_preview()
 
 
 ## 2D 순서 모드에서의 재생. 3D 를 다시 렌더하지 않고

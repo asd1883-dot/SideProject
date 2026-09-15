@@ -331,6 +331,21 @@ func rest_layer_order() -> PackedStringArray:
 	return auto_layer_order(d)
 
 
+## 파트별 단축률 { part -> 0~1 }. 1 = 뼈가 화면과 나란함, 0 = 카메라를 향함.
+## (화면상 head~tail 길이 ÷ 실제 뼈 길이를 픽셀로 환산한 것)
+## 레스트 포즈 고르기의 기준: 이 값이 낮은 파트는 그림이 짧고 얇게 찍혀서
+## 그 파트가 화면과 나란해지는 동작에서 3D 와 크게 어긋난다.
+func foreshortening(skel: Skeleton3D, cam: Camera3D, view_h_px: float) -> Dictionary:
+	var pr := project(skel, cam)
+	var ppu := view_h_px / maxf(cam.size, 1e-6)   # 픽셀 / 월드 단위 (직교 카메라)
+	var out := {}
+	for pname in pr.keys():
+		var p: Part = parts[pname]
+		var full := p.tail_local.length() * ppu
+		out[pname] = clampf(float(pr[pname]["len2d"]) / maxf(full, 1e-4), 0.0, 1.0)
+	return out
+
+
 func capture_rest(skel: Skeleton3D, cam: Camera3D) -> void:
 	var pr := project(skel, cam)
 	for pname in pr.keys():

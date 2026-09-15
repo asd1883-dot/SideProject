@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## 발 / 발가락 / 레이어 검사.
-## [0] 기본 프로필: 발가락은 발에 합친다. 발은 레스트 모양 그대로 한 장이고 발목에서 회전만 한다(늘이기 없음).
+## [0] 기본 프로필: 발가락은 발에 합친다. 발은 레스트 모양 그대로 한 장이고 발목에서 회전만 한다(늘이기는 켬).
 ## [1]~[4] humanoid(true): 발가락을 따로 꺾는 모드. 발가락은 별도 파트·별도 본이지만
 ##         그리기 순서에서는 발과 한 줄(한 레이어)로 묶여 항상 발 바로 위에 그려져야 한다.
 ##
@@ -47,7 +47,7 @@ func _run() -> void:
 # ---------------------------------------------------------------- 기본: 발가락을 발에 합침
 
 func _check_merged(scene: PackedScene) -> void:
-	print("[0] 기본 프로필 — 발가락은 발에 합침, 발은 한 장·발목 회전만·늘이기 없음")
+	print("[0] 기본 프로필 — 발가락은 발에 합침, 발은 한 장·발목 회전만(늘이기는 켬)")
 	var baker: DRBaker = await _make_baker(scene, DRPartProfile.humanoid())
 	if baker == null:
 		_check(false, "기본 프로필 setup"); return
@@ -63,13 +63,13 @@ func _check_merged(scene: PackedScene) -> void:
 		_check(fp.bones.size() >= 2, "%s 에 본 %d개 (발 + 발가락)" % [foot, fp.bones.size()])
 		_check(baker.skeleton.get_bone_name(fp.root_bone) == "foot_" + side.to_lower(),
 			"%s 루트 본 = %s (발목에서 회전)" % [foot, baker.skeleton.get_bone_name(fp.root_bone)])
-		_check(rig.no_stretch.has(foot), "%s 늘이기 끔" % foot)
-	_check(not rig.no_stretch.has("L_Calf") and not rig.no_stretch.has("L_UpperArm"),
-		"다른 파트는 늘이기 유지 (끔 목록 %s)" % str(rig.no_stretch.keys()))
+		_check(not rig.no_stretch.has(foot), "%s 늘이기 켬 (기본 — 09-15 Walk 실측에서 켠 쪽이 3D 에 가까움)" % foot)
+	_check(rig.no_stretch.is_empty(), "기본 프로필은 늘이기 끈 파트 없음 (끔 목록 %s)" % str(rig.no_stretch.keys()))
 
 	var an := baker.resolve_anim("Jog_Fwd")
 	var anim := baker.anim_player.get_animation(an)
-	var s_bad := ""
+	var s_lo := INF
+	var s_hi := -INF
 	var lo := INF
 	var hi := -INF
 	for i in 24:
@@ -77,15 +77,14 @@ func _check_merged(scene: PackedScene) -> void:
 		baker.set_pose(an, t)
 		await RenderingServer.frame_post_draw
 		var loc := rig.project_local(baker.skeleton, baker.camera)
-		for side in ["L", "R"]:
-			var s := float(loc[side + "_Foot"]["s"])
-			if absf(s - 1.0) > 0.000001:
-				s_bad = "(t=%.2f %s_Foot s=%.3f)" % [t, side, s]
+		var s := float(loc["L_Foot"]["s"])
+		s_lo = minf(s_lo, s)
+		s_hi = maxf(s_hi, s)
 		var r := rad_to_deg(float(loc["L_Foot"]["r"]))
 		lo = minf(lo, r)
 		hi = maxf(hi, r)
-	_check(s_bad == "", "Jog_Fwd 24프레임 전부 발 늘이기 = 1.0 %s" % s_bad)
-	_check(hi - lo > 10.0, "L_Foot 발목 회전 폭 %.1f° (발은 여전히 움직임)" % (hi - lo))
+	_check(s_hi - s_lo > 0.05, "Jog_Fwd 에서 L_Foot 늘이기 s 가 %.2f~%.2f 로 움직임(켜짐)" % [s_lo, s_hi])
+	_check(hi - lo > 10.0, "L_Foot 발목 회전 폭 %.1f° (발가락이 접혀도 발 그림은 발목 회전만)" % (hi - lo))
 
 	var out_dir := "res://puppet_test/foot_bake"
 	var ex := DRExporter.new()
@@ -108,13 +107,10 @@ func _check_merged(scene: PackedScene) -> void:
 			_check(false, "씬에 %s_Foot 본" % side)
 			continue
 		var base := String(pup.get_path_to(fb))
-		_check(a.find_track(NodePath(base + "/stretch:scale"), Animation.TYPE_VALUE) < 0,
-			"%s_Foot 늘이기 트랙 없음" % side)
+		_check(a.find_track(NodePath(base + "/stretch:scale"), Animation.TYPE_VALUE) >= 0,
+			"%s_Foot 늘이기 트랙 있음" % side)
 		_check(a.find_track(NodePath(base + ":rotation"), Animation.TYPE_VALUE) >= 0,
 			"%s_Foot 회전 트랙 있음" % side)
-	var calf := pup.find_child("L_Calf", true, false) as Bone2D
-	_check(calf != null and a.find_track(NodePath(String(pup.get_path_to(calf)) + "/stretch:scale"),
-		Animation.TYPE_VALUE) >= 0, "L_Calf 늘이기 트랙은 그대로 있음")
 	pup.queue_free()
 
 	var f := FileAccess.open(out_dir.path_join("rig.json"), FileAccess.READ)
@@ -123,7 +119,7 @@ func _check_merged(scene: PackedScene) -> void:
 	var st := {}
 	for p in doc.get("parts", []):
 		st[String(p.get("name", ""))] = p.get("stretch", null)
-	_check(st.get("L_Foot") == false and st.get("L_Calf") == true,
+	_check(st.get("L_Foot") == true and st.get("L_Calf") == true,
 		"rig.json stretch — L_Foot %s · L_Calf %s" % [st.get("L_Foot"), st.get("L_Calf")])
 
 
@@ -156,6 +152,8 @@ func _check_split(scene: PackedScene) -> void:
 		_check(rb == "ball_" + side.to_lower(), "%s 루트 본 = %s" % [toe, rb])
 		var tris := int(baker.split.tri_counts.get(toe, 0))
 		_check(tris > 0, "%s 삼각형 %d개" % [toe, tris])
+		_check(rig.no_stretch.has(toe) and not rig.no_stretch.has(foot),
+			"%s 늘이기 끔(규칙 stretch:false), %s 는 켬" % [toe, foot])
 
 	print("[2] Jog_Fwd — 발가락이 발 기준으로 따로 접히나 / 자동 z 가 발 바로 위인가")
 	var an := baker.resolve_anim("Jog_Fwd")
@@ -237,6 +235,8 @@ func _check_split(scene: PackedScene) -> void:
 				rhi = maxf(rhi, v)
 		var span := rad_to_deg(rhi - rlo) if tr >= 0 else 0.0
 		_check(tr >= 0 and span > 10.0, "%s_Toe 회전 트랙 폭 %.1f°" % [side, span])
+		_check(a.find_track(NodePath(String(pup.get_path_to(toe_bone)) + "/stretch:scale"), Animation.TYPE_VALUE) < 0,
+			"%s_Toe 늘이기 트랙 없음 (stretch:false 가 씬까지 감)" % side)
 
 	var f := FileAccess.open(out_dir.path_join("rig.json"), FileAccess.READ)
 	var doc: Dictionary = JSON.parse_string(f.get_as_text())

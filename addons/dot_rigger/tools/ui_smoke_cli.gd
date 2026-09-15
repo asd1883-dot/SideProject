@@ -116,15 +116,14 @@ func _run() -> void:
 		auto_order.append(win._z_list.get_item_text(i))
 	print("8) 그리기 순서 자동 %d개 — 맨뒤=%s 맨앞=%s" % [
 		auto_order.size(), auto_order[0], auto_order[-1]])
-	# 기본 프로필은 발가락을 발에 합친다(발은 한 장, 발목 회전만, 늘이기 없음)
+	# 기본 프로필은 발가락을 발에 합친다(발은 한 장, 발목 회전만). 늘이기를 끈 파트는 없어야 한다
 	var lrig := win.baker.rig
-	if lrig.order.size() != 15 or lrig.parts.has("L_Toe") or lrig.parts.has("R_Toe") \
-			or not lrig.no_stretch.has("L_Foot") or not lrig.no_stretch.has("R_Foot") or lrig.no_stretch.has("L_Calf"):
+	if lrig.order.size() != 15 or lrig.parts.has("L_Toe") or lrig.parts.has("R_Toe") or not lrig.no_stretch.is_empty():
 		printerr("파트 구성 이상: 파트 %d개, 발가락 파트 %s, 늘이기 끔 %s" % [
 			lrig.order.size(), lrig.parts.has("L_Toe"), str(lrig.no_stretch.keys())])
 		quit(1); return
-	print("8-1) 파트 %d개 · 순서 목록 %d줄 — 발가락은 발에 합침, 늘이기 끔 %s" % [
-		lrig.order.size(), win._z_list.item_count, str(lrig.no_stretch.keys())])
+	print("8-1) 파트 %d개 · 순서 목록 %d줄 — 발가락은 발에 합침, 늘이기는 전 파트 켬" % [
+		lrig.order.size(), win._z_list.item_count])
 
 	# 수동 재정렬 -> 자동 해제 확인
 	win._z_list.select(0)
@@ -754,6 +753,61 @@ func _run() -> void:
 	while win._busy:
 		await process_frame
 	print("23) ▶ 재생 애니 분리 OK — 레스트 Idle 그대로, 3D·2D 모두 Jog_Fwd 재생(파트 캐시 유지), 6번 선택 없으면 레스트 애니")
+
+	# ---- 레스트 자세 찾기 + 레스트 시점(슬라이더)이 베이커 옵션까지 가는지 ----
+	win._yaw.value = -55.0
+	win._pitch.value = 0.0
+	for i in win._rest_anim.item_count:
+		if win._rest_anim.get_item_text(i) == "Idle":
+			win._rest_anim.select(i)
+	win._rest_time.value = 0.0
+	win._picked_anims.clear()
+	win._picked_anims["Idle"] = true
+	win._picked_anims["Walk"] = true
+	win._fill_anim_list()
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var rs_before: Array = win._rest_score()
+	# "이 애니에서" — 5번 애니(Idle)는 그대로 두고 시점만 찾아야 한다
+	await win._find_rest_pose("rest")
+	while win._busy:
+		await process_frame
+	if win._rest_anim.get_item_text(win._rest_anim.selected) != "Idle":
+		printerr("'이 애니에서 찾기'가 애니를 바꿈: %s" % win._rest_anim.get_item_text(win._rest_anim.selected)); quit(1); return
+	# "6번 동작에서" — Idle·Walk 중 Walk 가 골라져야 한다
+	await win._find_rest_pose("picked")
+	while win._busy:
+		await process_frame
+	var rs_anim := win._rest_anim.get_item_text(win._rest_anim.selected)
+	var rs_after: Array = win._rest_score()
+	if rs_anim != "Walk" or float(rs_after[0]) <= float(rs_before[0]) + 0.2:
+		printerr("레스트 자세 찾기 실패: %s %.0f%% 점수 %.2f (이전 Idle %.2f, 기대: Walk 로 바뀌고 점수 크게 상승)" % [
+			rs_anim, win._rest_time.value * 100.0, rs_after[0], rs_before[0]]); quit(1); return
+	# "이 애니에서" 를 Walk 에 다시 — 애니는 Walk 그대로, 점수는 6번 결과와 같아야(같은 애니라 같은 최적 시점)
+	var rs_t := win._rest_time.value
+	await win._find_rest_pose("rest")
+	while win._busy:
+		await process_frame
+	if win._rest_anim.get_item_text(win._rest_anim.selected) != "Walk" or absf(win._rest_time.value - rs_t) > 0.011:
+		printerr("'이 애니에서 찾기'(Walk) 결과가 다름: %s %.2f (기대 Walk %.2f)" % [
+			win._rest_anim.get_item_text(win._rest_anim.selected), win._rest_time.value, rs_t]); quit(1); return
+	var rs_len: float = win.baker.anim_player.get_animation("Walk").length
+	if absf(win.baker.opts.rest_time - rs_len * win._rest_time.value) > 0.001 or win._rest_time.value <= 0.0:
+		printerr("레스트 시점이 베이커 옵션에 안 감: 슬라이더 %.2f → opts.rest_time %.3f (기대 %.3f)" % [
+			win._rest_time.value, win.baker.opts.rest_time, rs_len * win._rest_time.value]); quit(1); return
+	print("24) 레스트 자세 찾기 OK — '이 애니에서'는 애니 유지 · '6번 동작에서' Idle(%s %.2f) → Walk %.0f%% (%s %.2f), opts.rest_time %.3f초 = 길이 × 슬라이더" % [
+		rs_before[1], rs_before[0], win._rest_time.value * 100.0, rs_after[1], rs_after[0], win.baker.opts.rest_time])
+	win._rest_time.value = 0.0
+	for i in win._rest_anim.item_count:
+		if win._rest_anim.get_item_text(i) == "Idle":
+			win._rest_anim.select(i)
+	win._picked_anims.clear()
+	win._fill_anim_list()
+	win._yaw.value = 90.0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
 
 	# ---- 창 자체를 캡처해서 배치 검사 ----
 	win._show_composite()
