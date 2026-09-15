@@ -23,6 +23,9 @@ class Options:
 	var ambient: float = 0.45
 	var light_dir: Vector3 = Vector3(-0.4, 0.7, 0.6)
 	var trim_parts: bool = true
+	## 캐릭터 화면 위치 이동(px). +x = 오른쪽, +y = 위. 도트 크기(Ortho)는 그대로 두고 찍는 틀만 옮긴다.
+	## 자동 맞춤이 켜져 있으면 결국 다시 가운데로 맞춰진다.
+	var view_offset: Vector2 = Vector2.ZERO
 
 
 var opts: Options
@@ -72,6 +75,11 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 		return false
 
 	rig = DRRigModel.build(skeleton, split.bone_part, split.part_bones, split.weighted_bones)
+	# 파트 -> 레이어(그리기 순서 목록의 한 줄). 발가락은 발 레이어에 묶인다
+	for pn in rig.order:
+		rig.layer_of[pn] = profile.layer_for_part(pn)
+		if not profile.stretch_for_part(pn):
+			rig.no_stretch[pn] = true
 
 	# 원본 메쉬를 숨기고 파트 메쉬로 교체
 	source_mi.visible = false
@@ -163,19 +171,52 @@ func apply_view_size() -> void:
 		viewport.size = want
 
 
+## yaw/pitch(도) -> 카메라 기저. **pitch 양수 = 위에서 내려다봄.**
+## Basis.from_euler 의 X 회전은 양수일 때 +Z 쪽 점을 아래로 내리므로 부호를 뒤집는다.
+## (09-15 이전에는 뒤집지 않아 "탑다운 60"·"아이소 30" 프리셋이 아래에서 올려다봤다)
+static func view_basis(yaw_deg: float, pitch_deg: float) -> Basis:
+	return Basis.from_euler(Vector3(deg_to_rad(-pitch_deg), deg_to_rad(yaw_deg), 0.0))
+
+
+func _cam_dist() -> float:
+	var radius: float = maxf(_model_aabb.size.length() * 0.5, 0.001)
+	return radius * 4.0 + 2.0
+
+
 func apply_camera() -> void:
 	if camera == null:
 		return
-	var center := _model_aabb.get_center()
-	var radius: float = maxf(_model_aabb.size.length() * 0.5, 0.001)
 	var size := opts.ortho_size
 	if size <= 0.0:
 		size = maxf(_model_aabb.size.y, _model_aabb.size.x) * 1.15
 	camera.size = maxf(size, 0.01)
-	var basis := Basis.from_euler(Vector3(deg_to_rad(opts.pitch), deg_to_rad(opts.yaw), 0.0))
-	var dist: float = radius * 4.0 + 2.0
-	var pos := center + basis * Vector3(0, 0, dist)
-	camera.global_transform = Transform3D(Basis(), pos).looking_at(center, Vector3.UP)
+	# 캐릭터를 화면에서 옮기려면 카메라를 반대로 옮긴다 (px → 월드 = 화면 세로 높이 / 세로 픽셀 수)
+	var wpp := camera.size / float(maxi(opts.view_size.y, 1))
+	_place_camera(opts.yaw, opts.pitch, -opts.view_offset * wpp)
+
+
+## 자동 맞춤으로 잡힌 크기와 화면 안 위치를 유지한 채 각도만 바꾼다(기즈모 드래그용).
+## auto_fit 은 카메라를 자기 오른쪽/위 방향으로만 옮기므로, 그 두 성분을 떼어 두었다가
+## 새 각도의 오른쪽/위 방향에 다시 얹으면 인물이 화면에서 튀지 않는다.
+func orbit_camera(yaw_deg: float, pitch_deg: float) -> void:
+	if camera == null:
+		return
+	var ideal := _model_aabb.get_center() + view_basis(opts.yaw, opts.pitch) * Vector3(0, 0, _cam_dist())
+	var off := camera.global_position - ideal
+	var b := camera.global_transform.basis
+	var shift := Vector2(off.dot(b.x), off.dot(b.y))
+	opts.yaw = yaw_deg
+	opts.pitch = pitch_deg
+	_place_camera(yaw_deg, pitch_deg, shift)
+
+
+func _place_camera(yaw_deg: float, pitch_deg: float, shift: Vector2) -> void:
+	var center := _model_aabb.get_center()
+	var dist := _cam_dist()
+	var pos := center + view_basis(yaw_deg, pitch_deg) * Vector3(0, 0, dist)
+	var xf := Transform3D(Basis(), pos).looking_at(center, Vector3.UP)
+	xf.origin += xf.basis.x * shift.x + xf.basis.y * shift.y
+	camera.global_transform = xf
 	camera.far = dist * 3.0
 
 
@@ -187,6 +228,7 @@ func serialize_view() -> Dictionary:
 	return {
 		"yaw": opts.yaw,
 		"pitch": opts.pitch,
+		"view_offset": [opts.view_offset.x, opts.view_offset.y],   # 캐릭터 화면 위치 이동(px), 참고용(실제 위치는 camera_origin)
 		"ortho_size": camera.size,
 		"size": [opts.view_size.x, opts.view_size.y],
 		"supersample": opts.supersample,

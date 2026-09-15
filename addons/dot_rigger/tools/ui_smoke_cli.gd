@@ -9,6 +9,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# 산출물 폴더. 저장소에는 없으므로(.gitignore) 새로 clone 한 PC 에서는 여기서 만든다.
+	# 없으면 19번 프리셋 저장 검사가 실패한다.
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://puppet_test"))
 	var win := DRMainWindow.new()
 	root.add_child(win)
 	# 숨긴 채로 두면 SubViewport 가 렌더되지 않아 프리뷰가 검게 나온다.
@@ -16,6 +19,24 @@ func _run() -> void:
 	win.popup_centered(Vector2i(1000, 700))
 	await process_frame
 	print("1) UI 구성 OK")
+	# 이름 글자(Label)에 올려도 툴팁이 떠야 한다 (Label 기본값은 마우스 무시라 그냥 두면 안 뜸)
+	var tip_lbl: Label = null
+	for tip_c in win._yaw.get_parent().get_children():
+		if tip_c is Label:
+			tip_lbl = tip_c
+	if tip_lbl == null or tip_lbl.tooltip_text == "" or tip_lbl.mouse_filter == Control.MOUSE_FILTER_IGNORE:
+		printerr("Yaw 이름표에 툴팁이 안 붙음"); quit(1); return
+	var tip_names := ["_yaw", "_pitch", "_ortho", "_autofit", "_margin", "_res", "_ss", "_bands",
+		"_ambient", "_alpha", "_levels", "_bleed", "_rest_anim", "_anim_list", "_fps", "_stretch",
+		"_smooth", "_out_edit", "_keep_anims", "_bake_btn", "_z_auto", "_parts_tree",
+		"_off_x", "_off_y", "_play_anim"]
+	var tip_missing := []
+	for tip_n in tip_names:
+		if (win.get(tip_n) as Control).tooltip_text == "":
+			tip_missing.append(tip_n)
+	if tip_missing.size() > 0:
+		printerr("툴팁 없음: %s" % str(tip_missing)); quit(1); return
+	print("1-1) 툴팁 OK — 이름 글자에도 뜸(Yaw), 설정 %d개 모두 툴팁 있음" % tip_names.size())
 
 	win._model_edit.text = "res://models/UAL1.glb"
 	win._on_load()
@@ -66,6 +87,26 @@ func _run() -> void:
 	win._anim_filter.text = "jog"
 	win._fill_anim_list()
 	print("7) 애니 필터 'jog' -> %d개" % win._anim_list.item_count)
+	# 검색을 바꿔 가며 골라도 선택이 쌓여야 한다(예전엔 목록을 다시 채우며 선택이 풀렸음)
+	win._anim_list.select(0, false)
+	var pick_a := win._anim_list.get_item_text(0)
+	win._anim_filter.text = "idle"
+	win._anim_filter.text_changed.emit("idle")
+	win._anim_list.select(0, false)
+	var pick_b := win._anim_list.get_item_text(0)
+	win._anim_filter.text = ""
+	win._anim_filter.text_changed.emit("")
+	var pick_got := win._picked_anim_names()
+	var pick_sel := 0
+	for i in win._anim_list.item_count:
+		if win._anim_list.is_selected(i):
+			pick_sel += 1
+	if pick_got.size() != 2 or not pick_got.has(pick_a) or not pick_got.has(pick_b) or pick_sel != 2:
+		printerr("검색을 바꾸자 선택이 풀림: 고른 것 %s / 목록 선택 %d개 (기대 %s, %s)" % [str(pick_got), pick_sel, pick_a, pick_b])
+		quit(1); return
+	print("7-1) 검색을 바꿔도 선택 유지 — %s · 표시 \"%s\"" % [str(pick_got), win._anim_count.text])
+	win._picked_anims.clear()
+	win._fill_anim_list()
 
 	# 그리기 순서 목록 (자동)
 	if win._z_list.item_count != 15:
@@ -75,6 +116,15 @@ func _run() -> void:
 		auto_order.append(win._z_list.get_item_text(i))
 	print("8) 그리기 순서 자동 %d개 — 맨뒤=%s 맨앞=%s" % [
 		auto_order.size(), auto_order[0], auto_order[-1]])
+	# 기본 프로필은 발가락을 발에 합친다(발은 한 장, 발목 회전만, 늘이기 없음)
+	var lrig := win.baker.rig
+	if lrig.order.size() != 15 or lrig.parts.has("L_Toe") or lrig.parts.has("R_Toe") \
+			or not lrig.no_stretch.has("L_Foot") or not lrig.no_stretch.has("R_Foot") or lrig.no_stretch.has("L_Calf"):
+		printerr("파트 구성 이상: 파트 %d개, 발가락 파트 %s, 늘이기 끔 %s" % [
+			lrig.order.size(), lrig.parts.has("L_Toe"), str(lrig.no_stretch.keys())])
+		quit(1); return
+	print("8-1) 파트 %d개 · 순서 목록 %d줄 — 발가락은 발에 합침, 늘이기 끔 %s" % [
+		lrig.order.size(), win._z_list.item_count, str(lrig.no_stretch.keys())])
 
 	# 수동 재정렬 -> 자동 해제 확인
 	win._z_list.select(0)
@@ -159,8 +209,11 @@ func _run() -> void:
 	if Array(win._z_list.get_selected_items()) != [2, 3, 4]:
 		printerr("갱신 후 다중 선택이 날아감: %s" % str(win._z_list.get_selected_items()))
 		quit(1); return
-	if win._iso_parts.size() != 3:
-		printerr("프리뷰 대상이 3개가 아님: %s" % str(win._iso_parts)); quit(1); return
+	var expect_parts := 0
+	for i in [2, 3, 4]:
+		expect_parts += win.baker.rig.layer_parts(win._z_list.get_item_text(i)).size()
+	if win._iso_parts.size() != expect_parts:
+		printerr("프리뷰 대상 수 불일치: %s (기대 %d — 발 줄이면 발가락 포함)" % [str(win._iso_parts), expect_parts]); quit(1); return
 	# 고른 3개만 렌더되는지: 전체 합성보다 픽셀이 확실히 적어야 한다
 	var only3: Image = await win.baker.render_parts(win._iso_parts)
 	var allimg: Image = await win.baker.render_all_parts_composite()
@@ -231,6 +284,8 @@ func _run() -> void:
 	await process_frame
 
 	# ---- 2D 순서 합성이 실제로 순서를 반영하는지 ----
+	# 아래 픽셀 비교는 3D 렌더와 같은 캔버스 크기여야 하므로 부드러운 도트 이동은 끄고 한다(21 에서 따로 검사)
+	win._smooth.button_pressed = false
 	win._yaw.value = -45.0
 	win._show_composite()
 	while win._busy:
@@ -335,6 +390,55 @@ func _run() -> void:
 	if pct > 25.0:
 		printerr("파트 캐시가 한 자세로 안 찍혔습니다(팔다리 분리 의심)")
 		quit(1); return
+
+	# ---- 부드러운 도트 이동: 2D 퍼펫을 화면 배율로 그리고 셰이더를 붙이는지 ----
+	win._smooth.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var sm_vs := win.baker.opts.view_size
+	var sm_z := win._current_zoom()
+	var sm_want := Vector2i((Vector2(sm_vs) * clampf(sm_z, 1.0, DRMainWindow.PUPPET_SCALE_MAX)).round())
+	if win._puppet_vp.size != sm_want:
+		printerr("부드러운 도트: 퍼펫 뷰포트 %s (기대 %s, 화면 배율 %.2f)" % [win._puppet_vp.size, sm_want, sm_z]); quit(1); return
+	var sm_mats := 0
+	for sm_p in win._puppet_bones.keys():
+		var sm_art: Sprite2D = win._puppet_bones[sm_p]["art"]
+		if sm_art.material is ShaderMaterial:
+			sm_mats += 1
+	if sm_mats != win._puppet_bones.size():
+		printerr("부드러운 도트: 셰이더가 %d/%d 파트에만 붙음" % [sm_mats, win._puppet_bones.size()]); quit(1); return
+	if win._zoom_label.text != "맞춤":
+		printerr("부드러운 도트: 뷰포트 크기가 바뀌면서 확대 상태가 풀림/바뀜 (%s)" % win._zoom_label.text); quit(1); return
+	if is_equal_approx(win._puppet_scale, sm_z) and win._preview.size != Vector2(win._puppet_vp.size):
+		printerr("부드러운 도트: 화면 배율로 그렸는데 1:1 로 안 붙음 (%s vs %s)" % [win._preview.size, win._puppet_vp.size]); quit(1); return
+	# 크게 그린 결과를 캔버스 크기로 줄였을 때 끈 상태(rest2d)와 실루엣이 거의 같아야 한다
+	var sm_img: Image = win._puppet_vp.get_texture().get_image()
+	sm_img.resize(sm_vs.x, sm_vs.y, Image.INTERPOLATE_NEAREST)
+	var sm_area := 0
+	var sm_gap := 0
+	for y in rest2d.get_height():
+		for x in rest2d.get_width():
+			var sm_a1 := rest2d.get_pixel(x, y).a > 0.0
+			var sm_a2 := sm_img.get_pixel(x, y).a > 0.0
+			if sm_a1 or sm_a2:
+				sm_area += 1
+			if sm_a1 != sm_a2:
+				sm_gap += 1
+	var sm_pct := 100.0 * float(sm_gap) / float(maxi(sm_area, 1))
+	if sm_pct > 15.0:
+		printerr("부드러운 도트: 끈 상태와 실루엣 차이 %.1f%%" % sm_pct); quit(1); return
+	# 확대하면 뷰포트도 따라 커지고, 프리뷰 크기는 원래 크기 × 배율이어야 한다
+	win._step_zoom(1, win._pv_area.size * 0.5)
+	var sm_z2 := win._current_zoom()
+	var sm_want2 := Vector2i((Vector2(sm_vs) * clampf(sm_z2, 1.0, DRMainWindow.PUPPET_SCALE_MAX)).round())
+	if win._puppet_vp.size != sm_want2 or (win._preview.size - Vector2(sm_vs) * sm_z2).length() > 2.0:
+		printerr("부드러운 도트: 확대 %.2f 에서 뷰포트 %s (기대 %s), 프리뷰 %s" % [sm_z2, win._puppet_vp.size, sm_want2, win._preview.size]); quit(1); return
+	win._fit_preview()
+	print("21) 부드러운 도트 이동 OK — 맞춤 %.2f배 → 뷰포트 %s, 셰이더 %d개, 캔버스로 줄이면 실루엣 차이 %.1f%%, 확대 %.0f%% → 뷰포트 %s"
+		% [sm_z, sm_want, sm_mats, sm_pct, sm_z2 * 100.0, sm_want2])
 	win._rest_anim.select(0)
 	for i in win._rest_anim.item_count:
 		if win._rest_anim.get_item_text(i) == "Idle":
@@ -401,6 +505,9 @@ func _run() -> void:
 	win._margin.value = 3
 	win._fps.value = 20
 	win._stretch.button_pressed = false
+	win._smooth.button_pressed = false
+	win._keep_anims.button_pressed = false
+	win._off_y.value = 7
 	win._out_edit.text = "res://preset_out"
 	win._anim_filter.text = ""
 	win._fill_anim_list()
@@ -435,6 +542,9 @@ func _run() -> void:
 	win._margin.value = 10
 	win._fps.value = 12
 	win._stretch.button_pressed = true
+	win._smooth.button_pressed = true
+	win._keep_anims.button_pressed = true
+	win._off_y.value = 0
 	win._out_edit.text = "res://elsewhere"
 	win._z_auto.button_pressed = true
 	win._anim_list.deselect_all()
@@ -456,6 +566,9 @@ func _run() -> void:
 	if int(win._margin.value) != 3: bad_fields.append("margin=%s" % win._margin.value)
 	if int(win._fps.value) != 20: bad_fields.append("fps=%s" % win._fps.value)
 	if win._stretch.button_pressed: bad_fields.append("stretch")
+	if win._smooth.button_pressed: bad_fields.append("smooth")
+	if win._keep_anims.button_pressed: bad_fields.append("keep_anims")
+	if int(win._off_y.value) != 7: bad_fields.append("offset_y=%s" % win._off_y.value)
 	if win._out_edit.text != "res://preset_out": bad_fields.append("out=%s" % win._out_edit.text)
 	if win._z_auto.button_pressed: bad_fields.append("z_auto 가 다시 켜짐")
 	var got_order := []
@@ -474,12 +587,173 @@ func _run() -> void:
 	print("19) 프리셋 왕복 OK — 시점/도트/순서(%d개)/애니(%d개)/출력 전부 복원"
 		% [got_order.size(), got_anims.size()])
 	win._z_auto.button_pressed = true
+	win._off_y.value = 0
 	win._res.value = 256
 	win._yaw.value = 90.0
 	win._pitch.value = 0.0
 	win._show_composite()
 	while win._busy:
 		await process_frame
+
+	# ---- 3D 회전 기즈모 (2. 시점 칸과 연동) ----
+	win._mode_2d.button_pressed = false
+	win._yaw.value = 90.0
+	win._pitch.value = 0.0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if not win._gizmo.visible:
+		printerr("3D 모드인데 기즈모가 안 보임"); quit(1); return
+	# pitch 부호: 양수 = 위에서 내려다봄
+	win._pitch.value = 60.0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var g_cy := win.baker.camera.global_position.y - win.baker._model_aabb.get_center().y
+	if g_cy <= 0.0:
+		printerr("pitch +60 인데 카메라가 모델 아래 (%.2f)" % g_cy); quit(1); return
+	win._pitch.value = 0.0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	# 드래그 흉내: 누르고 → 오른쪽 아래로 20px 씩 두 번 → 뗌 (기대: yaw 90→70, pitch 0→20)
+	var g_pos := Vector2(46, 46)
+	var g_down := InputEventMouseButton.new()
+	g_down.button_index = MOUSE_BUTTON_LEFT
+	g_down.pressed = true
+	g_down.position = g_pos
+	win._on_gizmo_input(g_down)
+	for g_k in 2:
+		var g_mv := InputEventMouseMotion.new()
+		g_mv.relative = Vector2(20, 20)
+		g_mv.position = g_pos + Vector2(20, 20) * float(g_k + 1)
+		win._on_gizmo_input(g_mv)
+	var g_yaw := win._yaw.value
+	var g_pitch := win._pitch.value
+	var g_camyaw := win.baker.opts.yaw
+	var g_camdir := -win.baker.camera.global_transform.basis.z
+	var g_up := InputEventMouseButton.new()
+	g_up.button_index = MOUSE_BUTTON_LEFT
+	g_up.pressed = false
+	g_up.position = g_pos + Vector2(40, 40)
+	win._on_gizmo_input(g_up)
+	while win._busy:
+		await process_frame
+	if absf(g_yaw - 70.0) > 0.01 or absf(g_pitch - 20.0) > 0.01:
+		printerr("드래그가 시점 칸에 반영 안 됨: yaw %.2f pitch %.2f (기대 70 / 20)" % [g_yaw, g_pitch]); quit(1); return
+	if absf(g_camyaw - g_yaw) > 0.01 or g_camdir.y >= 0.0:
+		printerr("드래그 중 카메라가 칸 값과 어긋남 (카메라 yaw %.2f, 시선 y %.2f)" % [g_camyaw, g_camdir.y]); quit(1); return
+	var g_pset := win._collect_preset()
+	if absf(g_pset.yaw - 70.0) > 0.01 or absf(g_pset.pitch - 20.0) > 0.01:
+		printerr("기즈모 각도가 프리셋(출력)에 안 들어감"); quit(1); return
+	if absf(win.baker.opts.yaw - 70.0) > 0.01 or absf(win.baker.opts.pitch - 20.0) > 0.01:
+		printerr("손을 뗀 뒤 베이커 옵션이 칸 값과 다름"); quit(1); return
+	# 축 클릭: +X 끝을 눌렀다 떼면 오른쪽(+X)에서 보기
+	var g_xpos := Vector2(-999, -999)
+	for g_ax in win._gizmo_axes():
+		if String(g_ax["name"]) == "X":
+			g_xpos = g_ax["pos"]
+	var g_cdown := InputEventMouseButton.new()
+	g_cdown.button_index = MOUSE_BUTTON_LEFT
+	g_cdown.pressed = true
+	g_cdown.position = g_xpos
+	win._on_gizmo_input(g_cdown)
+	var g_cup := InputEventMouseButton.new()
+	g_cup.button_index = MOUSE_BUTTON_LEFT
+	g_cup.pressed = false
+	g_cup.position = g_xpos
+	win._on_gizmo_input(g_cup)
+	while win._busy:
+		await process_frame
+	if absf(win._yaw.value - 90.0) > 0.5 or absf(win._pitch.value) > 0.5:
+		printerr("X 축 클릭 → yaw %.1f pitch %.1f (기대 90 / 0)" % [win._yaw.value, win._pitch.value]); quit(1); return
+	# 2D 순서 모드에서는 숨김
+	win._mode_2d.button_pressed = true
+	while win._busy:
+		await process_frame
+	if win._gizmo.visible:
+		printerr("2D 모드인데 기즈모가 보임"); quit(1); return
+	win._mode_2d.button_pressed = false
+	while win._busy:
+		await process_frame
+	print("20) 기즈모 OK — pitch +60 은 위에서(+%.2f), 드래그 → 칸 yaw 70·pitch 20 = 카메라 = 프리셋, X축 클릭 → yaw 90, 2D 에서 숨김" % g_cy)
+
+	# ---- 캐릭터 화면 위치 이동 (자동 맞춤 끔일 때) ----
+	win._mode_2d.button_pressed = false
+	win._autofit.button_pressed = false
+	win._off_x.value = 0
+	win._off_y.value = 0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var off0: Image = await win.baker.render_all_parts_composite()
+	win._off_x.value = -10
+	win._off_y.value = 12
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var off1: Image = await win.baker.render_all_parts_composite()
+	var off_d := off1.get_used_rect().position - off0.get_used_rect().position
+	if absi(off_d.x + 10) > 1 or absi(off_d.y + 12) > 1:
+		printerr("캐릭터 이동이 안 맞음: X -10 · Y +12(위) 인데 찍힌 위치 이동 %s (기대 약 (-10, -12))" % str(off_d)); quit(1); return
+	print("22) 캐릭터 이동 OK — X -10 · Y +12(위) → 찍힌 위치 %s 이동 (Ortho %.3f 그대로)" % [str(off_d), win.baker.camera.size])
+	win._off_x.value = 0
+	win._off_y.value = 0
+	win._autofit.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+
+	# ---- ▶ 재생 애니 분리: 레스트 포즈는 그대로, 6번에서 고른 애니를 돌림 ----
+	for i in win._rest_anim.item_count:
+		if win._rest_anim.get_item_text(i) == "Idle":
+			win._rest_anim.select(i)
+	win._picked_anims.clear()
+	win._picked_anims["Idle"] = true
+	win._picked_anims["Jog_Fwd"] = true
+	win._anim_filter.text = ""
+	win._fill_anim_list()
+	var pl_found := false
+	for i in win._play_anim.item_count:
+		if String(win._play_anim.get_item_metadata(i)) == "Jog_Fwd":
+			win._play_anim.select(i)
+			pl_found = true
+	if not pl_found or win._play_anim.item_count != 2:
+		printerr("재생 드롭다운이 6번 선택으로 안 채워짐 (%d개)" % win._play_anim.item_count); quit(1); return
+	if win._current_play_anim() != "Jog_Fwd" or win._current_rest_anim() != "Idle":
+		printerr("재생 애니 %s / 레스트 %s (기대 Jog_Fwd / Idle)" % [win._current_play_anim(), win._current_rest_anim()]); quit(1); return
+	win._mode_2d.button_pressed = false
+	win._play.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var pl_3d := String(win.baker.anim_player.current_animation)
+	if pl_3d != "Jog_Fwd" or win.baker.anim_player.speed_scale != 1.0:
+		printerr("3D 재생이 Jog_Fwd 가 아님: %s (속도 %.1f)" % [pl_3d, win.baker.anim_player.speed_scale]); quit(1); return
+	win._mode_2d.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var pl_sig := win._part_sig
+	var pl_t0 := win._play_t
+	for _k in 20:
+		await process_frame
+	var pl_2d := String(win.baker.anim_player.current_animation)
+	if pl_2d != "Jog_Fwd" or win._play_t <= pl_t0 or win._part_sig != pl_sig:
+		printerr("2D 재생 이상: 애니 %s · t %.2f→%.2f · 파트 캐시 바뀜 %s" % [pl_2d, pl_t0, win._play_t, win._part_sig != pl_sig]); quit(1); return
+	win._play.button_pressed = false
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	win._picked_anims.clear()
+	win._fill_anim_list()
+	if win._play_anim.item_count != 1 or win._current_play_anim() != "Idle":
+		printerr("6번 선택이 없는데 재생 애니가 레스트가 아님: %s" % win._current_play_anim()); quit(1); return
+	win._mode_2d.button_pressed = false
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	print("23) ▶ 재생 애니 분리 OK — 레스트 Idle 그대로, 3D·2D 모두 Jog_Fwd 재생(파트 캐시 유지), 6번 선택 없으면 레스트 애니")
 
 	# ---- 창 자체를 캡처해서 배치 검사 ----
 	win._show_composite()
@@ -503,6 +777,7 @@ func _run() -> void:
 		"파트 트리": win._parts_tree,
 		"그리기 순서 목록": win._z_list,
 		"상태줄": win._iso_label,
+		"기즈모": win._gizmo,
 	}
 	var bad := 0
 	for name in checks.keys():

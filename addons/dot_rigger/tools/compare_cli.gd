@@ -58,12 +58,7 @@ func _run() -> void:
 	img3.save_png(out_dir.path_join("a_3d.png"))
 
 	# 2) 깊이 기준 자동 순서로 2D 합성 = 베이크 결과와 같은 방식
-	var order: Array = []
-	for p in baker.rig.order:
-		order.append(p)
-	order.sort_custom(func(a, b):
-		return (baker.rig.parts[a] as DRRigModel.Part).rest_depth \
-			> (baker.rig.parts[b] as DRRigModel.Part).rest_depth)
+	var order := baker.rig.expand_layers(baker.rig.rest_layer_order())   # 베이크 자동 순서와 같은 규칙(레이어 단위)
 	print("[그리기 순서 뒤->앞] ", String(" < ").join(PackedStringArray(order)))
 
 	var img2 := Image.create(sz, sz, false, Image.FORMAT_RGBA8)

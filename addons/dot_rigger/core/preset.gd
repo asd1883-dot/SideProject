@@ -16,6 +16,9 @@ class_name DRPreset
 @export var yaw: float = 90.0
 @export var pitch: float = 0.0
 @export var ortho: float = 0.0
+## 캐릭터 화면 위치 이동(px). +x = 오른쪽, +y = 위. 자동 맞춤이 켜져 있으면 무시(다시 가운데로 맞춤).
+@export var offset_x: int = 0
+@export var offset_y: int = 0
 @export var auto_fit: bool = true
 @export var margin: int = 6
 
@@ -31,7 +34,7 @@ class_name DRPreset
 @export var bleed_rings: int = 1
 ## true 면 3D 깊이로 자동 정렬. false 면 아래 z_order 를 그대로 쓴다.
 @export var z_auto: bool = true
-## 뒤 -> 앞 순서
+## 레이어 이름, 뒤 -> 앞 순서. 발가락처럼 다른 줄에 묶인 파트는 따로 적지 않는다.
 @export var z_order: PackedStringArray = PackedStringArray()
 
 @export_group("포즈 / 애니메이션")
@@ -40,6 +43,10 @@ class_name DRPreset
 @export var animations: PackedStringArray = PackedStringArray()
 @export var fps: int = 12
 @export var apply_stretch: bool = true
+## 부드러운 도트 이동 셰이더(2D 프리뷰 + 베이크 씬 스프라이트). 끄면 예전처럼 nearest.
+@export var smooth_pixel: bool = true
 
 @export_group("출력")
 @export var out_dir: String = "res://puppet"
+## 같은 폴더에 다시 구울 때 예전에 구운 애니를 유지(레스트 포즈·시점이 같을 때만).
+@export var keep_anims: bool = true

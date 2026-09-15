@@ -38,5 +38,10 @@ void fragment() {
 		col = mix(col, vec3(1.0), step(0.6, f) * rim);
 	}
 	ALBEDO = col;
+	// ALPHA 만 쓰면 Godot 이 반투명 물체로 분류해 깊이를 기록하지 않는다 → 나중에 그린 면이 무조건 위에 올라가
+	// 뒤쪽 어깨·관절 안쪽이 앞으로 비쳐 보였다(2026-09-15 실측: 합성의 6~8% 픽셀, 오른손 파트 93px 중 18px).
+	// 알파 가위(ALPHA_SCISSOR_THRESHOLD)를 주면 불투명 파이프라인으로 그려져 픽셀마다 앞뒤를 가린다.
+	// 투명 텍스처는 0.5 기준으로 오려낸다. (알파를 아예 뺀 결과와 픽셀 단위로 같음을 확인)
 	ALPHA = base.a;
+	ALPHA_SCISSOR_THRESHOLD = 0.5;
 }

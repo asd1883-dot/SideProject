@@ -79,6 +79,14 @@ func _run() -> void:
 	if not pup.equip(item):
 		printerr("장착 실패"); quit(1); return
 	print("장착 완료: slot=%s part=%s offset=%s z=%d" % [item.slot, item.part, item.offset, item.z_index])
+	# 장비도 본체 파트와 같은 방식(부드러운 도트 이동 셰이더 유무)으로 그려져야 결이 맞는다
+	var body_art := puppet.find_child("art", true, false) as Sprite2D
+	var body_mat: Material = body_art.material if body_art != null else null
+	var eq_spr := pup.get_equipped(item.slot)
+	if eq_spr == null or eq_spr.material != body_mat:
+		printerr("장비 머티리얼이 본체와 다름 (장비 %s / 본체 %s)"
+			% [eq_spr.material if eq_spr != null else null, body_mat]); quit(1); return
+	print("장비 머티리얼 = 본체와 같음 (%s)" % ("부드러운 도트 셰이더" if body_mat != null else "없음"))
 
 	# 애니메이션 캡처
 	var ap := puppet.get_node_or_null("AnimationPlayer") as AnimationPlayer

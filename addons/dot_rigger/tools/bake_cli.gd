@@ -9,6 +9,10 @@ extends SceneTree
 ##       --rest=A_TPose --anims=Idle_Loop,Walk_Fwd_Loop
 ##
 ## --diag 만 주면 렌더 없이 본->파트 매핑 결과만 출력한다.
+## --nostretch 단축 보정 끔 / --nosmooth 부드러운 도트 이동 셰이더를 붙이지 않음.
+## --split_toes 발가락을 발과 따로 꺾음(기본은 발에 합쳐 발은 한 장·발목 회전만).
+## --fresh 같은 출력 폴더에 예전에 구운 애니를 이어 담지 않고 이번 애니만 남김.
+## --offset_x=0 --offset_y=0 캐릭터 화면 위치 이동(px, +x 오른쪽, +y 위). --nofit 일 때 의미 있음.
 
 var _args := {}
 
@@ -39,7 +43,7 @@ func _run() -> void:
 		quit(1)
 		return
 
-	var profile := DRPartProfile.humanoid()
+	var profile := DRPartProfile.humanoid(_args.has("split_toes"))
 
 	# ---- 진단 모드: 본 -> 파트 매핑만 확인 ----
 	if _args.has("diag"):
@@ -53,6 +57,7 @@ func _run() -> void:
 	opts.yaw = float(_arg("yaw", "90"))
 	opts.pitch = float(_arg("pitch", "0"))
 	opts.ortho_size = float(_arg("ortho", "0"))
+	opts.view_offset = Vector2(float(_arg("offset_x", "0")), float(_arg("offset_y", "0")))
 	opts.supersample = int(_arg("ss", "1"))
 	opts.bleed_rings = int(_arg("bleed", "1"))
 	opts.rest_anim = _arg("rest", "")
@@ -91,6 +96,8 @@ func _run() -> void:
 	ex.auto_fit = not _args.has("nofit")
 	ex.fit_margin = int(_arg("margin", "6"))
 	ex.apply_stretch = not _args.has("nostretch")
+	ex.smooth_pixel = not _args.has("nosmooth")
+	ex.keep_previous = not _args.has("fresh")
 	var zo := _arg("zorder", "")
 	if zo != "":
 		ex.z_override = PackedStringArray(zo.split(",", false))
@@ -104,6 +111,10 @@ func _run() -> void:
 	var comp: Image = await baker.render_all_parts_composite()
 	comp.save_png(ex.out_dir.path_join("_preview_composite.png"))
 	print("[DotRigger] ortho_size=%.4f" % baker.camera.size)
+	if ex.kept_anims.size() > 0:
+		print("[DotRigger] 같은 폴더의 예전 애니 이어 담음: ", ex.kept_anims)
+	if ex.dropped_reason != "":
+		print("[DotRigger] ⚠ ", ex.dropped_reason)
 	print("[DotRigger] 결과: ", res)
 	quit(0 if bool(res.get("ok", false)) else 1)
 

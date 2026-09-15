@@ -14,6 +14,8 @@ signal unequipped(slot: String)
 
 var _parts: Dictionary = {}      # part 이름 -> {bone, stretch, rest_head, rest_angle}
 var _equipped: Dictionary = {}   # slot -> Sprite2D
+## 본체 파트 스프라이트의 머티리얼(부드러운 도트 이동 셰이더). 장비도 같은 방식으로 그려야 결이 맞는다
+var _art_material: Material = null
 
 
 func _ready() -> void:
@@ -23,6 +25,7 @@ func _ready() -> void:
 ## 씬 구조가 바뀌었을 때 다시 훑는다.
 func rebuild_index() -> void:
 	_parts.clear()
+	_art_material = null
 	var skel := get_node_or_null("Skeleton2D")
 	if skel == null:
 		push_warning("[DRPuppet] Skeleton2D 를 찾지 못했습니다.")
@@ -42,6 +45,10 @@ func _walk(n: Node, parent_head: Vector2) -> void:
 		"rest_head": head,
 		"rest_angle": b.get_bone_angle(),
 	}
+	if _art_material == null:
+		var art := b.get_node_or_null("stretch/art") as Sprite2D
+		if art != null:
+			_art_material = art.material
 	for c in b.get_children():
 		_walk(c, head)
 
@@ -82,6 +89,7 @@ func equip(item: DREquipItem) -> bool:
 	spr.z_as_relative = false
 	spr.z_index = item.z_index
 	spr.modulate = item.modulate
+	spr.material = _art_material
 	# 본체 파트 스프라이트와 완전히 같은 규격으로 배치한다.
 	spr.rotation = -ra
 	spr.position = (item.offset - Vector2(info["rest_head"])).rotated(-ra)

@@ -24,6 +24,11 @@ class Part:
 var parts: Dictionary = {}                  # name -> Part
 var order: PackedStringArray = PackedStringArray()   # 계층 순(부모 먼저)
 var root_parts: PackedStringArray = PackedStringArray()
+## 파트 -> 레이어. 없는 파트는 자기 이름이 곧 레이어(아래 '레이어' 절 참고).
+var layer_of: Dictionary = {}
+## 늘이기(단축 보정)를 하지 않는 파트 집합 { part: true }. 프로필 규칙의 "stretch": false 에서 온다(예: 발).
+## project_local() 의 s 가 항상 1 이라 2D 프리뷰와 베이크가 같이 따른다.
+var no_stretch: Dictionary = {}
 
 
 ## weighted: 정점을 실제로 지배하는 본 집합(bone idx -> true). 비어 있으면 무시한다.
@@ -217,17 +222,113 @@ func project_local(skel: Skeleton3D, cam: Camera3D) -> Dictionary:
 		out[pname] = {
 			"p": lp,
 			"r": lr,
-			"s": float(d["len2d"]) / p.rest_len2d,
+			"s": 1.0 if no_stretch.has(pname) else float(d["len2d"]) / p.rest_len2d,
 			"d": float(d["depth"]),
 		}
 
-	# 깊이 -> z 순번. 카메라 공간에서 앞쪽일수록 더 작은 음수이므로
-	# 내림차순 = 먼 것부터 = 뒤에 그릴 것부터.
-	var ranked := out.keys()
-	ranked.sort_custom(func(a, b): return float(out[a]["d"]) > float(out[b]["d"]))
-	for k in ranked.size():
-		out[ranked[k]]["z"] = k
+	# 깊이 -> z 순번. 레이어 단위로 정렬한 뒤 파트로 펼친다.
+	# (발가락은 발과 한 레이어라 항상 발 바로 위의 z 를 받는다)
+	var depth_of := {}
+	for pn in out.keys():
+		depth_of[pn] = float(out[pn]["d"])
+	var k := 0
+	for pn in expand_layers(auto_layer_order(depth_of)):
+		if out.has(pn):
+			out[pn]["z"] = k
+			k += 1
 	return out
+
+
+# ---------------------------------------------------------------- 레이어
+# 파트   = 애니메이션 단위. 본에 붙어 따로 움직인다.
+# 레이어 = 그리기 순서 목록의 한 줄. 깊이를 함께 다룬다.
+# 대부분은 파트 하나가 곧 레이어지만, 발가락처럼 "움직임은 따로, 순서는 발과 한 몸"인
+# 파트는 부모 파트의 레이어에 묶는다. 한 레이어 안은 계층 순(부모가 뒤)이라
+# 발가락은 항상 발 바로 위에 그려진다.
+
+func layer(part: String) -> String:
+	return String(layer_of.get(part, part))
+
+
+## 레이어 이름들, 계층 순(부모 먼저).
+func layer_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	var seen := {}
+	for p in order:
+		var l := layer(p)
+		if not seen.has(l):
+			seen[l] = true
+			out.append(l)
+	return out
+
+
+## 한 레이어에 속한 파트들, 계층 순.
+func layer_parts(layer_name: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	for p in order:
+		if layer(p) == layer_name:
+			out.append(p)
+	return out
+
+
+## 레이어 순서(뒤 -> 앞)를 파트 순서로 펼친다. 목록에 없는 레이어는 끝에 계층 순으로 붙인다.
+func expand_layers(layer_order: PackedStringArray) -> PackedStringArray:
+	var out := PackedStringArray()
+	var done := {}
+	for l in layer_order:
+		if done.has(l):
+			continue
+		done[l] = true
+		out.append_array(layer_parts(l))
+	for l in layer_names():
+		if not done.has(l):
+			done[l] = true
+			out.append_array(layer_parts(l))
+	return out
+
+
+## 이름 목록을 레이어 순서로 정리한다. 레이어 이름이든 옛 프리셋처럼 파트 이름(L_Toe)이
+## 섞여 있든 받아서 중복 없이 레이어로 바꾸고, 빠진 레이어는 끝에 계층 순으로 붙인다.
+func normalize_layer_order(names: PackedStringArray) -> PackedStringArray:
+	var known := {}
+	for l in layer_names():
+		known[l] = true
+	var out := PackedStringArray()
+	var seen := {}
+	for n in names:
+		var l := layer(String(n))
+		if known.has(l) and not seen.has(l):
+			seen[l] = true
+			out.append(l)
+	for l in layer_names():
+		if not seen.has(l):
+			out.append(l)
+	return out
+
+
+## 깊이(part -> 카메라 공간 z)로 레이어를 뒤 -> 앞 정렬한다.
+## 레이어 깊이 = 레이어와 이름이 같은 파트(발 레이어면 발)의 깊이. 없으면 레이어 첫 파트.
+func auto_layer_order(depth_of: Dictionary) -> PackedStringArray:
+	var ls: Array = []
+	var ld := {}
+	for l in layer_names():
+		var key := l
+		if not depth_of.has(key):
+			var lp := layer_parts(l)
+			if lp.size() > 0:
+				key = lp[0]
+		ls.append(l)
+		ld[l] = float(depth_of.get(key, 0.0))
+	# 카메라 공간 z 는 앞쪽일수록 더 작은 음수 -> 내림차순 = 먼 것부터
+	ls.sort_custom(func(a, b): return float(ld[a]) > float(ld[b]))
+	return PackedStringArray(ls)
+
+
+func rest_layer_order() -> PackedStringArray:
+	var d := {}
+	for pn in parts.keys():
+		d[pn] = (parts[pn] as Part).rest_depth
+	return auto_layer_order(d)
 
 
 func capture_rest(skel: Skeleton3D, cam: Camera3D) -> void:

@@ -17,10 +17,23 @@ var fit_margin: int = 6
 var apply_stretch: bool = true
 var stretch_limit: float = 1.6
 
-## 그리기 순서 수동 지정 (뒤 -> 앞). 비어 있으면 3D 깊이로 자동 계산한다.
+## 부드러운 도트 이동 셰이더를 파트 스프라이트에 붙인다.
+## 게임에서 캐릭터를 확대해서 그릴 때 1픽셀 미만 움직임이 깜빡임(TV 노이즈) 대신 매끄럽게 보인다.
+var smooth_pixel: bool = true
+const SMOOTH_SHADER := "res://addons/dot_rigger/runtime/smooth_pixel.gdshader"
+
+## 그리기 순서 수동 지정 — 레이어 이름, 뒤 -> 앞. 비어 있으면 3D 깊이로 자동 계산한다.
 ## 값이 있으면 그 순서를 모든 프레임에 고정하고, 프레임별 z 트랙을 만들지 않는다.
 ## (한 각도로 고정된 게임에서는 고정 표가 예측 가능해서 더 안전한 경우가 많다)
 var z_override: PackedStringArray = PackedStringArray()
+
+## 같은 출력 폴더에 예전에 구운 애니메이션을 이어서 담을지.
+## 애니 값은 "레스트 포즈·카메라 기준 상대값"이라 둘이 같을 때만 섞는다.
+## 다르면 예전 애니는 버리고 dropped_reason 에 이유를 남긴다. 이름이 같은 애니는 이번 것으로 교체.
+var keep_previous: bool = true
+## 실행 결과: 예전 rig.json 에서 이어 담은 애니 이름 / 이어 담지 못한 이유("" = 없음)
+var kept_anims: PackedStringArray = PackedStringArray()
+var dropped_reason: String = ""
 
 var _part_crop: Dictionary = {}   # part -> Rect2i
 var _part_img: Dictionary = {}    # part -> Image
@@ -76,7 +89,11 @@ func run() -> Dictionary:
 			key = aname
 		_anim_data[key] = await _project_anim(aname)
 
-	# 4) 저장
+	# 4) 같은 폴더에 예전에 구운 애니가 있으면 이어 담는다(같은 레스트 포즈·시점일 때만)
+	#    rig.json 을 덮어쓰기 전에 읽어야 한다.
+	_merge_previous()
+
+	# 5) 저장
 	_write_json()
 	var scene_path := out_dir.path_join("puppet.tscn")
 	var err := _build_and_save_scene(scene_path)
@@ -87,32 +104,95 @@ func run() -> Dictionary:
 		"animations": _anim_data.keys(),
 		"scene": scene_path,
 		"json": out_dir.path_join("rig.json"),
+		"kept": kept_anims,
+		"dropped_reason": dropped_reason,
 	}
 
 
-## 그리기 순서(뒤 -> 앞)를 확정한다.
-## z_override 가 비어 있으면 레스트 포즈의 카메라 깊이로 자동 정렬한다.
-## 카메라 공간 z 는 앞쪽일수록 더 작은 음수이므로 내림차순 = 먼 것부터.
-func resolve_z_order() -> PackedStringArray:
-	var names: Array = []
-	for pname in baker.rig.order:
-		if _part_crop.has(pname):
-			names.append(pname)
+## 출력 폴더의 예전 rig.json 에서 애니메이션을 가져와 이번 결과에 합친다.
+func _merge_previous() -> void:
+	kept_anims = PackedStringArray()
+	dropped_reason = ""
+	if not keep_previous:
+		return
+	var path := out_dir.path_join("rig.json")
+	if not FileAccess.file_exists(path):
+		return
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return
+	var doc = JSON.parse_string(f.get_as_text())
+	f.close()
+	if not (doc is Dictionary) or not (doc.get("animations") is Dictionary):
+		return
+	var old: Dictionary = doc["animations"]
+	var old_names := PackedStringArray()
+	for an in old.keys():
+		if not _anim_data.has(an):
+			old_names.append(String(an))
+	if old_names.is_empty():
+		return
+	var why := _incompatible_reason(doc)
+	if why != "":
+		dropped_reason = "%s — 예전 애니 %s 는 섞을 수 없어 뺐습니다" % [why, ", ".join(old_names)]
+		push_warning("[DotRigger] " + dropped_reason)
+		return
+	for an in old_names:
+		_anim_data[an] = old[an]
+		kept_anims.append(an)
+
+
+## 예전 결과와 이번 결과의 애니를 섞으면 안 되는 이유. 같으면 "".
+## 애니 값(위치·회전)은 레스트 포즈를 이 카메라로 찍은 기준에서 잰 상대값이다.
+func _incompatible_reason(doc: Dictionary) -> String:
+	var v: Dictionary = doc.get("view", {})
+	var now := baker.serialize_view()
+	if String(v.get("rest_anim", "")) != String(now["rest_anim"]) \
+			or absf(float(v.get("rest_time", 0.0)) - float(now["rest_time"])) > 0.0001:
+		return "레스트 포즈가 다름 (예전 %s %d%% → 지금 %s %d%%)" % [
+			v.get("rest_anim", ""), int(float(v.get("rest_time", 0.0)) * 100.0),
+			now["rest_anim"], int(float(now["rest_time"]) * 100.0)]
+	var sz: Array = v.get("size", [])
+	if sz.size() != 2 or int(sz[0]) != int(now["size"][0]) or int(sz[1]) != int(now["size"][1]):
+		return "해상도가 다름 (예전 %s → 지금 %s)" % [str(sz), str(now["size"])]
+	if absf(float(v.get("ortho_size", 0.0)) - float(now["ortho_size"])) > 0.001:
+		return "카메라 크기(Ortho)가 다름 (예전 %.3f → 지금 %.3f)" % [float(v.get("ortho_size", 0.0)), float(now["ortho_size"])]
+	for key in ["camera_basis", "camera_origin"]:
+		var a: Array = v.get(key, [])
+		var b: Array = now[key]
+		if a.size() != b.size():
+			return "시점(카메라 위치·각도)이 다름"
+		for i in a.size():
+			if absf(float(a[i]) - float(b[i])) > 0.001:
+				return "시점(카메라 위치·각도)이 다름"
+	var old_parts := {}
+	for p in doc.get("parts", []):
+		old_parts[String(p.get("name", ""))] = true
+	if old_parts.size() != _part_crop.size():
+		return "파트 구성이 다름 (예전 %d개 → 지금 %d개)" % [old_parts.size(), _part_crop.size()]
+	for pn in _part_crop.keys():
+		if not old_parts.has(String(pn)):
+			return "파트 구성이 다름 (%s)" % pn
+	return ""
+
+
+## 그리기 순서를 레이어 단위(뒤 -> 앞)로 확정한다.
+## z_override 는 레이어 이름 목록(옛 프리셋처럼 파트 이름이 섞여도 소속 레이어로 바뀜).
+## 비어 있으면 레스트 포즈의 카메라 깊이로 자동 정렬한다.
+func resolve_layer_order() -> PackedStringArray:
 	if z_override.size() > 0:
-		var out := PackedStringArray()
-		var seen := {}
-		for n in z_override:
-			if names.has(n) and not seen.has(n):
-				out.append(String(n))
-				seen[n] = true
-		for n in names:              # 지정에서 빠진 파트는 뒤에 자동 순서로 붙인다
-			if not seen.has(n):
-				out.append(String(n))
-		return out
-	names.sort_custom(func(a, b):
-		return (baker.rig.parts[a] as DRRigModel.Part).rest_depth \
-			> (baker.rig.parts[b] as DRRigModel.Part).rest_depth)
-	return PackedStringArray(names)
+		return baker.rig.normalize_layer_order(z_override)
+	return baker.rig.rest_layer_order()
+
+
+## 파트 단위 그리기 순서(뒤 -> 앞). 레이어 순서를 펼친 것이라
+## 한 레이어의 파트(발 + 발가락)는 항상 붙어서 연속된 z 를 받는다.
+func resolve_z_order() -> PackedStringArray:
+	var out := PackedStringArray()
+	for pname in baker.rig.expand_layers(resolve_layer_order()):
+		if _part_crop.has(pname):
+			out.append(pname)
+	return out
 
 
 ## 에디터에서 PNG 임포트가 끝난 뒤 다시 호출하면, 씬이 임베드된 이미지 대신
@@ -219,6 +299,8 @@ func _write_json() -> void:
 		parts_arr.append({
 			"name": pname,
 			"parent": p.parent,
+			"layer": baker.rig.layer(pname),
+			"stretch": not baker.rig.no_stretch.has(pname),   # false = 늘이기 없이 회전만(예: 발)
 			"root_bone": baker.skeleton.get_bone_name(p.root_bone),
 			"bones": p.bones.size(),
 			"image": "parts/%s.png" % pname,
@@ -235,7 +317,9 @@ func _write_json() -> void:
 		"view": baker.serialize_view(),
 		"parts": parts_arr,
 		"z_order": resolve_z_order(),        # 뒤 -> 앞
+		"layer_order": resolve_layer_order(),   # 그리기 순서 목록(레이어) 뒤 -> 앞
 		"z_order_manual": z_override.size() > 0,
+		"smooth_pixel": smooth_pixel,   # 파트 스프라이트에 runtime/smooth_pixel.gdshader 를 붙였는지
 		"animations": _anim_data,
 		"unmapped_bones": baker.split.unmapped_bones,
 	}
@@ -262,6 +346,16 @@ func _build_and_save_scene(path: String) -> int:
 	var z_of := {}
 	for i in zorder.size():
 		z_of[zorder[i]] = i
+
+	# 모든 파트가 머티리얼 하나를 같이 쓴다(씬에 한 번만 저장됨)
+	var smooth_mat: ShaderMaterial = null
+	if smooth_pixel:
+		var sh := load(SMOOTH_SHADER) as Shader
+		if sh != null:
+			smooth_mat = ShaderMaterial.new()
+			smooth_mat.shader = sh
+		else:
+			push_warning("[DotRigger] 부드러운 도트 셰이더를 찾을 수 없습니다: %s" % SMOOTH_SHADER)
 
 	var bones := {}   # part -> Bone2D
 	for pname in baker.rig.order:
@@ -301,6 +395,7 @@ func _build_and_save_scene(path: String) -> int:
 		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		spr.z_as_relative = false
 		spr.z_index = int(z_of.get(pname, 0))
+		spr.material = smooth_mat
 		spr.rotation = -p.rest_angle
 		# 에디터에서 실행하면 임포트된 텍스처를 쓰고, CLI 등 임포트 전이면
 		# 방금 렌더한 Image 를 그대로 씬에 심는다.
@@ -366,7 +461,7 @@ func _make_animation(data: Dictionary, bones: Dictionary, root: Node2D) -> Anima
 			a.value_track_set_update_mode(t_z, Animation.UPDATE_DISCRETE)
 			a.track_set_interpolation_type(t_z, Animation.INTERPOLATION_NEAREST)
 		var t_s := -1
-		if apply_stretch:
+		if apply_stretch and not baker.rig.no_stretch.has(pname):
 			t_s = a.add_track(Animation.TYPE_VALUE)
 			a.track_set_path(t_s, NodePath(base + "/stretch:scale"))
 

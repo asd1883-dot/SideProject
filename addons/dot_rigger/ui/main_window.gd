@@ -33,6 +33,11 @@ var _fps: SpinBox
 var _margin: SpinBox
 var _autofit: CheckBox
 var _stretch: CheckBox
+var _smooth: CheckBox
+var _off_x: SpinBox
+var _off_y: SpinBox
+## ▶ 재생으로 돌릴 애니(6번에서 고른 것 중). 레스트 포즈(파트 그림 기준)와 따로 고른다.
+var _play_anim: OptionButton
 var _isolate: OptionButton
 var _rest_anim: OptionButton
 var _rest_time: HSlider
@@ -54,6 +59,11 @@ var _loading := false
 var _preset_path := ""
 
 var _all_anims: PackedStringArray = PackedStringArray()
+## 6번 목록에서 고른 애니 이름 { name: true }. 검색으로 목록을 다시 채워도 선택이 남도록
+## 목록(ItemList)과 따로 들고 있는다. (예전엔 검색을 바꾸면 선택이 풀려 마지막 검색 것만 구워졌음)
+var _picked_anims: Dictionary = {}
+var _anim_count: Label
+var _keep_anims: CheckBox
 var _busy := false
 var _dirty := false
 ## 프리뷰에 보여줄 파트 집합. 비어 있으면 전체 합성.
@@ -81,8 +91,25 @@ var _part_sig := ""
 ## "구우면 이렇게 나온다"를 그대로 보여주고, 3D 재렌더 없이 재생도 된다.
 var _puppet_vp: SubViewport
 var _puppet_bones: Dictionary = {}     # part -> {bone, stretch, art}
+## 2D 퍼펫 뷰포트가 파트 캔버스보다 몇 배 크게 그리는지 (부드러운 도트 이동이면 화면 배율)
+var _puppet_scale := 1.0
+var _smooth_mat: ShaderMaterial
+## 프리뷰 확대 계산에 쓰는 원래 크기. 2D 퍼펫 텍스처는 화면 배율로 커지므로 텍스처 크기를 쓰면 안 된다
+var _pv_logical := Vector2.ZERO
+const PUPPET_SCALE_MAX := 8.0
 var _puppet_sig := ""
 var _play_t := 0.0
+
+## 3D 회전 기즈모. 값의 기준은 2. 시점의 Yaw·Pitch 칸 하나뿐이고 기즈모는 그 칸을 바꾸는 손잡이다.
+const GIZMO_SIZE := 92.0
+const GIZMO_DEG_PER_PX := 0.5
+var _gizmo: Control
+var _giz_drag := false
+var _giz_moved := false
+var _giz_press_pos := Vector2.ZERO
+## 칸은 1도 단위라 드래그 누적값을 따로 들고 있다가 정수로 넣는다(칸 = 카메라 = 베이크 각도).
+var _giz_yaw := 0.0
+var _giz_pitch := 0.0
 
 
 func _init() -> void:
@@ -130,6 +157,7 @@ func _build_ui() -> void:
 	load_p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	load_p.pressed.connect(_on_load_preset)
 	prow.add_child(load_p)
+	_tip(load_p, ".tres 프리셋을 골라 모델·각도·도트화·그리기 순서·애니 선택을 한 번에 되돌립니다.\n프리셋의 모델이 지금과 다르면 그 모델을 먼저 불러옵니다.")
 	left.add_child(prow)
 	_preset_label = Label.new()
 	_preset_label.text = "(저장된 프리셋 없음)"
@@ -145,21 +173,42 @@ func _build_ui() -> void:
 	_model_edit.placeholder_text = "res://models/....glb"
 	_model_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mrow.add_child(_model_edit)
+	_tip(_model_edit, "불러올 3D 모델 경로(res://). 스킨(뼈대)과 애니메이션이 들어 있는 .glb 권장.")
 	var browse := Button.new()
 	browse.text = "..."
 	browse.pressed.connect(_on_browse)
 	mrow.add_child(browse)
+	_tip(browse, "파일 탐색기로 모델 고르기")
 	left.add_child(mrow)
 	var load_btn := Button.new()
 	load_btn.text = "모델 불러오기 / 파트 분리"
 	load_btn.pressed.connect(_on_load)
 	left.add_child(load_btn)
+	_tip(load_btn, "모델을 읽고 뼈 가중치로 몸을 파트(머리·몸통·팔다리…)로 나눕니다.\n파트 목록·애니메이션 목록·그리기 순서가 여기서 채워집니다.")
 
 	# 시점
 	left.add_child(_section("2. 시점 (이 게임의 유일한 각도)"))
 	_yaw = _spin(left, "Yaw (좌우 회전)", -180, 180, 1, 90)
 	_pitch = _spin(left, "Pitch (상하 회전)", -89, 89, 1, 0)
 	_ortho = _spin(left, "Ortho 크기 (0=자동)", 0, 100, 0.01, 0)
+	_off_x = _spin(left, "캐릭터 이동 X (px)", -1024, 1024, 1, 0)
+	_off_y = _spin(left, "캐릭터 이동 Y (px, +위)", -1024, 1024, 1, 0)
+	_tip(_yaw, "0 = 정면(+Z 쪽에서 봄), 90 = 오른쪽(+X), -90 = 왼쪽, 180 = 뒤.\n" \
+		+ "3D 프리뷰 오른쪽 위 기즈모를 드래그해도 이 값이 바뀝니다.\n" \
+		+ "고르는 요령: 동작이 주로 '화면 안에서' 일어나는 각도가 2D 로 잘 나옵니다(걷기·공중제비는 측면 90).\n" \
+		+ "몸이 카메라 쪽으로 넘어오는 각도에서는 파트가 줄어들며 종이가 접히듯 보입니다.")
+	_tip(_pitch, "양수 = 위에서 내려다봄, 음수 = 아래에서 올려다봄 (±89 까지).\n" \
+		+ "3D 프리뷰 오른쪽 위 기즈모와 연동됩니다.")
+	_tip(_ortho, "직교 카메라(원근 없음)가 화면 세로로 담는 실제 높이. 모델 단위(UAL1 키는 약 1.8).\n" \
+		+ "작게 하면 인물이 크게 찍히고 잘릴 수 있고, 크게 하면 작게 찍힙니다.\n" \
+		+ "0 = 자동(모델 크기 × 1.15).\n" \
+		+ "'자동 맞춤'이 켜져 있으면 이 값은 시작값일 뿐, 화면에 꽉 차게 다시 맞춥니다.\n" \
+		+ "휠 확대와 달리 베이크 결과 자체가 바뀝니다.")
+	_tip(_off_x, "도트 크기(Ortho)는 그대로 두고 캐릭터가 찍히는 위치만 옮깁니다(캔버스 픽셀 단위, + = 오른쪽).\n" \
+		+ "수영·눕기처럼 몸이 틀 밖으로 나가 잘릴 때 씁니다.\n" \
+		+ "'자동 맞춤'이 켜져 있으면 다시 가운데로 맞춰져 무시됩니다. 베이크 결과(파트 그림·카메라)가 바뀝니다.")
+	_tip(_off_y, "캐릭터를 위(+)·아래(−)로 옮깁니다(캔버스 픽셀 단위). 아래가 잘리면 + 로 올리세요.\n" \
+		+ "'자동 맞춤'이 켜져 있으면 무시됩니다. 베이크 결과가 바뀝니다.")
 	var vrow := HBoxContainer.new()
 	_autofit = CheckBox.new()
 	_autofit.text = "자동 맞춤"
@@ -167,11 +216,16 @@ func _build_ui() -> void:
 	vrow.add_child(_autofit)
 	left.add_child(vrow)
 	_margin = _spin(left, "여백 (px)", 0, 64, 1, 6)
+	_tip(_autofit, "켜면 캐릭터가 캔버스에 꽉 차도록 카메라 위치와 Ortho 크기를 자동으로 맞춥니다(아래 여백만큼 남김).\n" \
+		+ "끄면 Ortho 크기 값을 그대로 쓰고 캐릭터를 가운데에 둡니다.")
+	_tip(_margin, "자동 맞춤 때 캔버스 가장자리에 남길 픽셀 수. 자동 맞춤이 꺼져 있으면 쓰이지 않습니다.\n" \
+		+ "픽셀 고정이라 해상도가 낮을수록 차지하는 비중이 커집니다(64px 이면 2 정도 권장).")
 	var preset := HBoxContainer.new()
 	for d in [["정측면", 90.0, 0.0], ["3/4 앞", 45.0, 0.0], ["정면", 0.0, 0.0],
 			["아이소", 45.0, 30.0], ["탑다운", 0.0, 60.0]]:
 		var b := Button.new()
 		b.text = String(d[0])
+		b.tooltip_text = "Yaw %d° · Pitch %d° 로 맞춥니다." % [int(d[1]), int(d[2])]
 		b.pressed.connect(func():
 			_yaw.value = float(d[1])
 			_pitch.value = float(d[2])
@@ -187,10 +241,23 @@ func _build_ui() -> void:
 	_ambient = _spin(left, "앰비언트", 0, 1, 0.05, 0.45)
 	_alpha = _spin(left, "알파 임계값", 0, 1, 0.05, 0.5)
 	_levels = _spin(left, "색 양자화 (0=끔)", 0, 32, 1, 0)
+	_tip(_res, "캐릭터 한 마리가 들어갈 정사각 캔버스 크기(px). 작을수록 도트가 굵어집니다.\n" \
+		+ "파트 이미지와 퍼펫 좌표가 모두 이 크기 기준이라, 바꾸면 다시 구워야 합니다.")
+	_tip(_ss, "2 이상이면 그 배수만큼 크게 찍은 뒤 해상도로 줄입니다(가는 부분이 덜 끊기지만 느림).\n" \
+		+ "1 = 해상도 그대로 바로 찍음(가장 도트다움).")
+	_tip(_bands, "빛 받는 정도를 몇 단계 색으로 나눌지(2~8).\n적을수록 단순한 만화식 명암, 많을수록 부드러운 명암.")
+	_tip(_ambient, "빛을 안 받는 쪽의 밝기(0~1). 낮추면 그림자 쪽이 어두워져 입체감이 강해집니다.")
+	_tip(_alpha, "가장자리의 반투명 픽셀을 이 값보다 옅으면 투명, 진하면 완전 불투명으로 자릅니다.\n" \
+		+ "도트에 흐린 테두리가 안 생기게 합니다(0 = 자르지 않음).")
+	_tip(_levels, "색을 빨강·초록·파랑 각각 N단계로 반올림해 줄입니다(0 또는 1 = 끔).\n" \
+		+ "작을수록 쓰이는 색 수가 줄어 팔레트 느낌이 납니다.")
 
 	# 파트
 	left.add_child(_section("4. 파트 분리"))
 	_bleed = _spin(left, "관절 겹침 링 수", 0, 4, 1, 1)
+	_tip(_bleed, "파트 경계에서 이웃 파트 쪽 삼각형을 몇 겹 더 가져올지 (모든 관절 공통).\n" \
+		+ "2D 에서 관절을 굽혔을 때 이음새가 벌어지는 틈을 메웁니다. 바깥 실루엣은 안 커지고 관절에서만 자랍니다.\n" \
+		+ "크게 하면 이웃 살점까지 들고 다녀서, 그리기 순서가 어긋난 곳에 턱이 보일 수 있습니다.")
 	var irow := HBoxContainer.new()
 	var ilbl := Label.new()
 	ilbl.text = "미리보기"
@@ -205,6 +272,7 @@ func _build_ui() -> void:
 			_set_isolation(PackedStringArray([_isolate.get_item_text(i)]), true))
 	irow.add_child(_isolate)
 	left.add_child(irow)
+	_tip(_isolate, "파트 하나만 골라 프리뷰에 띄웁니다. 맨 위 항목 = 전체 합성.")
 
 	# 레스트 포즈
 	left.add_child(_section("5. 레스트 포즈 (파트 스프라이트를 뽑는 자세)"))
@@ -216,12 +284,16 @@ func _build_ui() -> void:
 	_rest_anim = OptionButton.new()
 	_rest_anim.item_selected.connect(func(_i): _refresh_preview())
 	left.add_child(_rest_anim)
+	_tip(_rest_anim, "파트 이미지를 찍을 자세. 2D 퍼펫은 이 자세에서 찍은 그림 그대로 돌리고 늘여서 움직입니다.\n" \
+		+ "팔다리가 몸과 덜 겹치고 카메라 쪽을 향하지 않는 자세가 좋습니다(T포즈는 측면에서 팔이 뭉개짐).\n" \
+		+ "프리뷰의 ▶ 재생도 이 애니메이션을 돌립니다.")
 	_rest_time = HSlider.new()
 	_rest_time.min_value = 0.0
 	_rest_time.max_value = 1.0
 	_rest_time.step = 0.01
 	_rest_time.value_changed.connect(func(_v): _refresh_preview())
 	left.add_child(_rest_time)
+	_tip(_rest_time, "위 애니메이션의 몇 % 시점을 레스트 자세로 쓸지 (0% = 첫 프레임).")
 	_rest_time_lbl = Label.new()
 	_rest_time_lbl.text = "t = 0%"
 	left.add_child(_rest_time_lbl)
@@ -230,28 +302,81 @@ func _build_ui() -> void:
 	left.add_child(_section("6. 내보낼 애니메이션"))
 	_anim_filter = LineEdit.new()
 	_anim_filter.placeholder_text = "검색 (예: idle, jog, throw)"
-	_anim_filter.text_changed.connect(func(_t): _fill_anim_list())
+	_anim_filter.text_changed.connect(func(_t):
+		_sync_picked_from_list()
+		_fill_anim_list())
 	left.add_child(_anim_filter)
+	_tip(_anim_filter, "이름에 이 글자가 들어간 애니메이션만 아래 목록에 보여 줍니다. 선택은 유지됩니다.")
 	_anim_list = ItemList.new()
 	_anim_list.select_mode = ItemList.SELECT_MULTI
 	_anim_list.custom_minimum_size = Vector2(0, 160)
 	left.add_child(_anim_list)
+	_tip(_anim_list, "베이크할 애니메이션. Ctrl + 클릭 = 하나씩 추가, Shift + 클릭 = 범위 선택.\n" \
+		+ "검색어를 바꿔 가며 골라도 선택이 쌓입니다(아래 '선택 N개' 확인).")
+	# 선택이 바뀌면 목록 상태를 기억해 둔다. 여러 칸이 한꺼번에 바뀌는 클릭도 있어 한 프레임 뒤에 읽는다
+	_anim_list.multi_selected.connect(func(_i, _on): _sync_picked_from_list.call_deferred())
+	_anim_list.item_selected.connect(func(_i): _sync_picked_from_list.call_deferred())
+	_anim_list.empty_clicked.connect(func(_p, _b): _sync_picked_from_list.call_deferred())
+	var acrow := HBoxContainer.new()
+	_anim_count = Label.new()
+	_anim_count.text = "선택 0개"
+	_anim_count.clip_text = true
+	_anim_count.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_anim_count.custom_minimum_size = Vector2(80, 20)
+	_anim_count.add_theme_font_size_override("font_size", 11)
+	acrow.add_child(_anim_count)
+	var aclear := Button.new()
+	aclear.text = "선택 비우기"
+	aclear.pressed.connect(func():
+		_picked_anims.clear()
+		_fill_anim_list())
+	acrow.add_child(aclear)
+	left.add_child(acrow)
+	_tip(aclear, "6번에서 고른 애니를 전부 해제합니다(검색으로 목록에 안 보이는 것까지).")
 	_fps = _spin(left, "샘플 FPS", 4, 60, 1, 12)
+	_tip(_fps, "애니메이션에서 1초에 몇 번 자세를 뽑아 키로 넣을지.\n" \
+		+ "키 사이는 Godot 이 이어 주므로 12 로도 부드럽게 움직입니다.\n" \
+		+ "공중제비·구르기처럼 빠르게 도는 동작은 올려야 모양이 정확합니다(파일은 커짐).")
 	_stretch = CheckBox.new()
 	_stretch.text = "단축 보정 (팔 권장, 도트 결은 약간 흐트러짐)"
 	_stretch.button_pressed = true
 	left.add_child(_stretch)
+	_tip(_stretch, "팔다리가 카메라 쪽으로 향하면 화면에서 짧아지는데, 이걸 흉내 내려고 파트 그림을 뼈 방향으로 줄이거나 늘립니다\n" \
+		+ "(0.63 ~ 1.6배로 제한). 끄면 도트 결은 깨끗하지만 관절이 벌어져 보일 수 있습니다.\n" \
+		+ "몸이 카메라 쪽으로 크게 넘어가는 동작에서는 종이가 접히는 것처럼 보이는 원인이기도 합니다.")
+	_smooth = CheckBox.new()
+	_smooth.text = "부드러운 도트 이동 (찌글거림 줄임)"
+	_smooth.button_pressed = true
+	_smooth.tooltip_text = "2D 순서 프리뷰와 베이크 씬의 파트 스프라이트에 셰이더를 붙입니다.\n" \
+		+ "도트 칸 안쪽은 또렷하게 두고 칸 경계만 화면 1픽셀 폭으로 섞어서,\n" \
+		+ "1픽셀 미만으로 움직일 때 도트가 깜빡이지(TV 노이즈) 않고 매끄럽게 움직입니다.\n" \
+		+ "게임에서 캐릭터를 확대해서 그릴 때 효과가 있고, 1:1 로 그리면 끈 것과 거의 같습니다."
+	_smooth.toggled.connect(func(_on):
+		_apply_puppet_scale()
+		_layout_preview()
+		_refresh_preview())
+	left.add_child(_smooth)
 
 	# 출력
 	left.add_child(_section("7. 출력"))
 	_out_edit = LineEdit.new()
 	_out_edit.text = DEF_OUT
 	left.add_child(_out_edit)
+	_tip(_out_edit, "베이크 결과(parts/*.png, rig.json, puppet.tscn)를 저장할 res:// 폴더.\n" \
+		+ "같은 폴더에 다시 구우면 파트 그림과 씬을 새로 만듭니다(애니메이션은 아래 칸 참고).")
+	_keep_anims = CheckBox.new()
+	_keep_anims.text = "같은 폴더의 기존 애니 유지"
+	_keep_anims.button_pressed = true
+	left.add_child(_keep_anims)
+	_tip(_keep_anims, "켜면 같은 폴더에 다시 구울 때 예전에 구운 애니를 남기고 이번 애니를 추가합니다(같은 이름은 새로 구운 것으로 교체).\n" \
+		+ "애니는 레스트 포즈·시점 기준 값이라, 레스트 포즈·시점·해상도·파트 구성이 예전과 다르면 섞지 않고 상태줄에 이유를 알려 줍니다.\n" \
+		+ "끄면 이번에 고른 애니만 남습니다.")
 	_bake_btn = Button.new()
 	_bake_btn.text = "베이크"
 	_bake_btn.custom_minimum_size = Vector2(0, 36)
 	_bake_btn.pressed.connect(_on_bake)
 	left.add_child(_bake_btn)
+	_tip(_bake_btn, "고른 애니메이션을 지금 설정(시점·도트화·그리기 순서)으로 굽습니다.\n굽는 동안 창을 닫지 마세요(닫혀 있으면 화면이 안 그려집니다).")
 	_progress = ProgressBar.new()
 	_progress.value = 0
 	left.add_child(_progress)
@@ -286,6 +411,17 @@ func _build_ui() -> void:
 	_preview.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pv_area.add_child(_preview)
+	# 3D 회전 기즈모 (프리뷰 오른쪽 위, 3D 모드에서만). 드래그하면 2. 시점의 Yaw·Pitch 칸이 같이 바뀐다
+	_gizmo = Control.new()
+	_gizmo.custom_minimum_size = Vector2(GIZMO_SIZE, GIZMO_SIZE)
+	_gizmo.size = Vector2(GIZMO_SIZE, GIZMO_SIZE)
+	_gizmo.mouse_filter = Control.MOUSE_FILTER_STOP
+	_gizmo.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	_gizmo.tooltip_text = "드래그: 좌우·상하 회전 (2. 시점의 Yaw·Pitch 칸과 연동)\n축 끝 동그라미 클릭: 그 방향에서 보기"
+	_gizmo.draw.connect(_draw_gizmo)
+	_gizmo.gui_input.connect(_on_gizmo_input)
+	_gizmo.visible = false
+	_pv_area.add_child(_gizmo)
 
 	_status = Label.new()
 	_status.text = "모델을 불러오세요."
@@ -323,6 +459,7 @@ func _build_ui() -> void:
 	_mode_2d.toggled.connect(func(on):
 		if baker != null:
 			baker.set_playback(false)
+		_update_gizmo()
 		_refresh_preview())
 	toolbar.add_child(_mode_2d)
 
@@ -330,13 +467,25 @@ func _build_ui() -> void:
 	# (베이크는 항상 프레임마다 자세를 세워 놓고 찍는다).
 	_play = CheckBox.new()
 	_play.text = "▶ 재생"
-	_play.tooltip_text = "선택한 레스트 포즈 애니메이션을 프리뷰에서 돌립니다.\n" \
+	_play.tooltip_text = "오른쪽 드롭다운에서 고른 애니메이션을 프리뷰에서 돌립니다.\n" \
 		+ "2D 순서 모드에서도 돌아가며, 그때는 지정한 그리기 순서가 적용된 채로 재생됩니다\n" \
 		+ "(= 베이크 결과를 그대로 미리 보는 것). 베이크 자체에는 영향이 없습니다."
 	_play.toggled.connect(func(on):
 		_play_t = 0.0
 		_refresh_preview())
 	toolbar.add_child(_play)
+	_play_anim = OptionButton.new()
+	_play_anim.custom_minimum_size = Vector2(120, 0)
+	_play_anim.clip_text = true
+	_play_anim.fit_to_longest_item = false
+	_play_anim.tooltip_text = "▶ 재생으로 돌릴 애니메이션. 6번에서 고른 애니 중에서 고릅니다.\n" \
+		+ "레스트 포즈(5번)는 파트 그림 기준으로 그대로 두고 동작만 미리 봅니다.\n" \
+		+ "6번에서 아무것도 안 골랐으면 레스트 포즈 애니를 돌립니다."
+	_play_anim.item_selected.connect(func(_i):
+		_play_t = 0.0
+		if _play.button_pressed:
+			_refresh_preview())
+	toolbar.add_child(_play_anim)
 	_iso_label = Label.new()
 	_iso_label.text = "현재: 전체 합성"
 	_iso_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -365,6 +514,8 @@ func _build_ui() -> void:
 	_parts_tree.custom_minimum_size = Vector2(0, 190)
 	_parts_tree.item_selected.connect(_on_tree_select)
 	right.add_child(_parts_tree)
+	_tip(_parts_tree, "나뉜 파트 목록(계층 순). 줄을 누르면 그 파트만 프리뷰에 뜹니다.\n" \
+		+ "루트 본 = 파트가 붙어 도는 뼈, 삼각형 = 그 파트에 들어간 면 수(관절 겹침 포함).")
 
 	# ---- 그리기 순서 (B뷰 역할) — 세로 전체를 쓰는 우측 컬럼 ----
 	var zbox := VBoxContainer.new()
@@ -382,6 +533,8 @@ func _build_ui() -> void:
 		if on:
 			_fill_z_list())
 	zbox.add_child(_z_auto)
+	_tip(_z_auto, "켜면 3D 깊이로 매 프레임 순서를 자동으로 정합니다(팔이 몸 앞뒤로 교차하는 동작에 맞춰 바뀜).\n" \
+		+ "끄면 아래 목록 순서를 모든 프레임에 고정합니다. ▲▼ 로 순서를 바꾸면 자동으로 꺼집니다.")
 	_z_list = ItemList.new()
 	_z_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	# Shift = 범위 선택, Ctrl = 하나씩 추가. 여러 개를 한 번에 올리고 내릴 수 있다.
@@ -394,6 +547,8 @@ func _build_ui() -> void:
 		b.text = String(spec[0])
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_move_z.bind(int(spec[1])))
+		b.tooltip_text = "선택한 줄을 한 칸 뒤로(목록 위쪽) 옮깁니다." if int(spec[1]) < 0 \
+			else "선택한 줄을 한 칸 앞으로(목록 아래쪽) 옮깁니다."
 		zbtn.add_child(b)
 	zbox.add_child(zbtn)
 	var zhint := Label.new()
@@ -434,6 +589,18 @@ func _spin(parent: Control, label: String, lo: float, hi: float, step: float, va
 	row.add_child(sb)
 	parent.add_child(row)
 	return sb
+
+
+## 툴팁을 컨트롤과, 같은 줄의 이름표(Label)에 같이 붙인다.
+## Label 은 기본값이 "마우스 무시"라 그대로 두면 글자 위에 올려도 툴팁이 안 뜬다.
+func _tip(c: Control, text: String) -> void:
+	c.tooltip_text = text
+	var row := c.get_parent()
+	if row is HBoxContainer:
+		for s in row.get_children():
+			if s is Label:
+				(s as Label).tooltip_text = text
+				(s as Label).mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 # ---------------------------------------------------------------- 동작
@@ -493,6 +660,8 @@ func _collect_preset() -> DRPreset:
 	p.yaw = _yaw.value
 	p.pitch = _pitch.value
 	p.ortho = _ortho.value
+	p.offset_x = int(_off_x.value)
+	p.offset_y = int(_off_y.value)
 	p.auto_fit = _autofit.button_pressed
 	p.margin = int(_margin.value)
 	p.resolution = int(_res.value)
@@ -507,13 +676,12 @@ func _collect_preset() -> DRPreset:
 	if _rest_anim.selected > 0:
 		p.rest_anim = _rest_anim.get_item_text(_rest_anim.selected)
 	p.rest_time = _rest_time.value
-	var picked := PackedStringArray()
-	for i in _anim_list.item_count:
-		if _anim_list.is_selected(i):
-			picked.append(_anim_list.get_item_text(i))
-	p.animations = picked
+	_sync_picked_from_list()
+	p.animations = _picked_anim_names()
+	p.keep_anims = _keep_anims.button_pressed
 	p.fps = int(_fps.value)
 	p.apply_stretch = _stretch.button_pressed
+	p.smooth_pixel = _smooth.button_pressed
 	p.out_dir = _out_edit.text.strip_edges()
 	return p
 
@@ -531,6 +699,8 @@ func _apply_preset(p: DRPreset) -> void:
 	_yaw.value = p.yaw
 	_pitch.value = p.pitch
 	_ortho.value = p.ortho
+	_off_x.value = p.offset_x
+	_off_y.value = p.offset_y
 	_autofit.button_pressed = p.auto_fit
 	_margin.value = p.margin
 	_res.value = p.resolution
@@ -542,6 +712,7 @@ func _apply_preset(p: DRPreset) -> void:
 	_bleed.value = p.bleed_rings
 	_fps.value = p.fps
 	_stretch.button_pressed = p.apply_stretch
+	_smooth.button_pressed = p.smooth_pixel
 	if p.out_dir != "":
 		_out_edit.text = p.out_dir
 
@@ -554,30 +725,19 @@ func _apply_preset(p: DRPreset) -> void:
 	_rest_time.value = p.rest_time
 
 	# 내보낼 애니메이션도 이름으로 복원. 필터를 지워야 전부 보인다.
+	_picked_anims.clear()
+	for a in p.animations:
+		_picked_anims[String(a)] = true
 	_anim_filter.text = ""
 	_fill_anim_list()
-	var want := {}
-	for a in p.animations:
-		want[a] = true
-	for i in _anim_list.item_count:
-		if want.has(_anim_list.get_item_text(i)):
-			_anim_list.select(i, false)
+	_keep_anims.button_pressed = p.keep_anims
 
-	# 그리기 순서
+	# 그리기 순서 — 레이어 단위. 옛 프리셋의 파트 이름(L_Toe 등)도 소속 레이어로 바꿔 받는다
 	_z_auto.set_pressed_no_signal(p.z_auto)
 	if not p.z_auto and p.z_order.size() > 0 and baker != null:
-		var known := {}
-		for n in baker.rig.order:
-			known[n] = true
 		_z_list.clear()
-		var seen := {}
-		for n in p.z_order:
-			if known.has(n) and not seen.has(n):
-				_z_list.add_item(String(n))
-				seen[n] = true
-		for n in baker.rig.order:          # 프리셋에 없던 파트는 뒤에 붙인다
-			if not seen.has(n):
-				_z_list.add_item(String(n))
+		for l in baker.rig.normalize_layer_order(p.z_order):
+			_z_list.add_item(String(l))
 
 	_loading = false
 	_fit_sig = ""
@@ -627,6 +787,7 @@ func _current_opts() -> DRBaker.Options:
 	o.yaw = _yaw.value
 	o.pitch = _pitch.value
 	o.ortho_size = _ortho.value
+	o.view_offset = Vector2(_off_x.value, _off_y.value)
 	o.supersample = int(_ss.value)
 	o.bleed_rings = int(_bleed.value)
 	o.light_bands = int(_bands.value)
@@ -658,6 +819,7 @@ func _on_load() -> void:
 
 	# 애니메이션 목록
 	_all_anims = PackedStringArray()
+	_picked_anims.clear()
 	if baker.anim_player != null:
 		for a in baker.anim_player.get_animation_list():
 			_all_anims.append(String(a))
@@ -680,14 +842,15 @@ func _on_load() -> void:
 	_fill_parts_tree()
 	_z_auto.button_pressed = true
 	_z_list.clear()
-	for p in baker.rig.order:
-		_z_list.add_item(String(p))
+	for l in baker.rig.layer_names():     # 그리기 순서 목록은 레이어 단위
+		_z_list.add_item(String(l))
 	_iso_parts = PackedStringArray()
 	_fit_sig = ""
 
 	var un := baker.split.unmapped_bones.size()
-	_status.text = "파트 %d개 / 본 %d개 / 애니 %d개%s" % [
-		baker.rig.order.size(), baker.skeleton.get_bone_count(), _all_anims.size(),
+	_status.text = "파트 %d개(순서 목록 %d줄) / 본 %d개 / 애니 %d개%s" % [
+		baker.rig.order.size(), baker.rig.layer_names().size(),
+		baker.skeleton.get_bone_count(), _all_anims.size(),
 		("  ⚠ 미매핑 본 %d개" % un) if un > 0 else ""]
 	_refresh_preview()
 
@@ -723,7 +886,13 @@ func _current_zoom() -> float:
 		return _zoom
 	if _preview.texture == null:
 		return 1.0
-	var ts := Vector2(_preview.texture.get_size())
+	return _zoom_for(_pv_logical)
+
+
+## 원래 크기 ts 인 그림을 지금 확대 상태로 보일 때의 배율
+func _zoom_for(ts: Vector2) -> float:
+	if _zoom > 0.0:
+		return _zoom
 	var area := _pv_area.size
 	if ts.x <= 0.0 or ts.y <= 0.0 or area.x <= 0.0 or area.y <= 0.0:
 		return 1.0
@@ -755,7 +924,7 @@ func _step_zoom(dir: int, anchor: Vector2) -> void:
 
 	# 앵커 고정: 커서 위치의 이미지 좌표가 그대로 유지되도록 pan 을 다시 잡는다
 	var img_pt := (anchor - _preview.position) / old
-	var ts := Vector2(_preview.texture.get_size())
+	var ts := _pv_logical
 	var base := (_pv_area.size - ts * new_z) * 0.5
 	_pan = anchor - img_pt * new_z - base
 	_zoom = new_z
@@ -771,13 +940,21 @@ func _fit_preview() -> void:
 func _layout_preview() -> void:
 	if _preview == null or _pv_area == null:
 		return
+	if _gizmo != null:
+		_gizmo.position = Vector2(_pv_area.size.x - GIZMO_SIZE - 8.0, 8.0)
+		_gizmo.size = Vector2(GIZMO_SIZE, GIZMO_SIZE)
 	if _preview.texture == null:
 		_zoom_label.text = "맞춤"
 		return
-	var ts := Vector2(_preview.texture.get_size())
+	var ts := _pv_logical
 	var z := _current_zoom()
 	_preview.size = ts * z
-	var base := (_pv_area.size - ts * z) * 0.5
+	if _puppet_vp != null and _preview.texture == _puppet_vp.get_texture():
+		_apply_puppet_scale()
+		# 화면 배율 그대로 그렸으면 1:1 로 붙인다. 조금이라도 늘이면 섞어 둔 경계가 다시 nearest 로 뭉개진다
+		if is_equal_approx(_puppet_scale, z):
+			_preview.size = Vector2(_puppet_vp.size)
+	var base := (_pv_area.size - _preview.size) * 0.5
 	if _zoom <= 0.0:
 		_pan = Vector2.ZERO
 	# 정수 좌표로 스냅해야 도트가 반 픽셀에 걸려 흐려지지 않는다
@@ -808,12 +985,19 @@ func _ensure_part_cache() -> void:
 	_part_sig = sig
 
 
-## 목록에 보이는 순서 그대로(위 = 뒤쪽) 돌려준다.
+## 목록에 보이는 순서 그대로(위 = 뒤쪽) 돌려준다. 항목은 레이어 이름.
 func _order_from_list() -> PackedStringArray:
 	var out := PackedStringArray()
 	for i in _z_list.item_count:
 		out.append(_z_list.get_item_text(i))
 	return out
+
+
+## 목록(레이어) 순서를 파트 순서로 펼친다. 같은 레이어의 파트(발 + 발가락)는 붙어서 나온다.
+func _part_order_from_list() -> PackedStringArray:
+	if baker == null:
+		return _order_from_list()
+	return baker.rig.expand_layers(_order_from_list())
 
 
 ## 캐시한 파트 이미지로 2D 퍼펫을 만든다. 베이크된 씬과 같은 노드 구조.
@@ -868,6 +1052,40 @@ func _build_puppet(sig: String) -> void:
 		_puppet_bones[pname] = {"bone": bone, "stretch": stretch, "art": art}
 	_puppet_sig = sig
 	_pose_puppet(true)
+	_apply_puppet_scale()
+
+
+func _smooth_material() -> ShaderMaterial:
+	if _smooth_mat == null:
+		_smooth_mat = ShaderMaterial.new()
+		_smooth_mat.shader = load(DRExporter.SMOOTH_SHADER) as Shader
+	return _smooth_mat
+
+
+## 부드러운 도트 이동이 켜져 있으면 2D 퍼펫을 화면에 보이는 배율 그대로 그린다.
+## 파트 캔버스(예: 184px)에 그린 뒤 확대하면 셰이더가 섞을 화면 픽셀이 없어 nearest 와 같아진다
+## (2026-09-15 실측: 캔버스에 그린 뒤 확대 = 지금 방식과 차이 없음, 화면 배율 + 셰이더 = Idle 노이즈 81% 감소).
+## 여기서 바뀌는 건 프리뷰 뷰포트 크기뿐이고 파트 이미지·베이크에는 영향이 없다.
+func _apply_puppet_scale() -> void:
+	if _puppet_vp == null or baker == null:
+		return
+	var on := _smooth != null and _smooth.button_pressed
+	var vs := Vector2(baker.opts.view_size)
+	var r := 1.0
+	if on:
+		r = clampf(_zoom_for(vs), 1.0, PUPPET_SCALE_MAX)
+	var want := Vector2i((vs * r).round())
+	if _puppet_vp.size != want:
+		_puppet_vp.size = want
+	_puppet_scale = r
+	for c in _puppet_vp.get_children():
+		if c is Node2D and not c.is_queued_for_deletion():
+			(c as Node2D).scale = Vector2(r, r)
+	var mat: Material = _smooth_material() if on else null
+	for pname in _puppet_bones.keys():
+		var art: Sprite2D = _puppet_bones[pname]["art"]
+		if art.material != mat:
+			art.material = mat
 
 
 ## 현재 3D 자세를 투영해 2D 퍼펫에 적용한다. rest_only 면 레스트 상태로 되돌린다.
@@ -875,7 +1093,7 @@ func _pose_puppet(rest_only: bool = false) -> void:
 	if _puppet_bones.is_empty():
 		return
 	var zpos := {}
-	var ord := _order_from_list()
+	var ord := _part_order_from_list()   # 레이어를 파트로 펼친 순서
 	for i in ord.size():
 		zpos[ord[i]] = i
 	var want := {}
@@ -920,7 +1138,7 @@ func _composite_by_order(only: PackedStringArray) -> Image:
 	var want := {}
 	for n in only:
 		want[n] = true
-	for n in _order_from_list():          # 뒤 -> 앞
+	for n in _part_order_from_list():     # 뒤 -> 앞 (레이어를 파트로 펼친 순서)
 		if not want.is_empty() and not want.has(n):
 			continue
 		var im: Image = _part_imgs.get(n)
@@ -934,11 +1152,12 @@ func _composite_by_order(only: PackedStringArray) -> Image:
 
 ## 시점에 영향을 주는 값들의 지문. 이게 그대로면 카메라를 다시 맞추지 않는다.
 func _view_sig() -> String:
-	return "%.3f|%.3f|%.4f|%d|%d|%d|%d|%d|%.4f" % [
+	return "%.3f|%.3f|%.4f|%d|%d|%d|%d|%d|%.4f|%d|%d" % [
 		_yaw.value, _pitch.value, _ortho.value,
 		int(_res.value), int(_ss.value), int(_margin.value),
 		1 if _autofit.button_pressed else 0,
-		_rest_anim.selected, _rest_time.value]
+		_rest_anim.selected, _rest_time.value,
+		int(_off_x.value), int(_off_y.value)]
 
 
 ## 파트 격리를 풀고 전체 합성으로 돌아간다.
@@ -970,7 +1189,8 @@ func _fill_parts_tree() -> void:
 		var p: DRRigModel.Part = baker.rig.parts[pname]
 		var parent_item: TreeItem = items.get(p.parent, root)
 		var it := _parts_tree.create_item(parent_item)
-		it.set_text(0, pname)
+		var lay := baker.rig.layer(pname)
+		it.set_text(0, pname if lay == pname else "%s   (%s 줄에 묶임)" % [pname, lay])
 		it.set_text(1, baker.skeleton.get_bone_name(p.root_bone))
 		it.set_text(2, str(p.bones.size()))
 		it.set_text(3, str(int(baker.split.tri_counts.get(pname, 0))))
@@ -996,12 +1216,7 @@ func _fill_z_list() -> void:
 		return
 	if not _z_auto.button_pressed:
 		return          # 수동 모드에서는 사용자가 만든 순서를 건드리지 않는다
-	var names: Array = []
-	for p in baker.rig.order:
-		names.append(p)
-	names.sort_custom(func(a, b):
-		return (baker.rig.parts[a] as DRRigModel.Part).rest_depth \
-			> (baker.rig.parts[b] as DRRigModel.Part).rest_depth)
+	var names := baker.rig.rest_layer_order()   # 레이어 단위 — 발가락은 발 줄에 포함
 
 	# 내용이 그대로면 손대지 않는다.
 	# clear() 하는 순간 다중 선택이 통째로 날아가므로, 각도가 바뀌지 않은
@@ -1033,7 +1248,11 @@ func _fill_z_list() -> void:
 func _on_z_selection_changed() -> void:
 	var picked := PackedStringArray()
 	for i in _z_list.get_selected_items():
-		picked.append(_z_list.get_item_text(i))
+		var lay := _z_list.get_item_text(i)
+		if baker != null:
+			picked.append_array(baker.rig.layer_parts(lay))   # 발 줄을 고르면 발가락도 같이
+		else:
+			picked.append(lay)
 	_set_isolation(picked)
 
 
@@ -1053,7 +1272,8 @@ func _set_isolation(names: PackedStringArray, sync_list: bool = false) -> void:
 	if sync_list and _z_list != null:
 		var want := {}
 		for n in names:
-			want[n] = true
+			# 목록 줄은 레이어 단위이므로 파트(L_Toe)는 소속 레이어(L_Foot) 줄을 고른다
+			want[baker.rig.layer(String(n)) if baker != null else String(n)] = true
 		_z_list.deselect_all()
 		for i in _z_list.item_count:
 			if want.has(_z_list.get_item_text(i)):
@@ -1108,7 +1328,77 @@ func _fill_anim_list() -> void:
 	_anim_list.clear()
 	for a in _all_anims:
 		if f == "" or a.to_lower().contains(f):
-			_anim_list.add_item(a)
+			var idx := _anim_list.add_item(a)
+			if _picked_anims.has(a):
+				_anim_list.select(idx, false)
+	_update_anim_count()
+
+
+## 목록에 지금 보이는 항목의 선택 상태를 _picked_anims 에 옮긴다.
+## 검색으로 숨은 항목의 선택은 건드리지 않는다.
+func _sync_picked_from_list() -> void:
+	for i in _anim_list.item_count:
+		var n := _anim_list.get_item_text(i)
+		if _anim_list.is_selected(i):
+			_picked_anims[n] = true
+		else:
+			_picked_anims.erase(n)
+	_update_anim_count()
+
+
+## 고른 애니 이름(원래 목록 순서)
+func _picked_anim_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	for a in _all_anims:
+		if _picked_anims.has(a):
+			out.append(a)
+	return out
+
+
+func _update_anim_count() -> void:
+	if _anim_count == null:
+		return
+	var names := _picked_anim_names()
+	_anim_count.text = "선택 %d개%s" % [names.size(), (": " + ", ".join(names)) if names.size() > 0 else ""]
+	_anim_count.tooltip_text = _anim_count.text
+	_refill_play_anims()
+
+
+## ▶ 재생 드롭다운을 6번에서 고른 애니로 채운다. 고른 게 없으면 "(레스트 포즈 애니)" 하나.
+## 고르던 항목이 목록에 남아 있으면 그대로 둔다.
+func _refill_play_anims() -> void:
+	if _play_anim == null:
+		return
+	var prev := ""
+	if _play_anim.item_count > 0 and _play_anim.selected >= 0:
+		prev = String(_play_anim.get_item_metadata(_play_anim.selected))
+	_play_anim.clear()
+	var names := _picked_anim_names()
+	if names.is_empty():
+		_play_anim.add_item("(레스트 포즈 애니)")
+		_play_anim.set_item_metadata(0, "")
+	else:
+		for n in names:
+			var i := _play_anim.item_count
+			_play_anim.add_item(n)
+			_play_anim.set_item_metadata(i, n)
+	var pick := 0
+	for i in _play_anim.item_count:
+		if String(_play_anim.get_item_metadata(i)) == prev:
+			pick = i
+	_play_anim.select(pick)
+	if String(_play_anim.get_item_metadata(pick)) != prev and _play != null and _play.button_pressed:
+		_play_t = 0.0
+		_refresh_preview()
+
+
+## ▶ 재생으로 돌릴 애니메이션의 실제 이름. 드롭다운이 레스트 항목이면 레스트 포즈 애니.
+func _current_play_anim() -> String:
+	if baker != null and _play_anim != null and _play_anim.item_count > 0 and _play_anim.selected >= 0:
+		var n := String(_play_anim.get_item_metadata(_play_anim.selected))
+		if n != "":
+			return baker.resolve_anim(n)
+	return _current_rest_anim()
 
 
 ## 렌더 중에 또 요청이 오면(슬라이더를 계속 돌리는 경우) 버리지 않고
@@ -1160,6 +1450,12 @@ func _render_preview_once() -> void:
 	var playing := _play != null and _play.button_pressed
 	# 3D 는 엔진이 직접 돌린다(뷰포트 텍스처가 그대로 갱신됨).
 	# 2D 는 _process 에서 자세를 투영해 퍼펫을 움직인다.
+	# 3D 재생: 파트 기준(레스트 포즈)은 위에서 이미 잡았으니, 재생할 애니로 바꿔 엔진이 돌리게 한다.
+	# (2D 재생은 _process 가 재생할 애니로 자세를 세운다. 파트 그림 캐시는 레스트 포즈로 찍힌 그대로)
+	if playing and not use_2d:
+		var pa := _current_play_anim()
+		if pa != "":
+			baker.set_pose(pa, 0.0)
 	baker.set_playback(playing and not use_2d)
 	set_process(playing and use_2d)
 	if use_2d:
@@ -1188,10 +1484,14 @@ func _render_preview_once() -> void:
 	# 저해상도로 갈수록 손해가 커지는데, 숫자로 봐야 알아챌 수 있다.
 	# 라벨은 clip_text 라 길어지면 잘리므로 짧은 형식으로 쓴다.
 	var used := img.get_used_rect() if img != null else Rect2i()
-	if used.size.y > 0:
-		var fill := 100.0 * float(used.size.y) / float(maxi(baker.opts.view_size.y, 1))
+	# 2D 퍼펫은 화면 배율로 크게 그렸을 수 있으므로 파트 캔버스 픽셀로 되돌려 센다
+	var px := _puppet_scale if use_2d else 1.0
+	var used_w := roundi(used.size.x / px)
+	var used_h := roundi(used.size.y / px)
+	if used_h > 0:
+		var fill := 100.0 * float(used_h) / float(maxi(baker.opts.view_size.y, 1))
 		_iso_label.text = "%s · %d×%d · 채움 %.0f%%" % [
-			what, used.size.x, used.size.y, fill]
+			what, used_w, used_h, fill]
 	else:
 		_iso_label.text = what
 	if playing:
@@ -1200,15 +1500,19 @@ func _render_preview_once() -> void:
 
 	if use_2d:
 		_preview.texture = _puppet_vp.get_texture()
+		_pv_logical = Vector2(baker.opts.view_size)
 	else:
 		_preview.texture = baker.viewport.get_texture()
+		_pv_logical = Vector2(_preview.texture.get_size())
 	# 해상도가 바뀌면 확대 상태를 유지해봐야 엉뚱한 곳을 보게 되므로 맞춤으로 되돌린다
-	var tsz := Vector2i(_preview.texture.get_size())
+	# (2D 퍼펫 텍스처는 확대할 때마다 크기가 바뀌므로 텍스처가 아니라 원래 크기로 비교한다)
+	var tsz := Vector2i(_pv_logical)
 	if tsz != _last_tex_size:
 		_last_tex_size = tsz
 		_zoom = 0.0
 		_pan = Vector2.ZERO
 	_layout_preview()
+	_update_gizmo()
 
 
 func _on_bake() -> void:
@@ -1225,10 +1529,8 @@ func _on_bake() -> void:
 	_busy = true
 	_bake_btn.disabled = true
 
-	var picked := PackedStringArray()
-	for i in _anim_list.item_count:
-		if _anim_list.is_selected(i):
-			picked.append(_anim_list.get_item_text(i))
+	_sync_picked_from_list()
+	var picked := _picked_anim_names()   # 검색으로 목록에 안 보이는 것까지
 
 	var ex := DRExporter.new()
 	ex.baker = baker
@@ -1238,6 +1540,8 @@ func _on_bake() -> void:
 	ex.auto_fit = _autofit.button_pressed
 	ex.fit_margin = int(_margin.value)
 	ex.apply_stretch = _stretch.button_pressed
+	ex.smooth_pixel = _smooth.button_pressed
+	ex.keep_previous = _keep_anims.button_pressed
 	ex.z_override = _current_z_override()
 	ex.progress.connect(func(stage, cur, total):
 		_progress.max_value = total
@@ -1261,8 +1565,14 @@ func _on_bake() -> void:
 	_bake_btn.disabled = false
 	_progress.value = 0
 	if bool(res.get("ok", false)):
-		_status.text = "완료 — 파트 %d개, 애니 %d개 → %s" % [
+		var msg := "완료 — 파트 %d개, 애니 %d개 → %s" % [
 			res["parts"].size(), res["animations"].size(), res["scene"]]
+		var kept: PackedStringArray = res.get("kept", PackedStringArray())
+		if kept.size() > 0:
+			msg += "  (예전 애니 %d개 유지: %s)" % [kept.size(), ", ".join(kept)]
+		if String(res.get("dropped_reason", "")) != "":
+			msg += "\n⚠ " + String(res["dropped_reason"])
+		_status.text = msg
 		EditorInterface.get_file_system_dock().navigate_to_path(String(res["scene"]))
 	else:
 		_status.text = "베이크 실패: %s" % String(res.get("error", "알 수 없음"))
@@ -1285,7 +1595,7 @@ func _process(delta: float) -> void:
 	# 파트마다 다른 순간이 찍혀서 팔다리가 몸에서 떨어져 나간다.
 	if _busy:
 		return
-	var an := _current_rest_anim()
+	var an := _current_play_anim()
 	if an == "":
 		return
 	var anim := baker.anim_player.get_animation(an)
@@ -1294,6 +1604,128 @@ func _process(delta: float) -> void:
 	_play_t = fmod(_play_t + delta, maxf(anim.length, 0.001))
 	baker.set_pose(an, _play_t)
 	_pose_puppet(false)
+
+
+# ---------------------------------------------------------------- 3D 회전 기즈모
+
+func _update_gizmo() -> void:
+	if _gizmo == null:
+		return
+	_gizmo.visible = baker != null and not (_mode_2d != null and _mode_2d.button_pressed)
+	_gizmo.queue_redraw()
+
+
+## 축 끝 좌표(기즈모 안 좌표)와 깊이. 카메라 기저를 그대로 투영하므로
+## 부호 규칙과 무관하게 화면에 보이는 모델 방향과 일치한다.
+func _gizmo_axes() -> Array:
+	var out: Array = []
+	if baker == null or baker.camera == null:
+		return out
+	var b := baker.camera.global_transform.basis
+	var c := Vector2(GIZMO_SIZE, GIZMO_SIZE) * 0.5
+	var rad := GIZMO_SIZE * 0.5 - 12.0
+	var defs := [
+		["X", Vector3.RIGHT, Color(0.93, 0.33, 0.33)],
+		["Y", Vector3.UP, Color(0.55, 0.85, 0.30)],
+		["Z", Vector3.BACK, Color(0.32, 0.56, 0.98)],
+	]
+	for d in defs:
+		for sgn in [1.0, -1.0]:
+			var v: Vector3 = Vector3(d[1]) * float(sgn)
+			out.append({
+				"name": ("" if float(sgn) > 0.0 else "-") + String(d[0]),
+				"axis": v,
+				"pos": c + Vector2(v.dot(b.x), -v.dot(b.y)) * rad,
+				"depth": v.dot(b.z),
+				"color": d[2],
+				"positive": float(sgn) > 0.0,
+			})
+	# 먼 축부터 그려서 가까운 축이 위에 오게
+	out.sort_custom(func(p, q): return float(p["depth"]) < float(q["depth"]))
+	return out
+
+
+func _draw_gizmo() -> void:
+	var c := Vector2(GIZMO_SIZE, GIZMO_SIZE) * 0.5
+	_gizmo.draw_circle(c, GIZMO_SIZE * 0.5 - 1.0, Color(0, 0, 0, 0.45 if _giz_drag else 0.28))
+	var font := _gizmo.get_theme_default_font()
+	for a in _gizmo_axes():
+		var col: Color = a["color"]
+		var p: Vector2 = a["pos"]
+		if bool(a["positive"]):
+			_gizmo.draw_line(c, p, col, 2.0, true)
+			_gizmo.draw_circle(p, 8.0, col)
+			_gizmo.draw_string(font, p + Vector2(-4, 4), String(a["name"]),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.08, 0.08, 0.1))
+		else:
+			_gizmo.draw_circle(p, 6.0, Color(col, 0.3))
+			_gizmo.draw_arc(p, 6.0, 0.0, TAU, 16, col, 1.5, true)
+
+
+## 드래그 = 좌우·상하 회전. 거의 안 움직이고 떼면 축 클릭.
+func _on_gizmo_input(ev: InputEvent) -> void:
+	if baker == null:
+		return
+	if ev is InputEventMouseButton:
+		var mb := ev as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if mb.pressed:
+			_giz_drag = true
+			_giz_moved = false
+			_giz_press_pos = mb.position
+			_giz_yaw = _yaw.value
+			_giz_pitch = _pitch.value
+		else:
+			var was_drag := _giz_drag and _giz_moved
+			_giz_drag = false
+			if was_drag:
+				_refresh_preview()     # 손을 뗄 때 한 번: 자동 맞춤·그리기 순서까지 제대로 다시
+			else:
+				_gizmo_click(mb.position)
+		_gizmo.queue_redraw()
+		_gizmo.accept_event()
+	elif ev is InputEventMouseMotion and _giz_drag:
+		var mm := ev as InputEventMouseMotion
+		if not _giz_moved and (mm.position - _giz_press_pos).length() > 3.0:
+			_giz_moved = true
+		if _giz_moved and not _busy:
+			_giz_yaw -= mm.relative.x * GIZMO_DEG_PER_PX
+			_giz_pitch = clampf(_giz_pitch + mm.relative.y * GIZMO_DEG_PER_PX, -89.0, 89.0)
+			_set_view_live(wrapf(roundf(_giz_yaw), -180.0, 180.0), roundf(_giz_pitch))
+		_gizmo.accept_event()
+
+
+## 드래그 중: 칸 숫자와 카메라만 즉시 바꾼다. 자동 맞춤·순서 재계산 같은 전체 갱신은
+## 손을 뗄 때 한 번 — 매 픽셀마다 돌리면 렌더가 쌓여 끊긴다.
+func _set_view_live(yaw: float, pitch: float) -> void:
+	_yaw.set_value_no_signal(yaw)
+	_pitch.set_value_no_signal(pitch)
+	baker.orbit_camera(_yaw.value, _pitch.value)
+	_gizmo.queue_redraw()
+
+
+## 축 끝을 누르면 그 방향에서 본다. 정면 +Z = Yaw 0, 오른쪽 +X = Yaw 90, 위 +Y = Pitch 89.
+func _gizmo_click(pos: Vector2) -> void:
+	var best: Dictionary = {}
+	var best_d := 12.0
+	for a in _gizmo_axes():
+		var dd := (Vector2(a["pos"]) - pos).length()
+		if dd <= best_d:
+			best_d = dd
+			best = a
+	if best.is_empty():
+		return
+	var v: Vector3 = best["axis"]
+	var yaw := _yaw.value
+	var pitch := 0.0
+	if absf(v.y) > 0.5:
+		pitch = 89.0 if v.y > 0.0 else -89.0
+	else:
+		yaw = rad_to_deg(atan2(v.x, v.z))
+	_yaw.set_value_no_signal(wrapf(roundf(yaw), -180.0, 180.0))
+	_pitch.set_value_no_signal(pitch)
+	_refresh_preview()
 
 
 func _teardown() -> void:
