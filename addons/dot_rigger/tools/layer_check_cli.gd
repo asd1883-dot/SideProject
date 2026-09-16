@@ -84,6 +84,45 @@ func _check_merged(scene: PackedScene) -> void:
 		lo = minf(lo, r)
 		hi = maxf(hi, r)
 	_check(s_hi - s_lo > 0.05, "Jog_Fwd 에서 L_Foot 늘이기 s 가 %.2f~%.2f 로 움직임(켜짐)" % [s_lo, s_hi])
+	_check(float(rig.stretch_limit.get("L_Foot", 0.0)) == 1.15 and s_hi <= 1.15 + 1e-6 and s_lo >= 1.0 / 1.15 - 1e-6,
+		"발 늘이기는 ±15%% 안 (제한 %.2f, 실제 %.2f~%.2f)" % [float(rig.stretch_limit.get("L_Foot", 0.0)), s_lo, s_hi])
+	_check(not rig.stretch_limit.has("L_Calf"), "종아리는 파트별 제한 없음(전체 1.6)")
+
+	# 각도 안정화: 정면(yaw 0)에서는 발이 카메라를 향해 단축률이 낮다 → 켜면 발 회전 폭이 줄어야 하고, 측면 값에는 영향이 없어야 한다
+	_check(float(rig.angle_fade.get("L_Foot", 0.0)) == 0.45 and float(rig.angle_fade.get("L_Hand", 0.0)) == 0.45 and not rig.angle_fade.has("L_Calf"),
+		"angle_fade — 발·손 0.45, 종아리 없음 (%s)" % str(rig.angle_fade))
+	var fade_save: Dictionary = rig.angle_fade.duplicate()
+	var fade_yaw_save := baker.opts.yaw
+	baker.opts.yaw = 0.0
+	baker.apply_camera()
+	baker.set_rest_pose()
+	await RenderingServer.frame_post_draw
+	rig.capture_rest(baker.skeleton, baker.camera)
+	var fr_on := [INF, -INF]
+	var fr_off := [INF, -INF]
+	var fore_min := INF
+	var vh := float(baker.opts.view_size.y)
+	for i in 24:
+		baker.set_pose(an, anim.length * float(i) / 24.0)
+		var f := rig.foreshortening(baker.skeleton, baker.camera, vh)
+		fore_min = minf(fore_min, float(f["L_Foot"]))
+		var l_on := rig.project_local(baker.skeleton, baker.camera)
+		rig.angle_fade = {}
+		var l_off := rig.project_local(baker.skeleton, baker.camera)
+		rig.angle_fade = fade_save.duplicate()
+		fr_on[0] = minf(fr_on[0], rad_to_deg(float(l_on["L_Foot"]["r"])))
+		fr_on[1] = maxf(fr_on[1], rad_to_deg(float(l_on["L_Foot"]["r"])))
+		fr_off[0] = minf(fr_off[0], rad_to_deg(float(l_off["L_Foot"]["r"])))
+		fr_off[1] = maxf(fr_off[1], rad_to_deg(float(l_off["L_Foot"]["r"])))
+	var span_on: float = fr_on[1] - fr_on[0]
+	var span_off: float = fr_off[1] - fr_off[0]
+	_check(fore_min < 0.45, "정면 Jog_Fwd 에서 L_Foot 단축률 최소 %.2f (< 0.45 라 안정화가 작동하는 구간)" % fore_min)
+	_check(span_on < span_off * 0.8, "정면 L_Foot 회전 폭 안정화 켬 %.0f° < 끔 %.0f° 의 80%%" % [span_on, span_off])
+	baker.opts.yaw = fade_yaw_save
+	baker.apply_camera()
+	baker.set_rest_pose()
+	await RenderingServer.frame_post_draw
+	rig.capture_rest(baker.skeleton, baker.camera)
 	_check(hi - lo > 10.0, "L_Foot 발목 회전 폭 %.1f° (발가락이 접혀도 발 그림은 발목 회전만)" % (hi - lo))
 
 	var out_dir := "res://puppet_test/foot_bake"
@@ -121,6 +160,16 @@ func _check_merged(scene: PackedScene) -> void:
 		st[String(p.get("name", ""))] = p.get("stretch", null)
 	_check(st.get("L_Foot") == true and st.get("L_Calf") == true,
 		"rig.json stretch — L_Foot %s · L_Calf %s" % [st.get("L_Foot"), st.get("L_Calf")])
+	var sl := {}
+	for p in doc.get("parts", []):
+		sl[String(p.get("name", ""))] = float(p.get("stretch_limit", 0.0))
+	_check(absf(float(sl.get("L_Foot", 0.0)) - 1.15) < 1e-6 and absf(float(sl.get("L_Calf", 0.0)) - 1.6) < 1e-6,
+		"rig.json stretch_limit — L_Foot %.2f · L_Calf %.2f" % [float(sl.get("L_Foot", 0.0)), float(sl.get("L_Calf", 0.0))])
+	var af := {}
+	for p in doc.get("parts", []):
+		af[String(p.get("name", ""))] = float(p.get("angle_fade", -1.0))
+	_check(absf(float(af.get("L_Foot", 0.0)) - 0.45) < 1e-6 and float(af.get("L_Calf", 1.0)) == 0.0,
+		"rig.json angle_fade — L_Foot %.2f · L_Calf %.2f" % [float(af.get("L_Foot", 0.0)), float(af.get("L_Calf", 0.0))])
 
 
 # ---------------------------------------------------------------- humanoid(true): 발가락을 따로 꺾음

@@ -87,6 +87,12 @@ func _run() -> void:
 		printerr("장비 머티리얼이 본체와 다름 (장비 %s / 본체 %s)"
 			% [eq_spr.material if eq_spr != null else null, body_mat]); quit(1); return
 	print("장비 머티리얼 = 본체와 같음 (%s)" % ("부드러운 도트 셰이더" if body_mat != null else "없음"))
+	# 전체 실루엣 아웃라인으로 구운 씬이면 장비도 밑깔개를 받아야 헬멧 바깥에 선이 이어진다
+	var body_ol := puppet.find_child(DRExporter.OUTLINE_NODE, true, false) as Sprite2D
+	var eq_ol := pup.get_equipped_outline(item.slot)
+	if (body_ol != null) != (eq_ol != null) or (eq_ol != null and (eq_ol.material != body_ol.material or eq_ol.z_index != body_ol.z_index)):
+		printerr("장비 밑깔개가 본체와 다름 (본체 %s / 장비 %s)" % [body_ol, eq_ol]); quit(1); return
+	print("장비 밑깔개 = %s" % ("본체와 같은 머티리얼·z %d" % eq_ol.z_index if eq_ol != null else "없음(전체 실루엣 아웃라인으로 구운 씬이 아님)"))
 
 	# 애니메이션 캡처
 	var ap := puppet.get_node_or_null("AnimationPlayer") as AnimationPlayer

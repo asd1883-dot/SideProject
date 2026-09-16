@@ -8,10 +8,13 @@ class_name DRPartProfile
 @export var profile_name: String = "Humanoid"
 
 ## 순서대로 검사, 첫 매치 승리.
-## { pattern: String(정규식), part: String, sided: bool, layer: String(선택), stretch: bool(선택, 기본 true) }
+## { pattern: String(정규식), part: String, sided: bool, layer: String(선택), stretch: bool(선택, 기본 true),
+##   stretch_limit: float(선택) }
 ## layer 가 있으면 그 파트는 애니메이션에서는 따로 움직이되,
 ## 그리기 순서 목록에서는 layer 파트의 줄에 묶인다(예: 발가락 → 발).
-## stretch 가 false 면 그 파트는 늘이기(단축 보정) 없이 레스트 모양 그대로 회전만 한다(예: 발).
+## stretch 가 false 면 그 파트는 늘이기(단축 보정) 없이 레스트 모양 그대로 회전만 한다(예: 분리 모드의 발가락).
+## stretch_limit 이 있으면 그 파트의 늘이기를 1/limit ~ limit 로 묶는다(예: 발 1.15). 없으면 전체 제한(1.6).
+## angle_fade 가 있으면 단축률이 그 값 아래일 때 부모 기준 회전을 레스트 쪽으로 눌러 각도 잡음을 막는다(손·발 0.45).
 @export var rules: Array[Dictionary] = []
 
 ## 파트 렌더 순서(뒤 -> 앞)의 기본값. 실제 z는 3D 깊이로 덮어씀.
@@ -41,11 +44,15 @@ static func humanoid(split_toes: bool = false) -> DRPartProfile:
 		{"pattern": "(neck|head|jaw|eye)", "part": "Head", "sided": false},
 		{"pattern": "(upperarm|upper_arm)", "part": "UpperArm", "sided": true},
 		{"pattern": "(lowerarm|forearm|fore_arm)", "part": "Forearm", "sided": true},
-		{"pattern": "(hand|index|middle|pinky|ring|thumb|finger)", "part": "Hand", "sided": true},
+		# 손·발처럼 짧은 끝 파트는 카메라를 향하면(단축률 낮음) 2D 각도가 잡음처럼 튄다 → angle_fade 아래에서는
+		# 부모 기준 회전을 레스트 쪽으로 눌러 둔다(단축률 0 이면 회전 0, 0.45 이상이면 그대로).
+		{"pattern": "(hand|index|middle|pinky|ring|thumb|finger)", "part": "Hand", "sided": true, "angle_fade": 0.45},
 		{"pattern": "(thigh|upleg|up_leg|upperleg)", "part": "Thigh", "sided": true},
 		{"pattern": "(calf|shin|lowerleg|^leg)", "part": "Calf", "sided": true},
 		toe_rule,   # 발 규칙보다 먼저
-		{"pattern": "(foot|ankle)", "part": "Foot", "sided": true},
+		# 발은 늘이기를 ±15% 로 묶는다 — 팔다리처럼 1.6배까지 두면 50px 발이 걸음마다 부풀었다 줄어 지렁이처럼 보인다(09-16).
+		# 3D 실루엣과는 조금 더 벌어지지만(발끝 몇 px) 2D 게임 발은 원래 안 늘어난다.
+		{"pattern": "(foot|ankle)", "part": "Foot", "sided": true, "stretch_limit": 1.15, "angle_fade": 0.45},
 		{"pattern": "(arm)", "part": "UpperArm", "sided": true},
 	]
 	p.default_order = PackedStringArray([
@@ -138,6 +145,31 @@ func stretch_for_part(part: String) -> bool:
 		if String(r.get("part", "")) == base and r.has("stretch") and not bool(r["stretch"]):
 			return false
 	return true
+
+
+## 파트별 늘이기 제한(1 보다 큰 배율). 규칙에 없으면 0 (= 전체 제한을 쓴다).
+func stretch_limit_for_part(part: String) -> float:
+	var base := part
+	if part.begins_with("L_") or part.begins_with("R_"):
+		base = part.substr(2)
+	var lim := 0.0
+	for r in rules:
+		if String(r.get("part", "")) == base and r.has("stretch_limit"):
+			var v := float(r["stretch_limit"])
+			if v > 1.0 and (lim == 0.0 or v < lim):
+				lim = v
+	return lim
+
+
+## 파트별 각도 안정화 문턱(단축률, 0~1). 규칙에 없으면 0 (= 안 함).
+func angle_fade_for_part(part: String) -> float:
+	var base := part
+	if part.begins_with("L_") or part.begins_with("R_"):
+		base = part.substr(2)
+	for r in rules:
+		if String(r.get("part", "")) == base and r.has("angle_fade"):
+			return clampf(float(r["angle_fade"]), 0.0, 1.0)
+	return 0.0
 
 
 func clear_cache() -> void:

@@ -21,6 +21,16 @@ var stretch_limit: float = 1.6
 ## 게임에서 캐릭터를 확대해서 그릴 때 1픽셀 미만 움직임이 깜빡임(TV 노이즈) 대신 매끄럽게 보인다.
 var smooth_pixel: bool = true
 const SMOOTH_SHADER := "res://addons/dot_rigger/runtime/smooth_pixel.gdshader"
+## 도트 아웃라인(카툰 선). 0 = 없음, 1~3 = 도트 두께. 방식은 outline_whole 이 정한다.
+var outline_px: int = 0
+var outline_color: Color = Color.BLACK
+## true = 캐릭터 전체 실루엣에만 선(기본), false = 파트마다 선(관절 겹침에도).
+## 전체 실루엣은 파트마다 "밑깔개" 스프라이트(stretch/outline)를 하나 더 두고 모든 파트 뒤(OUTLINE_Z)에 깐다 —
+## 같은 셰이더의 outline_only 모드가 부풀린 실루엣을 선 색으로 그리고, 파트 본체가 그 위를 덮어 바깥 테두리만 남는다.
+var outline_whole: bool = true
+## 밑깔개의 절대 z. 파트 z 는 0 부터(뒤 -> 앞)라 그 바로 뒤
+const OUTLINE_Z := -1
+const OUTLINE_NODE := "outline"
 
 ## 그리기 순서 수동 지정 — 레이어 이름, 뒤 -> 앞. 비어 있으면 3D 깊이로 자동 계산한다.
 ## 값이 있으면 그 순서를 모든 프레임에 고정하고, 프레임별 z 트랙을 만들지 않는다.
@@ -38,6 +48,46 @@ var dropped_reason: String = ""
 var _part_crop: Dictionary = {}   # part -> Rect2i
 var _part_img: Dictionary = {}    # part -> Image
 var _anim_data: Dictionary = {}
+## run() 시점의 파트 레스트 기하 { part -> {head: Vector2, angle, len, depth} } 와 레이어 순서.
+## rig 의 rest_* 는 공유물이라 다음 세트가 capture_rest() 로 덮어쓴다 — 에디터가 PNG 임포트 뒤 rebuild_scene() 을 부를 때
+## 그걸 읽으면 앞 세트 씬이 뒷 세트 레스트 자세로 조립돼 리그가 통째로 깨진다(02 C11). 그래서 여기 찍어 둔다.
+var _rest_snap: Dictionary = {}
+var _layer_order_snap: PackedStringArray = PackedStringArray()
+
+
+func _rest_head(pname: String) -> Vector2:
+	if _rest_snap.has(pname):
+		return Vector2(_rest_snap[pname]["head"])
+	return (baker.rig.parts[pname] as DRRigModel.Part).rest_head2d
+
+
+func _rest_angle(pname: String) -> float:
+	if _rest_snap.has(pname):
+		return float(_rest_snap[pname]["angle"])
+	return (baker.rig.parts[pname] as DRRigModel.Part).rest_angle
+
+
+func _rest_len(pname: String) -> float:
+	if _rest_snap.has(pname):
+		return float(_rest_snap[pname]["len"])
+	return (baker.rig.parts[pname] as DRRigModel.Part).rest_len2d
+
+
+## 창·세트 베이커가 같은 설정을 넘기는 통로.
+## 키: fps, auto_fit, margin, stretch, smooth, keep_previous, outline_px, outline_color, outline_whole, z_override
+func apply_cfg(cfg: Dictionary) -> void:
+	anim_fps = int(cfg.get("fps", anim_fps))
+	auto_fit = bool(cfg.get("auto_fit", auto_fit))
+	fit_margin = int(cfg.get("margin", fit_margin))
+	apply_stretch = bool(cfg.get("stretch", apply_stretch))
+	smooth_pixel = bool(cfg.get("smooth", smooth_pixel))
+	keep_previous = bool(cfg.get("keep_previous", keep_previous))
+	outline_px = int(cfg.get("outline_px", outline_px))
+	if cfg.has("outline_color"):
+		outline_color = Color(cfg["outline_color"])
+	outline_whole = bool(cfg.get("outline_whole", outline_whole))
+	if cfg.has("z_override"):
+		z_override = PackedStringArray(cfg["z_override"])
 
 
 func run() -> Dictionary:
@@ -54,7 +104,12 @@ func run() -> Dictionary:
 	await RenderingServer.frame_post_draw
 	if auto_fit:
 		await baker.auto_fit(fit_margin)
-	baker.rig.capture_rest(baker.skeleton, baker.camera)
+	baker.capture_rest()   # 평면화가 켜져 있으면 포즈 시점의 레스트 각도도 같이
+	_rest_snap.clear()
+	for pn in baker.rig.order:
+		var rp: DRRigModel.Part = baker.rig.parts[pn]
+		_rest_snap[pn] = {"head": rp.rest_head2d, "angle": rp.rest_angle, "len": rp.rest_len2d, "depth": rp.rest_depth}
+	_layer_order_snap = baker.rig.rest_layer_order()
 
 	# 2) 파트별 스프라이트 렌더
 	var names := baker.rig.order
@@ -72,6 +127,9 @@ func run() -> Dictionary:
 			continue
 		var final_img := img
 		if baker.opts.trim_parts:
+			# 아웃라인(파트별·밑깔개 모두)은 셰이더가 텍스처 안에만 그리므로 그 두께만큼 여유를 두고 자른다
+			if outline_px > 0:
+				used = used.grow(outline_px).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
 			final_img = img.get_region(used)
 		else:
 			used = Rect2i(Vector2i.ZERO, Vector2i(img.get_width(), img.get_height()))
@@ -152,6 +210,12 @@ func _incompatible_reason(doc: Dictionary) -> String:
 		return "레스트 포즈가 다름 (예전 %s %d%% → 지금 %s %d%%)" % [
 			v.get("rest_anim", ""), int(float(v.get("rest_time", 0.0)) * 100.0),
 			now["rest_anim"], int(float(now["rest_time"]) * 100.0)]
+	# 평면화 애니와 3D 투영 애니는 같은 레스트라도 값의 뜻이 다르다(각도를 다른 시점에서 잼)
+	if bool(v.get("planar", false)) != bool(now["planar"]) \
+			or (bool(now["planar"]) and absf(float(v.get("pose_yaw", 0.0)) - float(now["pose_yaw"])) > 0.001):
+		return "동작 평면화 설정이 다름 (예전 %s → 지금 %s)" % [
+			("켬 %.0f°" % float(v.get("pose_yaw", 0.0))) if bool(v.get("planar", false)) else "끔",
+			("켬 %.0f°" % float(now["pose_yaw"])) if bool(now["planar"]) else "끔"]
 	var sz: Array = v.get("size", [])
 	if sz.size() != 2 or int(sz[0]) != int(now["size"][0]) or int(sz[1]) != int(now["size"][1]):
 		return "해상도가 다름 (예전 %s → 지금 %s)" % [str(sz), str(now["size"])]
@@ -182,6 +246,8 @@ func _incompatible_reason(doc: Dictionary) -> String:
 func resolve_layer_order() -> PackedStringArray:
 	if z_override.size() > 0:
 		return baker.rig.normalize_layer_order(z_override)
+	if not _layer_order_snap.is_empty():
+		return _layer_order_snap   # run() 때 이 세트의 레스트 깊이로 정한 순서(뒤 세트가 rig 를 덮어써도 유지)
 	return baker.rig.rest_layer_order()
 
 
@@ -224,8 +290,7 @@ func _project_anim(aname: String) -> Dictionary:
 			t = (float(f) / float(maxi(count - 1, 1))) * length
 		baker.set_pose(aname, t)
 		await RenderingServer.frame_post_draw
-		frames.append({"t": t, "parts": _to_json(
-			baker.rig.project_local(baker.skeleton, baker.camera))})
+		frames.append({"t": t, "parts": _to_json(baker.project_local())})
 
 	_unwrap_rotations(frames)
 	if looping and frames.size() > 1:
@@ -300,16 +365,18 @@ func _write_json() -> void:
 			"name": pname,
 			"parent": p.parent,
 			"layer": baker.rig.layer(pname),
-			"stretch": not baker.rig.no_stretch.has(pname),   # false = 늘이기 없이 회전만(예: 발)
+			"stretch": not baker.rig.no_stretch.has(pname),   # false = 늘이기 없이 회전만(예: 분리 모드 발가락)
+			"stretch_limit": float(baker.rig.stretch_limit.get(pname, stretch_limit)),   # 이 파트의 늘이기 배율 상한
+			"angle_fade": float(baker.rig.angle_fade.get(pname, 0.0)),   # 단축률이 이 아래면 회전을 레스트 쪽으로(0 = 안 함)
 			"root_bone": baker.skeleton.get_bone_name(p.root_bone),
 			"bones": p.bones.size(),
 			"image": "parts/%s.png" % pname,
 			"crop": [c.position.x, c.position.y, c.size.x, c.size.y],
 			"rest": {
-				"head": [p.rest_head2d.x, p.rest_head2d.y],
-				"angle": p.rest_angle,
-				"len": p.rest_len2d,
-				"depth": p.rest_depth,
+				"head": [_rest_head(pname).x, _rest_head(pname).y],
+				"angle": _rest_angle(pname),
+				"len": _rest_len(pname),
+				"depth": float(_rest_snap[pname]["depth"]) if _rest_snap.has(pname) else p.rest_depth,
 			},
 		})
 	var doc := {
@@ -320,6 +387,9 @@ func _write_json() -> void:
 		"layer_order": resolve_layer_order(),   # 그리기 순서 목록(레이어) 뒤 -> 앞
 		"z_order_manual": z_override.size() > 0,
 		"smooth_pixel": smooth_pixel,   # 파트 스프라이트에 runtime/smooth_pixel.gdshader 를 붙였는지
+		"outline_px": outline_px,       # 도트 아웃라인 두께(0 = 없음)
+		"outline_color": outline_color.to_html(),
+		"outline_mode": "whole" if outline_whole else "parts",   # whole = 파트마다 밑깔개(stretch/outline, z −1) · parts = 파트 셰이더
 		"animations": _anim_data,
 		"unmapped_bones": baker.split.unmapped_bones,
 	}
@@ -347,15 +417,26 @@ func _build_and_save_scene(path: String) -> int:
 	for i in zorder.size():
 		z_of[zorder[i]] = i
 
-	# 모든 파트가 머티리얼 하나를 같이 쓴다(씬에 한 번만 저장됨)
+	# 모든 파트가 머티리얼 하나를 같이 쓴다(씬에 한 번만 저장됨). 부드러운 이동이나 파트별 아웃라인 중 하나라도 켜면 붙인다
+	var part_outline := outline_px if not outline_whole else 0
 	var smooth_mat: ShaderMaterial = null
-	if smooth_pixel:
-		var sh := load(SMOOTH_SHADER) as Shader
-		if sh != null:
-			smooth_mat = ShaderMaterial.new()
-			smooth_mat.shader = sh
-		else:
-			push_warning("[DotRigger] 부드러운 도트 셰이더를 찾을 수 없습니다: %s" % SMOOTH_SHADER)
+	var outline_mat: ShaderMaterial = null   # 전체 실루엣 밑깔개용(같은 셰이더, outline_only)
+	var sh := load(SMOOTH_SHADER) as Shader
+	if sh == null and (smooth_pixel or outline_px > 0):
+		push_warning("[DotRigger] 파트 셰이더를 찾을 수 없습니다: %s" % SMOOTH_SHADER)
+	if sh != null and (smooth_pixel or part_outline > 0):
+		smooth_mat = ShaderMaterial.new()
+		smooth_mat.shader = sh
+		smooth_mat.set_shader_parameter("smooth_edges", smooth_pixel)
+		smooth_mat.set_shader_parameter("outline_px", part_outline)
+		smooth_mat.set_shader_parameter("outline_color", outline_color)
+	if sh != null and outline_px > 0 and outline_whole:
+		outline_mat = ShaderMaterial.new()
+		outline_mat.shader = sh
+		outline_mat.set_shader_parameter("smooth_edges", smooth_pixel)
+		outline_mat.set_shader_parameter("outline_px", outline_px)
+		outline_mat.set_shader_parameter("outline_color", outline_color)
+		outline_mat.set_shader_parameter("outline_only", true)
 
 	var bones := {}   # part -> Bone2D
 	for pname in baker.rig.order:
@@ -368,16 +449,16 @@ func _build_and_save_scene(path: String) -> int:
 		var parent_head := Vector2.ZERO
 		if p.parent != "" and bones.has(p.parent):
 			parent_node = bones[p.parent]
-			parent_head = (baker.rig.parts[p.parent] as DRRigModel.Part).rest_head2d
+			parent_head = _rest_head(p.parent)
 		parent_node.add_child(b)
-		b.position = p.rest_head2d - parent_head
+		b.position = _rest_head(pname) - parent_head
 		b.rotation = 0.0
 		b.rest = Transform2D(0.0, b.position)
 		# 말단 본은 자식이 없어 Godot 이 길이/각도를 못 구하고 경고를 낸다.
 		# 3D 에서 이미 알고 있으므로 직접 넣어 준다(에디터 기즈모 표시에도 쓰임).
 		b.set_autocalculate_length_and_angle(false)
-		b.set_length(p.rest_len2d)
-		b.set_bone_angle(p.rest_angle)
+		b.set_length(_rest_len(pname))
+		b.set_bone_angle(_rest_angle(pname))
 
 		# 본 축 방향 늘이기 노드.
 		# 3D 에서 팔다리가 카메라 쪽으로 돌면 화면상 길이가 짧아지는데(단축),
@@ -386,7 +467,7 @@ func _build_and_save_scene(path: String) -> int:
 		# scale=(1,1) 이면 아무 영향 없으므로 stretch 를 꺼도 계층은 그대로다.
 		var stretch := Node2D.new()
 		stretch.name = "stretch"
-		stretch.rotation = p.rest_angle
+		stretch.rotation = _rest_angle(pname)
 		b.add_child(stretch)
 
 		var spr := Sprite2D.new()
@@ -396,7 +477,7 @@ func _build_and_save_scene(path: String) -> int:
 		spr.z_as_relative = false
 		spr.z_index = int(z_of.get(pname, 0))
 		spr.material = smooth_mat
-		spr.rotation = -p.rest_angle
+		spr.rotation = -_rest_angle(pname)
 		# 에디터에서 실행하면 임포트된 텍스처를 쓰고, CLI 등 임포트 전이면
 		# 방금 렌더한 Image 를 그대로 씬에 심는다.
 		var tex_path := out_dir.path_join("parts/%s.png" % pname)
@@ -408,7 +489,14 @@ func _build_and_save_scene(path: String) -> int:
 		if tex != null:
 			spr.texture = tex
 		var crop: Rect2i = _part_crop[pname]
-		spr.position = (Vector2(crop.position) - p.rest_head2d).rotated(-p.rest_angle)
+		spr.position = (Vector2(crop.position) - _rest_head(pname)).rotated(-_rest_angle(pname))
+		if outline_mat != null:
+			# 전체 실루엣 밑깔개 — 본체와 같은 텍스처·자리, 모든 파트 뒤
+			var ol := spr.duplicate() as Sprite2D
+			ol.name = OUTLINE_NODE
+			ol.z_index = OUTLINE_Z
+			ol.material = outline_mat
+			stretch.add_child(ol)
 		stretch.add_child(spr)
 		bones[pname] = b
 

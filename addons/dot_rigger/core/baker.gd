@@ -7,6 +7,9 @@ class_name DRBaker
 
 const SHADER_PATH := "res://addons/dot_rigger/shaders/dot_flat.gdshader"
 
+## 동작 평면화용 두 번째 카메라. 렌더하지 않고(current 아님) 뼈 각도만 이 시점에서 잰다.
+var pose_camera: Camera3D
+
 
 class Options:
 	var view_size: Vector2i = Vector2i(192, 192)
@@ -26,6 +29,10 @@ class Options:
 	## 캐릭터 화면 위치 이동(px). +x = 오른쪽, +y = 위. 도트 크기(Ortho)는 그대로 두고 찍는 틀만 옮긴다.
 	## 자동 맞춤이 켜져 있으면 결국 다시 가운데로 맞춰진다.
 	var view_offset: Vector2 = Vector2.ZERO
+	## 동작 평면화(2D 게임식). 각도는 pose_yaw 시점에서 재고(위치 강체·늘이기 1), 그림은 렌더 시점.
+	## pose_yaw 가 ±360 밖(기본 999)이면 자동 = 렌더 yaw 에 가까운 측면(±90).
+	var planar: bool = false
+	var pose_yaw: float = 999.0
 
 
 var opts: Options
@@ -80,6 +87,12 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 		rig.layer_of[pn] = profile.layer_for_part(pn)
 		if not profile.stretch_for_part(pn):
 			rig.no_stretch[pn] = true
+		var lim := profile.stretch_limit_for_part(pn)
+		if lim > 0.0:
+			rig.stretch_limit[pn] = lim
+		var fade := profile.angle_fade_for_part(pn)
+		if fade > 0.0:
+			rig.angle_fade[pn] = fade
 
 	# 원본 메쉬를 숨기고 파트 메쉬로 교체
 	source_mi.visible = false
@@ -156,6 +169,14 @@ func _build_viewport() -> void:
 	env.fog_enabled = false
 	camera.environment = env
 	viewport.add_child(camera)
+	pose_camera = Camera3D.new()
+	pose_camera.name = "PoseCamera"
+	pose_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	pose_camera.near = 0.01
+	pose_camera.far = 100.0
+	viewport.add_child(pose_camera)
+	pose_camera.current = false
+	camera.current = true
 	apply_camera()
 
 
@@ -218,6 +239,41 @@ func _place_camera(yaw_deg: float, pitch_deg: float, shift: Vector2) -> void:
 	xf.origin += xf.basis.x * shift.x + xf.basis.y * shift.y
 	camera.global_transform = xf
 	camera.far = dist * 3.0
+	_sync_pose_camera()
+
+
+## 평면화가 켜졌을 때 각도를 잴 시점(yaw). 자동이면 렌더 yaw 에 가까운 쪽 측면.
+func effective_pose_yaw() -> float:
+	if opts.pose_yaw > 360.0 or opts.pose_yaw < -360.0:
+		return 90.0 if opts.yaw >= 0.0 else -90.0
+	return opts.pose_yaw
+
+
+## 평면화가 켜져 있을 때만 포즈 카메라, 아니면 null (rig.project_local / capture_rest 에 그대로 넘긴다)
+func pose_cam() -> Camera3D:
+	return pose_camera if (opts.planar and pose_camera != null) else null
+
+
+## 포즈 카메라 = 렌더 카메라와 같은 크기(px 배율이 같아야 루트 이동을 그대로 옮길 수 있다)·같은 거리,
+## 각도만 effective_pose_yaw, pitch 0 (평면화는 늘 수평 시점에서 잰다).
+func _sync_pose_camera() -> void:
+	if pose_camera == null or camera == null:
+		return
+	pose_camera.size = camera.size
+	var center := _model_aabb.get_center()
+	var dist := _cam_dist()
+	var pos := center + view_basis(effective_pose_yaw(), 0.0) * Vector3(0, 0, dist)
+	pose_camera.global_transform = Transform3D(Basis(), pos).looking_at(center, Vector3.UP)
+	pose_camera.far = dist * 3.0
+
+
+## 창·익스포터·검사 도구가 쓰는 한 통로 — 평면화 여부까지 포함해 같은 값을 낸다.
+func project_local() -> Dictionary:
+	return rig.project_local(skeleton, camera, pose_cam())
+
+
+func capture_rest() -> void:
+	rig.capture_rest(skeleton, camera, pose_cam())
 
 
 ## 현재 카메라 상태를 통째로 직렬화한다. 장비/무기를 나중에 따로 구울 때
@@ -234,6 +290,8 @@ func serialize_view() -> Dictionary:
 		"supersample": opts.supersample,
 		"rest_anim": opts.rest_anim,
 		"rest_time": opts.rest_time,
+		"planar": opts.planar,                                   # 동작 평면화(각도를 pose_yaw 시점에서 잼)
+		"pose_yaw": effective_pose_yaw() if opts.planar else 0.0,
 		"camera_basis": [x.basis.x.x, x.basis.x.y, x.basis.x.z,
 						 x.basis.y.x, x.basis.y.y, x.basis.y.z,
 						 x.basis.z.x, x.basis.z.y, x.basis.z.z],
@@ -257,6 +315,11 @@ func apply_view(v: Dictionary) -> void:
 		opts.rest_anim = String(v["rest_anim"])
 	if v.has("rest_time"):
 		opts.rest_time = float(v["rest_time"])
+	if v.has("planar"):
+		opts.planar = bool(v["planar"])
+		if opts.planar and v.has("pose_yaw"):
+			opts.pose_yaw = float(v["pose_yaw"])
+	_sync_pose_camera()
 
 
 ## 레스트 포즈 실루엣이 화면에 꽉 차도록 카메라 크기/중심을 자동 보정한다.
@@ -282,6 +345,7 @@ func auto_fit(margin_px: int = 6, iterations: int = 3) -> void:
 		if absf(s - 1.0) < 0.01:
 			break
 		camera.size = maxf(camera.size / s, 0.01)
+	_sync_pose_camera()
 
 
 ## glTF 임포터는 "Idle_Loop" 같은 이름에서 _Loop 접미사를 떼고 loop_mode 로 바꾼다.
@@ -326,9 +390,10 @@ func set_pose(anim_name: String, time: float) -> void:
 
 ## 프리뷰에서 애니메이션을 실제로 돌려 보고 싶을 때만 켠다.
 ## 베이크 경로는 항상 set_pose() 를 거치므로 이 값과 무관하게 자세가 고정된다.
-func set_playback(on: bool) -> void:
+## 3D 프리뷰 재생 on/off. speed 는 배속(0 = 멈춘 채 스크럽만).
+func set_playback(on: bool, speed: float = 1.0) -> void:
 	if anim_player != null:
-		anim_player.speed_scale = 1.0 if on else 0.0
+		anim_player.speed_scale = speed if on else 0.0
 
 
 func set_rest_pose() -> void:

@@ -29,6 +29,15 @@ var layer_of: Dictionary = {}
 ## 늘이기(단축 보정)를 하지 않는 파트 집합 { part: true }. 프로필 규칙의 "stretch": false 에서 온다(예: 발).
 ## project_local() 의 s 가 항상 1 이라 2D 프리뷰와 베이크가 같이 따른다.
 var no_stretch: Dictionary = {}
+## 파트별 늘이기 제한 { part: float } — s 를 1/limit ~ limit 로 묶는다(예: 발 1.15). 없는 파트는 전체 제한(익스포터·프리뷰의 1.6).
+var stretch_limit: Dictionary = {}
+## 파트별 각도 안정화 { part: 단축률 문턱 }. 뼈가 카메라를 향해 화면 길이가 문턱 아래로 짧아지면
+## 2D 각도는 잡음이라, 부모 기준 회전을 단축률에 비례해 레스트(0) 쪽으로 누른다. 손·발용.
+var angle_fade: Dictionary = {}
+## 동작 평면화용 — 포즈 시점(보통 측면)에서 잰 레스트 각도/머리 위치 { part -> float / Vector2 }.
+## capture_rest(…, pose_cam) 이 채우고 project_local(…, pose_cam) 이 쓴다. 비어 있으면 평면화 안 함.
+var rest_angle_pose: Dictionary = {}
+var rest_head_pose: Dictionary = {}
 
 
 ## weighted: 정점을 실제로 지배하는 본 집합(bone idx -> true). 비어 있으면 무시한다.
@@ -199,32 +208,68 @@ func project(skel: Skeleton3D, cam: Camera3D) -> Dictionary:
 ## 베이크(애니메이션 커브 생성)와 2D 프리뷰가 같은 값을 써야 하므로 여기 둔다.
 ## { part -> { p:Vector2(로컬 위치), r:float(로컬 회전), s:float(축방향 배율),
 ##             d:float(깊이), z:int(뒤에서부터의 순번) } }
-func project_local(skel: Skeleton3D, cam: Camera3D) -> Dictionary:
+## pose_cam 을 주면 **동작 평면화**: 각도는 pose_cam(보통 측면) 시점에서 잰 "레스트 대비 회전"만 쓰고
+## 위치는 레스트 오프셋(강체 2D 리그), 늘이기는 1. 깊이(그리기 순서)만 렌더 카메라 값.
+## 3D 를 그대로 투영하면 팔이 카메라 쪽으로 오갈 때 짧아졌다 길어지며 종이가 접히듯 보이는데(페이퍼맨),
+## 2D 게임의 컷아웃은 팔다리가 화면 안에서만 돈다 — 그 느낌을 내려면 각도를 측면에서 재야 한다.
+## 화면 길이 ÷ 실제 뼈 길이(픽셀). 1 = 화면과 나란, 0 = 카메라를 향함. 직교 카메라라 위치와 무관.
+func _fore_of(pname: String, len2d: float, cam: Camera3D) -> float:
+	var p: Part = parts[pname]
+	var vp := cam.get_viewport()
+	if vp == null:
+		return 1.0
+	var ppu := float(vp.get_visible_rect().size.y) / maxf(cam.size, 1e-6)
+	return clampf(len2d / maxf(p.tail_local.length() * ppu, 1e-4), 0.0, 1.0)
+
+
+## angle_fade 파트: 단축률이 문턱 아래면 회전을 레스트(0) 쪽으로 누른다. 문턱 이상이면 그대로.
+func _fade_rot(pname: String, lr: float, fore: float) -> float:
+	if not angle_fade.has(pname):
+		return lr
+	var thr := float(angle_fade[pname])
+	if thr <= 0.0 or fore >= thr:
+		return lr
+	return lerp_angle(0.0, lr, fore / thr)
+
+
+func project_local(skel: Skeleton3D, cam: Camera3D, pose_cam: Camera3D = null) -> Dictionary:
 	var pr := project(skel, cam)
-	var world_rot := {}
-	var world_pos := {}
 	var out := {}
-	for pname in order:
-		if not pr.has(pname):
-			continue
-		var p: Part = parts[pname]
-		var d: Dictionary = pr[pname]
-		var wr: float = float(d["angle"]) - p.rest_angle
-		var wp: Vector2 = d["head2d"]
-		world_rot[pname] = wr
-		world_pos[pname] = wp
-		var lp := wp
-		var lr := wr
-		if p.parent != "" and world_pos.has(p.parent):
-			var qx := Transform2D(float(world_rot[p.parent]), world_pos[p.parent])
-			lp = qx.affine_inverse() * wp
-			lr = wr - float(world_rot[p.parent])
-		out[pname] = {
-			"p": lp,
-			"r": lr,
-			"s": 1.0 if no_stretch.has(pname) else float(d["len2d"]) / p.rest_len2d,
-			"d": float(d["depth"]),
-		}
+	if pose_cam != null and not rest_angle_pose.is_empty():
+		out = _project_local_planar(skel, pr, pose_cam)
+	else:
+		var world_rot := {}
+		var world_pos := {}
+		for pname in order:
+			if not pr.has(pname):
+				continue
+			var p: Part = parts[pname]
+			var d: Dictionary = pr[pname]
+			var wr: float = float(d["angle"]) - p.rest_angle
+			var wp: Vector2 = d["head2d"]
+			var lp := wp
+			var lr := wr
+			if p.parent != "" and world_pos.has(p.parent):
+				var qx := Transform2D(float(world_rot[p.parent]), world_pos[p.parent])
+				lp = qx.affine_inverse() * wp
+				lr = wr - float(world_rot[p.parent])
+			# 손·발이 카메라를 향해 짧아지면 각도가 잡음 → 레스트 쪽으로 누른다. 자식(발가락 분리 모드)도 이 값을 기준으로 삼는다
+			var faded := _fade_rot(pname, lr, _fore_of(pname, float(d["len2d"]), cam))
+			if faded != lr:
+				wr += faded - lr
+				lr = faded
+			world_rot[pname] = wr
+			world_pos[pname] = wp
+			var s := 1.0 if no_stretch.has(pname) else float(d["len2d"]) / p.rest_len2d
+			if stretch_limit.has(pname):
+				var lim := float(stretch_limit[pname])
+				s = clampf(s, 1.0 / lim, lim)
+			out[pname] = {
+				"p": lp,
+				"r": lr,
+				"s": s,
+				"d": float(d["depth"]),
+			}
 
 	# 깊이 -> z 순번. 레이어 단위로 정렬한 뒤 파트로 펼친다.
 	# (발가락은 발과 한 레이어라 항상 발 바로 위의 z 를 받는다)
@@ -331,6 +376,36 @@ func rest_layer_order() -> PackedStringArray:
 	return auto_layer_order(d)
 
 
+## 평면화 계산. pr = 렌더 카메라 투영(깊이용), pose_cam = 각도를 잴 시점.
+## 파트의 로컬 회전 = (포즈 시점 각도 − 포즈 시점 레스트 각도) − 부모의 같은 값. 위치 = 레스트 오프셋.
+## 루트 파트(힙)만 포즈 시점의 머리 위치 이동(px)을 그대로 받아 위아래 들썩임을 살린다.
+func _project_local_planar(skel: Skeleton3D, pr: Dictionary, pose_cam: Camera3D) -> Dictionary:
+	var pp := project(skel, pose_cam)
+	var wdelta := {}
+	var out := {}
+	for pname in order:
+		if not pr.has(pname) or not pp.has(pname) or not rest_angle_pose.has(pname):
+			continue
+		var p: Part = parts[pname]
+		var wd := wrapf(float(pp[pname]["angle"]) - float(rest_angle_pose[pname]), -PI, PI)
+		var lr: float = wd
+		var lp: Vector2
+		if p.parent != "" and wdelta.has(p.parent):
+			lr = wrapf(lr - float(wdelta[p.parent]), -PI, PI)
+			# 포즈 시점에서 카메라를 향하는 손·발은 각도 잡음 → 레스트 쪽으로(단축률은 포즈 시점 것)
+			var faded := _fade_rot(pname, lr, _fore_of(pname, float(pp[pname]["len2d"]), pose_cam))
+			if faded != lr:
+				wd += faded - lr
+				lr = faded
+			lp = p.rest_head2d - (parts[p.parent] as Part).rest_head2d
+		else:
+			var hp: Vector2 = pp[pname]["head2d"]
+			lp = p.rest_head2d + (hp - Vector2(rest_head_pose.get(pname, hp)))
+		wdelta[pname] = wd
+		out[pname] = {"p": lp, "r": lr, "s": 1.0, "d": float(pr[pname]["depth"])}
+	return out
+
+
 ## 파트별 단축률 { part -> 0~1 }. 1 = 뼈가 화면과 나란함, 0 = 카메라를 향함.
 ## (화면상 head~tail 길이 ÷ 실제 뼈 길이를 픽셀로 환산한 것)
 ## 레스트 포즈 고르기의 기준: 이 값이 낮은 파트는 그림이 짧고 얇게 찍혀서
@@ -346,7 +421,7 @@ func foreshortening(skel: Skeleton3D, cam: Camera3D, view_h_px: float) -> Dictio
 	return out
 
 
-func capture_rest(skel: Skeleton3D, cam: Camera3D) -> void:
+func capture_rest(skel: Skeleton3D, cam: Camera3D, pose_cam: Camera3D = null) -> void:
 	var pr := project(skel, cam)
 	for pname in pr.keys():
 		var p: Part = parts[pname]
@@ -355,3 +430,10 @@ func capture_rest(skel: Skeleton3D, cam: Camera3D) -> void:
 		p.rest_angle = d["angle"]
 		p.rest_len2d = maxf(float(d["len2d"]), 1e-4)
 		p.rest_depth = d["depth"]
+	rest_angle_pose.clear()
+	rest_head_pose.clear()
+	if pose_cam != null:
+		var pp := project(skel, pose_cam)
+		for pname in pp.keys():
+			rest_angle_pose[pname] = float(pp[pname]["angle"])
+			rest_head_pose[pname] = pp[pname]["head2d"]

@@ -13,6 +13,8 @@ extends SceneTree
 ## --split_toes 발가락을 발과 따로 꺾음(기본은 발에 합쳐 발은 한 장·발목 회전만).
 ## --fresh 같은 출력 폴더에 예전에 구운 애니를 이어 담지 않고 이번 애니만 남김.
 ## --offset_x=0 --offset_y=0 캐릭터 화면 위치 이동(px, +x 오른쪽, +y 위). --nofit 일 때 의미 있음.
+## --planar 동작 평면화(2D 게임식) · --pose_yaw=90 각도를 잴 시점(생략 = 자동 측면).
+## --outline=1 도트 아웃라인 두께(0~3) · --outline_color=000000 색(html) · --outline_parts 파트별 선(기본은 전체 실루엣).
 
 var _args := {}
 
@@ -58,6 +60,8 @@ func _run() -> void:
 	opts.pitch = float(_arg("pitch", "0"))
 	opts.ortho_size = float(_arg("ortho", "0"))
 	opts.view_offset = Vector2(float(_arg("offset_x", "0")), float(_arg("offset_y", "0")))
+	opts.planar = _args.has("planar")
+	opts.pose_yaw = float(_arg("pose_yaw", "999"))
 	opts.supersample = int(_arg("ss", "1"))
 	opts.bleed_rings = int(_arg("bleed", "1"))
 	opts.rest_anim = _arg("rest", "")
@@ -98,6 +102,9 @@ func _run() -> void:
 	ex.apply_stretch = not _args.has("nostretch")
 	ex.smooth_pixel = not _args.has("nosmooth")
 	ex.keep_previous = not _args.has("fresh")
+	ex.outline_px = int(_arg("outline", "0"))
+	ex.outline_color = Color(_arg("outline_color", "000000"))
+	ex.outline_whole = not _args.has("outline_parts")
 	var zo := _arg("zorder", "")
 	if zo != "":
 		ex.z_override = PackedStringArray(zo.split(",", false))

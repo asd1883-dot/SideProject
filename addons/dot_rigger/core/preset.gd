@@ -40,11 +40,27 @@ class_name DRPreset
 @export_group("포즈 / 애니메이션")
 @export var rest_anim: String = ""
 @export var rest_time: float = 0.0
+## 레스트 자세 자동(고른 동작에서 찾기). 켜져 있으면 rest_anim/rest_time 은 마지막으로 찾은 값.
+@export var rest_auto: bool = true
 @export var animations: PackedStringArray = PackedStringArray()
 @export var fps: int = 12
 @export var apply_stretch: bool = true
 ## 부드러운 도트 이동 셰이더(2D 프리뷰 + 베이크 씬 스프라이트). 끄면 예전처럼 nearest.
 @export var smooth_pixel: bool = true
+## 도트 아웃라인(카툰 선) 두께(도트 단위, 0 = 없음)와 색. 창 상단 바.
+@export var outline_px: int = 0
+@export var outline_color: Color = Color.BLACK
+## true = 전체 실루엣에만 선(기본), false = 파트마다 선
+@export var outline_whole: bool = true
+## 동작 평면화(2D 게임식). 켜면 팔다리 각도를 측면(pose_yaw) 시점에서 재고 위치는 강체·늘이기 없음.
+@export var planar: bool = false
+@export var pose_auto: bool = true
+@export var pose_yaw: float = 90.0
+
+@export_group("리깅 애니메이션 세트")
+## 자세 계열별 묶음. 각 항목 { "name", "rest_anim", "rest_time"(0~1), "animations": PackedStringArray }.
+## 하나라도 있으면 베이크가 세트 전부를 순서대로 <out_dir>/<name>/ 에 굽고 sets.json 을 남긴다.
+@export var sets: Array[Dictionary] = []
 
 @export_group("출력")
 @export var out_dir: String = "res://puppet"
