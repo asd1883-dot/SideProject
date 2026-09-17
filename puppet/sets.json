@@ -1,0 +1,108 @@
+{
+	"base": "res://puppet",
+	"sets": [
+		{
+			"animations": [
+				"Idle"
+			],
+			"dir": "Idle",
+			"dropped_reason": "",
+			"index": 0,
+			"kept": [],
+			"layer_order": [
+				"L_UpperArm",
+				"L_Hand",
+				"L_Forearm",
+				"L_Foot",
+				"L_Thigh",
+				"L_Calf",
+				"Torso",
+				"Head",
+				"Hips",
+				"R_Foot",
+				"R_Thigh",
+				"R_Calf",
+				"R_UpperArm",
+				"R_Forearm",
+				"R_Hand"
+			],
+			"name": "Idle",
+			"ok": true,
+			"rest_anim": "Idle",
+			"rest_time": 0.0666666666666667,
+			"rest_time_sec": 0.166666666666667,
+			"rig": "Idle/rig.json",
+			"scene": "Idle/puppet.tscn",
+			"z_order_manual": true
+		},
+		{
+			"animations": [
+				"Walk"
+			],
+			"dir": "Walk",
+			"dropped_reason": "",
+			"index": 1,
+			"kept": [],
+			"layer_order": [
+				"L_UpperArm",
+				"L_Hand",
+				"L_Forearm",
+				"L_Foot",
+				"L_Thigh",
+				"L_Calf",
+				"Torso",
+				"Head",
+				"Hips",
+				"R_Foot",
+				"R_Thigh",
+				"R_Calf",
+				"R_UpperArm",
+				"R_Forearm",
+				"R_Hand"
+			],
+			"name": "Walk",
+			"ok": true,
+			"rest_anim": "Walk",
+			"rest_time": 0.875,
+			"rest_time_sec": 1.16666670143604,
+			"rig": "Walk/rig.json",
+			"scene": "Walk/puppet.tscn",
+			"z_order_manual": true
+		},
+		{
+			"animations": [
+				"Sprint"
+			],
+			"dir": "Sprint",
+			"dropped_reason": "",
+			"index": 2,
+			"kept": [],
+			"layer_order": [
+				"L_UpperArm",
+				"L_Hand",
+				"L_Forearm",
+				"L_Foot",
+				"L_Thigh",
+				"L_Calf",
+				"Torso",
+				"Head",
+				"Hips",
+				"R_Foot",
+				"R_Thigh",
+				"R_Calf",
+				"R_UpperArm",
+				"R_Forearm",
+				"R_Hand"
+			],
+			"name": "Sprint",
+			"ok": true,
+			"rest_anim": "Sprint",
+			"rest_time": 0.625,
+			"rest_time_sec": 0.416666679084301,
+			"rig": "Sprint/rig.json",
+			"scene": "Sprint/puppet.tscn",
+			"z_order_manual": true
+		}
+	],
+	"version": 1
+}
