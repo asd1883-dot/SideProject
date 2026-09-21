@@ -52,6 +52,8 @@
    캐릭터마다 한 벌씩 만들어 두면 다시 맞출 필요가 없다.
    파일시스템 독에 그대로 보이고, 툴을 안 열어도 인스펙터에서 값을 볼 수 있다.
 3. **1. 모델** — `.glb` 선택 후 `모델 불러오기 / 파트 분리`
+   `추가 동작 폴더 (선택)` — 모델 파일 밖의 동작(Mixamo 에서 받은 `.fbx` 등)을 같은 캐릭터에 얹는다.
+   **파일 이름 = 동작 이름**. 자세한 건 아래 "다른 출처의 동작 얹기 (Mixamo)".
 4. **2. 시점** — 이 게임에서 캐릭터를 보여줄 **단 하나의 각도**를 정한다.
    프리셋(정측면/3⁄4/아이소…) 또는 Yaw·Pitch 직접 입력. **Pitch 양수 = 위에서 내려다봄.**
    3D 모드(2D 순서 꺼짐)에서는 프리뷰 오른쪽 위 **회전 기즈모**를 드래그해도 된다 — 값이 Yaw·Pitch 칸에 그대로 들어가서
@@ -82,6 +84,10 @@
    35~60% 어긋남 → `Walk 25%` 레스트면 5%). 레스트와 동작이 같은 자세 계열이어야 자연스럽다는 뜻이고, 자동은 그걸 보장한다.
    자동을 끄면 아래 칸(애니·%·`이 애니에서 자세 찾기`·`고른 동작에서 찾기`)을 직접 고른다 —
    예: 내보내지 않는 `Crawl_Enter` 를 엎드리기 세트의 레스트로 쓰고 싶을 때. ⚠ T포즈는 측면에서 팔이 카메라를 향해 13x13 덩어리가 된다.
+   **`지금 프레임을 레스트로`** — 재생을 `멈춤` 으로 두고 위치 슬라이더로 조각 그림이 가장 잘 나올 프레임을 고른 뒤 누르면
+   그 애니·시점이 레스트 칸에 들어간다(자동은 꺼짐). 눈으로 보고 고르는 가장 빠른 방법.
+   `(바인드 포즈)` 는 모델의 기본 자세(T포즈류)다 — 09-18 전에는 버그로 "마지막에 보던 프레임"이 찍혔다(02 C12).
+   레스트가 **같은 자세 계열**이면 3D 대비 3~4%, 다른 계열(서서 쏴 ↔ 엎드려쏴)이면 16~22% 어긋난다(09-18 실측).
    **엎드리기(Crawl)·수영처럼 몸 방향이 다른 동작은 서 있는 자세로 못 찍는다** — 그 계열 동작만 골라(레스트는 자동으로 그 계열에서 나옴)
    **세트**(6번)로 담아 폴더를 나눠 굽는다. 게임에서 상태에 따라 퍼펫 씬을 바꾼다.
    아래 베이크 옵션 `샘플 FPS`·`단축 보정`·`부드러운 도트 이동`·`동작 평면화` 도 베이크 결과에 들어간다.
@@ -138,7 +144,7 @@ Godot.exe --path <프로젝트> --resolution 320x200 \
 
 | 도구 | 용도 |
 |---|---|
-| `tools/bake_cli.gd` | 베이크. `--diag` 만 주면 본→파트 매핑만 출력(렌더 없음, headless 가능). `--nostretch` 단축 보정 끔 · `--nosmooth` 부드러운 도트 셰이더 끔 · `--split_toes` 발가락 따로 꺾기 · `--fresh` 같은 폴더의 예전 애니를 이어 담지 않음 · `--planar [--pose_yaw=90]` 동작 평면화 |
+| `tools/bake_cli.gd` | 베이크. `--diag` 만 주면 본→파트 매핑만 출력(렌더 없음, headless 가능). `--nostretch` 단축 보정 끔 · `--nosmooth` 부드러운 도트 셰이더 끔 · `--split_toes` 발가락 따로 꺾기 · `--fresh` 같은 폴더의 예전 애니를 이어 담지 않음 · `--planar [--pose_yaw=90]` 동작 평면화 · `--extra_anims=res://source3d/mixamo` 추가 동작 폴더 |
 | `tools/preview_cli.gd` | 생성된 `puppet.tscn` 을 실제로 재생해 프레임 캡처 |
 | `tools/equip_test_cli.gd` | 장비 부착 검증 (장비 스프라이트 머티리얼이 본체와 같은지, 전체 실루엣 씬이면 장비 밑깔개까지) |
 | `tools/compare_cli.gd` | 같은 각도에서 **3D 렌더 vs 2D 순서 합성**을 나란히 뽑고 불일치 %를 측정. 각도 고를 때 유용 |
@@ -148,6 +154,8 @@ Godot.exe --path <프로젝트> --resolution 320x200 \
 | `tools/anim_merge_check_cli.gd` | 같은 폴더에 여러 번 구우면 애니가 쌓이는지 · 같은 이름은 교체되는지 · 레스트 포즈가 다르면 섞지 않는지 · 유지를 끄면 이번 것만 남는지 |
 | `tools/sets_check_cli.gd` | 리깅 애니메이션 세트 2개(서기 Idle / 엎드리기 Crawl_Enter 16%)를 한 번에 구우면 세트마다 자기 레스트로 폴더가 생기고 sets.json 이 순서대로 적히는지 |
 | `tools/planar_check_cli.gd` | 동작 평면화로 구우면 늘이기 전부 1·자식 위치 고정·팔다리 회전 폭 유지·rig.json 에 planar/pose_yaw, 평면화 끈 애니는 같은 폴더에 못 섞이는지 |
+| `tools/retarget_check_cli.gd` | Mixamo 접목 검사 — 표준 뼈대로 다시 가져온 모델의 기존 동작이 원본과 같은 자세인지 · `source3d/mixamo` 파일이 전부 경고 없이 얹히는지 · 구워지는지. `source3d` 가 없으면 건너뜀 |
+| `tools/make_bonemap_cli.gd` | 리타깃용 BoneMap(.tres) 생성(`--kind=mixamo --prefix=mixamorig9_` / `--kind=ual`). headless 가능 |
 | `tools/ui_smoke_cli.gd` | 에디터 창 UI 코드 경로 + 배치 스모크 테스트 |
 
 ## 그리기 순서 (어느 파트를 앞에 그릴지)
@@ -233,6 +241,42 @@ $Puppet.equip(item)
 **장비 이미지를 3D 에서 구울 때**는 캐릭터와 **완전히 같은 카메라 / 같은 레스트 포즈**
 여야 정렬된다. 그래서 `rig.json` 의 `view` 에 카메라 트랜스폼까지 통째로 저장해 둔다
 (`DRBaker.apply_view()` 로 복원).
+
+## 다른 출처의 동작 얹기 (Mixamo)
+
+Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonProfileHumanoid** 다. 차이는 Unity 는 실행 중에 Avatar 가
+바꿔 주고, Godot 는 **가져올 때** 본 이름과 기준 자세를 표준 휴머노이드로 바꿔 저장한다는 것. 그래서 **캐릭터 파일과 동작 파일
+양쪽에** 지정해야 한다. 전부 Godot 에디터 안에서 하고 다른 프로그램은 필요 없다(FBX 도 Godot 가 직접 읽는다).
+
+이 저장소에는 이미 해 둔 것이 `source3d/` 에 있다:
+
+| 파일 | 뜻 |
+|---|---|
+| `source3d/UAL1_humanoid.glb` | `models/UAL1.glb` 와 같은 파일. 임포트 설정에 `bonemap_ual.tres` 가 지정돼 본 이름이 표준(`Hips`, `LeftUpperArm` …)이다. 기존 동작 120개는 그대로(관절 위치 차이 5mm 미만 — `retarget_check_cli`) |
+| `source3d/mixamo/*.fbx` | Mixamo 동작(스킨 없이 받은 것). 임포트 설정에 `bonemap_mixamo.tres` 지정 |
+| `source3d/bonemap_ual.tres` · `bonemap_mixamo.tres` | 짝 맞춤 표. `tools/make_bonemap_cli.gd` 로 다시 만들 수 있다 |
+
+**Dot Rigger 에서 쓰기**: 모델 = `res://source3d/UAL1_humanoid.glb`, 추가 동작 폴더 = `res://source3d/mixamo` → `모델 불러오기`.
+동작 목록에 `Firing_Rifle`, `Rifle_Aiming_Idle` … 이 기존 120개와 같이 뜬다. 프리셋에 폴더도 저장된다.
+
+**Mixamo 동작을 더 받을 때**
+
+1. Mixamo 에서 **같은 캐릭터를 고른 채로**, `Without Skin`, 이동 동작은 **`In Place` 체크**해서 FBX 로 받는다.
+   (`In Place` 를 안 켜면 캐릭터가 화면 밖으로 걸어 나간다. 게임에서는 코드가 위치를 옮긴다.)
+2. 파일 이름을 **쓰고 싶은 동작 이름**으로 바꿔(`Rifle_Reload.fbx`) `source3d/mixamo/` 에 넣는다. Mixamo 는 파일마다
+   동작 이름이 전부 `mixamo.com` 이라 파일 이름을 동작 이름으로 쓴다(공백은 `_` 로 바뀜).
+3. 파일시스템 독에서 그 파일을 더블클릭 → 고급 임포트 설정 → 왼쪽 트리의 `Skeleton3D` → 오른쪽 `Retarget` 의 `Bone Map` 칸 →
+   `불러오기` → `source3d/bonemap_mixamo.tres` → `다시 가져오기`. 사람 모양 그림의 점이 전부 초록이면 된 것.
+4. Dot Rigger 창에서 `모델 불러오기` 를 다시 누른다. 짜 둔 **그리기 순서·고른 동작·레스트는 그대로 남는다**
+   (상태줄에 `· 유지: 그리기 순서, 고른 동작 N개`). 모델 칸을 `models/UAL1.glb` 에서 `source3d/UAL1_humanoid.glb` 로 바꿀 때도 마찬가지.
+
+- 상태줄에 `⚠ 추가 동작 경고 … 뼈 이름이 모델과 하나도 안 맞아 뺌` 이 뜨면 3번을 안 했거나 **본 이름 접두사가 다른 것**이다.
+  Mixamo 는 고른 캐릭터에 따라 `mixamorig:` · `mixamorig9:` 처럼 번호가 붙는다(지금 파일들은 `mixamorig9`). 접두사가 다른 파일은
+  `make_bonemap_cli.gd -- --kind=mixamo --prefix=mixamorig_ --out=...` 로 표를 하나 더 만들거나, 3번에서 `새 BoneMap` 을 골라 자동 짝 맞춤을 쓴다.
+- 되풀이 재생할 동작(조준 대기 등)은 고급 임포트 설정의 그 애니메이션에서 `Loop Mode` 를 켠다.
+- 두 캐릭터의 체형이 달라 **양손 간격이 원본과 다르다**(UAL 은 어깨가 좁아 Mixamo 원본보다 25% 좁음). 동작 내내 일정하므로
+  소총이 손 사이에서 미끄러지지는 않는다 — 소총 그림을 이 캐릭터의 손 간격에 맞춰 그리면 된다.
+- 검사: `tools/retarget_check_cli.gd` (기존 동작 보존 · 파일 전부 경고 없이 얹힘 · 힙 높이 · 굽기).
 
 ## 다른 리그 / 다른 종류
 

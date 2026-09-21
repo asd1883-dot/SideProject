@@ -46,7 +46,8 @@ static func humanoid(split_toes: bool = false) -> DRPartProfile:
 		{"pattern": "(lowerarm|forearm|fore_arm)", "part": "Forearm", "sided": true},
 		# 손·발처럼 짧은 끝 파트는 카메라를 향하면(단축률 낮음) 2D 각도가 잡음처럼 튄다 → angle_fade 아래에서는
 		# 부모 기준 회전을 레스트 쪽으로 눌러 둔다(단축률 0 이면 회전 0, 0.45 이상이면 그대로).
-		{"pattern": "(hand|index|middle|pinky|ring|thumb|finger)", "part": "Hand", "sided": true, "angle_fade": 0.45},
+		# little = Godot 표준 휴머노이드(SkeletonProfileHumanoid)의 새끼손가락 이름. 리타깃한 모델은 본 이름이 이 표준으로 바뀐다
+		{"pattern": "(hand|index|middle|pinky|little|ring|thumb|finger)", "part": "Hand", "sided": true, "angle_fade": 0.45},
 		{"pattern": "(thigh|upleg|up_leg|upperleg)", "part": "Thigh", "sided": true},
 		{"pattern": "(calf|shin|lowerleg|^leg)", "part": "Calf", "sided": true},
 		toe_rule,   # 발 규칙보다 먼저

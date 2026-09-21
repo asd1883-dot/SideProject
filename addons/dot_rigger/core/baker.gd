@@ -33,7 +33,13 @@ class Options:
 	## pose_yaw 가 ±360 밖(기본 999)이면 자동 = 렌더 yaw 에 가까운 측면(±90).
 	var planar: bool = false
 	var pose_yaw: float = 999.0
+	## 추가 동작 폴더(res://). 모델 파일 밖의 동작(예: Mixamo FBX)을 같은 캐릭터에 얹는다. "" = 안 씀.
+	## 폴더 안의 .fbx/.glb/.gltf/.tscn/.scn/.res/.tres 를 읽고, 동작이 하나뿐인 파일은 **파일 이름 = 동작 이름**.
+	## 뼈 이름이 모델과 같아야 한다 — 뼈대가 다른 출처(Mixamo 등)는 양쪽 임포트 설정에 BoneMap(리타깃)을 지정할 것.
+	var extra_anim_dir: String = ""
 
+
+const EXTRA_ANIM_EXT := ["fbx", "glb", "gltf", "tscn", "scn", "res", "tres"]
 
 var opts: Options
 var profile: DRPartProfile
@@ -46,6 +52,9 @@ var model_root: Node3D
 var skeleton: Skeleton3D
 var anim_player: AnimationPlayer
 var part_nodes: Dictionary = {}    # part -> MeshInstance3D
+## 추가 동작 폴더에서 얹은 동작 이름 / 그 과정의 경고(창 상태줄·CLI 가 보여 준다)
+var extra_anims: PackedStringArray = PackedStringArray()
+var extra_anim_warnings: PackedStringArray = PackedStringArray()
 
 var _host: Node
 var _model_aabb: AABB
@@ -66,6 +75,10 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 		push_error("[DotRigger] Skeleton3D 를 찾지 못했습니다.")
 		return false
 	anim_player = _find_node(model_root, "AnimationPlayer") as AnimationPlayer
+	extra_anims = PackedStringArray()
+	extra_anim_warnings = PackedStringArray()
+	if opts.extra_anim_dir.strip_edges() != "":
+		_load_extra_anims(opts.extra_anim_dir.strip_edges())
 	if anim_player != null:
 		# 시간이 저절로 흐르지 않게 한다. 안 그러면 파트 15장을 한 장씩 찍는 동안
 		# 자세가 계속 움직여서 서로 어긋난 스프라이트가 나온다.
@@ -112,6 +125,111 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 	_build_viewport()
 	host.add_child(viewport)
 	return true
+
+
+## 추가 동작 폴더의 동작을 모델의 AnimationPlayer 기본 라이브러리에 얹는다(메모리에서만 — 파일은 안 바뀐다).
+## - 가져온(캐시된) 라이브러리를 직접 고치면 에디터 세션 내내 남으므로 얕은 사본에 담는다.
+## - 트랙의 노드 경로는 출처마다 다르므로(Skeleton3D / Armature/Skeleton3D / %GeneralSkeleton) 이 모델의 뼈대 경로로 고쳐 쓴다.
+## - 뼈 이름은 고쳐 주지 않는다. 뼈대가 다른 출처는 양쪽 임포트 설정의 BoneMap(리타깃)으로 이름을 맞춰 와야 한다.
+func _load_extra_anims(dir_path: String) -> void:
+	var d := DirAccess.open(dir_path)
+	if d == null:
+		extra_anim_warnings.append("추가 동작 폴더를 열 수 없습니다: %s" % dir_path)
+		return
+	if anim_player == null:
+		# 동작이 없는 모델(스킨만 받은 캐릭터)도 쓸 수 있게 플레이어를 만들어 준다
+		anim_player = AnimationPlayer.new()
+		anim_player.name = "AnimationPlayer"
+		model_root.add_child(anim_player)
+	var lib: AnimationLibrary
+	if anim_player.has_animation_library(""):
+		lib = anim_player.get_animation_library("").duplicate(false) as AnimationLibrary
+		anim_player.remove_animation_library("")
+	else:
+		lib = AnimationLibrary.new()
+	anim_player.add_animation_library("", lib)
+
+	var ap_root := anim_player.get_node_or_null(anim_player.root_node)
+	var skel_path := _rel_path(ap_root, skeleton)
+
+	var files := Array(d.get_files())
+	files.sort()
+	for f in files:
+		var fname := String(f)
+		if not EXTRA_ANIM_EXT.has(fname.get_extension().to_lower()):
+			continue
+		var path := dir_path.path_join(fname)
+		if not ResourceLoader.exists(path):
+			extra_anim_warnings.append("%s — 아직 가져오기(임포트)가 안 됨" % fname)
+			continue
+		var res := ResourceLoader.load(path)
+		var found := {}   # 원래 이름 -> Animation
+		if res is PackedScene:
+			var inst := (res as PackedScene).instantiate()
+			var ap := _find_node(inst, "AnimationPlayer") as AnimationPlayer
+			if ap != null:
+				for an in ap.get_animation_list():
+					if String(an) != "RESET":
+						found[String(an)] = ap.get_animation(an).duplicate(true)
+			inst.free()
+		elif res is AnimationLibrary:
+			for an in (res as AnimationLibrary).get_animation_list():
+				if String(an) != "RESET":
+					found[String(an)] = (res as AnimationLibrary).get_animation(an).duplicate(true)
+		elif res is Animation:
+			found[fname.get_basename()] = (res as Animation).duplicate(true)
+		if found.is_empty():
+			extra_anim_warnings.append("%s — 동작이 없음" % fname)
+			continue
+		for src_name in found.keys():
+			var anim: Animation = found[src_name]
+			# 동작이 하나뿐인 파일(Mixamo 는 전부 "mixamo.com")은 파일 이름이 곧 동작 이름
+			var new_name := _clean_anim_name(fname.get_basename() if found.size() == 1 else String(src_name))
+			var bone_tracks := 0
+			var missing := 0
+			for ti in anim.get_track_count():
+				var sub := anim.track_get_path(ti).get_concatenated_subnames()
+				if sub == "":
+					continue
+				bone_tracks += 1
+				if skeleton.find_bone(sub) < 0:
+					missing += 1
+					continue
+				anim.track_set_path(ti, NodePath("%s:%s" % [skel_path, sub]))
+			if bone_tracks == 0 or missing == bone_tracks:
+				extra_anim_warnings.append("%s — 뼈 이름이 모델과 하나도 안 맞아 뺌. 모델과 이 파일 양쪽 임포트 설정에 BoneMap(리타깃)을 지정했는지 확인" % fname)
+				continue
+			if missing > 0:
+				extra_anim_warnings.append("%s — 모델에 없는 뼈 트랙 %d/%d개(그 트랙은 무시됨)" % [new_name, missing, bone_tracks])
+			if lib.has_animation(new_name):
+				extra_anim_warnings.append("%s — 모델에 같은 이름의 동작이 있어 추가 동작으로 바꿈" % new_name)
+				lib.remove_animation(new_name)
+			lib.add_animation(new_name, anim)
+			extra_anims.append(new_name)
+	for w in extra_anim_warnings:
+		push_warning("[DotRigger] 추가 동작: " + w)
+
+
+## AnimationLibrary 가 받지 않는 글자( / : , [ )와 공백을 _ 로
+static func _clean_anim_name(s: String) -> String:
+	var out := s.strip_edges().replace(" ", "_")
+	for ch in ["/", ":", ",", "["]:
+		out = out.replace(ch, "_")
+	return out
+
+
+## from_root 에서 node 까지의 상대 경로(트리에 안 붙어 있어도 되게 부모를 직접 거슬러 오른다)
+static func _rel_path(from_root: Node, node: Node) -> String:
+	if from_root == null or node == null or from_root == node:
+		return "."
+	var names := PackedStringArray()
+	var n := node
+	while n != null and n != from_root:
+		names.insert(0, String(n.name))
+		n = n.get_parent()
+	if n == null:
+		return "%" + String(node.name)   # 조상이 아님 — 고유 이름에 기댄다
+	return "/".join(names)
 
 
 func _apply_dot_material(mi: MeshInstance3D, shader: Shader) -> void:
@@ -396,11 +514,18 @@ func set_playback(on: bool, speed: float = 1.0) -> void:
 		anim_player.speed_scale = speed if on else 0.0
 
 
+## 레스트 자세로 세운다. rest_anim 이 비었거나 모델에 없는 이름이면 **진짜 바인드 포즈**(뼈대의 레스트)로 되돌린다.
+## (02 C12: 예전엔 stop() 만 해서 마지막에 보던 프레임이 그대로 남았고, 그게 레스트로 찍혔다.)
 func set_rest_pose() -> void:
-	if opts.rest_anim != "":
+	if opts.rest_anim != "" and resolve_anim(opts.rest_anim) != "":
 		set_pose(opts.rest_anim, opts.rest_time)
-	elif anim_player != null:
+		return
+	if anim_player != null:
 		anim_player.stop()
+	if skeleton != null:
+		skeleton.reset_bone_poses()
+		if skeleton.has_method("force_update_all_bone_transforms"):
+			skeleton.call("force_update_all_bone_transforms")
 
 
 ## 파트 하나만 보이게 하고 한 장 렌더. 나머지는 숨기므로

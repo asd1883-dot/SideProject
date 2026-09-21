@@ -14,6 +14,7 @@ extends SceneTree
 ## --fresh 같은 출력 폴더에 예전에 구운 애니를 이어 담지 않고 이번 애니만 남김.
 ## --offset_x=0 --offset_y=0 캐릭터 화면 위치 이동(px, +x 오른쪽, +y 위). --nofit 일 때 의미 있음.
 ## --planar 동작 평면화(2D 게임식) · --pose_yaw=90 각도를 잴 시점(생략 = 자동 측면).
+## --extra_anims=res://폴더 모델 파일 밖의 동작(Mixamo FBX 등)을 얹음. 파일 이름 = 동작 이름.
 ## --outline=1 도트 아웃라인 두께(0~3) · --outline_color=000000 색(html) · --outline_parts 파트별 선(기본은 전체 실루엣).
 
 var _args := {}
@@ -69,6 +70,7 @@ func _run() -> void:
 	opts.light_bands = int(_arg("bands", "3"))
 	opts.color_levels = int(_arg("levels", "0"))
 	opts.alpha_threshold = float(_arg("alpha", "0.5"))
+	opts.extra_anim_dir = _arg("extra_anims", "")
 
 	var baker := DRBaker.new()
 	if not baker.setup(root, scene, profile, opts):
@@ -85,6 +87,10 @@ func _run() -> void:
 			int(baker.split.tri_counts.get(pname, 0))])
 	if baker.split.unmapped_bones.size() > 0:
 		print("[DotRigger] 매핑 안 된 본: ", baker.split.unmapped_bones)
+	if opts.extra_anim_dir != "":
+		print("[DotRigger] 추가 동작 %d개: %s" % [baker.extra_anims.size(), ", ".join(baker.extra_anims)])
+		for w in baker.extra_anim_warnings:
+			print("[DotRigger] ⚠ 추가 동작: ", w)
 
 	await process_frame
 	await process_frame

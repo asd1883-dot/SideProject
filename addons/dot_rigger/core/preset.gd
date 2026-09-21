@@ -9,6 +9,8 @@ class_name DRPreset
 ## 한 번 맞춰 놓은 걸 파일로 남겨 두고 다시 불러 쓰는 용도.
 
 @export var model_path: String = ""
+## 추가 동작 폴더(res://). 모델 파일 밖의 동작(Mixamo FBX 등)을 같은 캐릭터에 얹는다. 파일 이름 = 동작 이름. "" = 안 씀
+@export_dir var extra_anim_dir: String = ""
 ## 사람이 알아보기 위한 메모. 동작에는 영향 없음.
 @export_multiline var note: String = ""
 

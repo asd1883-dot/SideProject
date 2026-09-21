@@ -65,7 +65,7 @@ func _run() -> void:
 		"_ambient", "_alpha", "_levels", "_bleed", "_rest_anim", "_anim_list", "_fps", "_stretch",
 		"_smooth", "_out_edit", "_keep_anims", "_bake_btn", "_z_auto", "_parts_tree",
 		"_off_x", "_off_y", "_play_anim", "_speed", "_scrub", "_sets_list", "_set_name",
-		"_planar", "_pose_auto", "_pose_yaw", "_rest_auto", "_outline_px", "_outline_color", "_outline_whole"]
+		"_planar", "_pose_auto", "_pose_yaw", "_rest_auto", "_outline_px", "_outline_color", "_outline_whole", "_extra_edit"]
 	var tip_missing := []
 	for tip_n in tip_names:
 		if (win.get(tip_n) as Control).tooltip_text == "":
@@ -1295,6 +1295,150 @@ func _run() -> void:
 	await win._refresh_preview()
 	while win._busy:
 		await process_frame
+
+	# ---- "(바인드 포즈)" 는 진짜 바인드 포즈여야 한다 + `지금 프레임을 레스트로` ----
+	# 09-18 사용자 "바인드 포즈로 해 놓으면 다 맞네? 버그임?" — 예전엔 마지막에 보던 프레임이 그대로 레스트로 찍혔다(02 C12)
+	win._rest_auto.button_pressed = false
+	win._mode_2d.button_pressed = false
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	win.baker.set_pose("Jog_Fwd", 0.2)          # 뭔가를 보고 있던 상황
+	win._rest_anim.select(0)                      # (바인드 포즈)
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if win._current_opts().rest_anim != "":
+		printerr("(바인드 포즈)인데 rest_anim 이 '%s'" % win._current_opts().rest_anim); quit(1); return
+	win.baker.set_pose("Jog_Fwd", 0.2)
+	win.baker.set_rest_pose()
+	var bp_sk: Skeleton3D = win.baker.skeleton
+	var bp_off := 0
+	for bi in bp_sk.get_bone_count():
+		if not bp_sk.get_bone_pose(bi).is_equal_approx(bp_sk.get_bone_rest(bi)):
+			bp_off += 1
+	if bp_off > 0:
+		printerr("(바인드 포즈)로 세웠는데 본 %d개가 레스트와 다름 — 보던 프레임이 남음" % bp_off); quit(1); return
+	# 지금 프레임을 레스트로: 재생 애니 Walk 의 40% 지점
+	win._picked_anims.clear()
+	win._picked_anims["Walk"] = true
+	win._fill_anim_list()
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var rn_an: String = win._current_play_anim()
+	var rn_len: float = win.baker.anim_player.get_animation(rn_an).length
+	win._play_t = rn_len * 0.4
+	win._rest_auto.button_pressed = true          # 자동이 켜져 있어도 눌리면 꺼져야 한다
+	while win._busy:
+		await process_frame
+	win._on_rest_from_current()
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if rn_an != "Walk" or win._rest_auto.button_pressed or win._rest_anim.disabled \
+			or win._rest_anim.get_item_text(win._rest_anim.selected) != "Walk" or absf(win._rest_time.value - 0.4) > 0.006 \
+			or absf(win.baker.opts.rest_time - rn_len * win._rest_time.value) > 0.001:
+		printerr("지금 프레임을 레스트로 이상: 재생 애니 %s, 자동 %s, 레스트 %s %.2f, opts %.3f" % [rn_an, win._rest_auto.button_pressed,
+			win._rest_anim.get_item_text(win._rest_anim.selected), win._rest_time.value, win.baker.opts.rest_time]); quit(1); return
+	print("31) 바인드 포즈 · 지금 프레임 OK — (바인드 포즈) = 본 %d개 전부 레스트(보던 Jog_Fwd 프레임 안 남음) · `지금 프레임을 레스트로` → 자동 꺼짐, Walk 40%%, opts %.3f초" % [bp_sk.get_bone_count(), win.baker.opts.rest_time])
+	win._picked_anims.clear()
+	win._fill_anim_list()
+	for i in win._rest_anim.item_count:
+		if win._rest_anim.get_item_text(i) == "Idle":
+			win._rest_anim.select(i)
+	win._rest_time.value = 0.0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+
+	# ---- 추가 동작 폴더: 모델 파일 밖의 동작을 같은 캐릭터에 얹는다(Mixamo 접목의 통로) ----
+	# Mixamo 파일에 기대지 않으려고 Walk 사본으로 시험 폴더를 만든다: 노드 경로를 엉뚱하게 바꾼 것(경로 고쳐 쓰기 검사) +
+	# 없는 뼈 트랙 하나(경고 검사) / 뼈 이름이 전부 틀린 것(빼고 경고)
+	var xa_dir := "res://puppet_test/_extra_anims"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(xa_dir))
+	var xa_walk: Animation = win.baker.anim_player.get_animation(win.baker.resolve_anim("Walk"))
+	var xa_good := xa_walk.duplicate(true) as Animation
+	var xa_bad := xa_walk.duplicate(true) as Animation
+	for xa_ti in xa_good.get_track_count():
+		var xa_sub := xa_good.track_get_path(xa_ti).get_concatenated_subnames()
+		xa_good.track_set_path(xa_ti, NodePath("Some/Other/Rig:%s" % xa_sub))
+		xa_bad.track_set_path(xa_ti, NodePath("Some/Other/Rig:nobone_%d" % xa_ti))
+	var xa_extra_ti := xa_good.add_track(Animation.TYPE_ROTATION_3D)
+	xa_good.track_set_path(xa_extra_ti, NodePath("Some/Other/Rig:bone_not_in_model"))
+	xa_good.rotation_track_insert_key(xa_extra_ti, 0.0, Quaternion.IDENTITY)
+	ResourceSaver.save(xa_good, xa_dir.path_join("Test Extra.res"))   # 공백은 _ 로 바뀌어야 한다
+	ResourceSaver.save(xa_bad, xa_dir.path_join("Bad_Bones.res"))
+	var xa_before: int = win._all_anims.size()
+	# 다시 불러와도 작업 상태(수동 그리기 순서 · 고른 동작 · 레스트)가 남아야 한다 — 09-18 사용자 "그리기 순서가 초기화되네"
+	win._rest_auto.button_pressed = false
+	win._z_auto.button_pressed = false
+	win._z_list.move_item(0, win._z_list.item_count - 1)   # 맨 뒤 줄을 맨 앞으로 — 기본 순서와 달라진다
+	var xa_order: PackedStringArray = win._order_from_list()
+	win._picked_anims.clear()
+	win._picked_anims["Walk"] = true
+	win._picked_anims["Jog_Fwd"] = true
+	win._fill_anim_list()
+	for i in win._rest_anim.item_count:
+		if win._rest_anim.get_item_text(i) == "Walk":
+			win._rest_anim.select(i)
+	win._rest_time.value = 0.25
+	# 위에서 값을 바꾸며 프리뷰 갱신이 걸렸다 — 바쁜 동안의 _on_load() 는 무시되므로 끝나길 기다린다
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	win._extra_edit.text = xa_dir
+	win._on_load()
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if win._z_auto.button_pressed or win._order_from_list() != xa_order:
+		printerr("다시 불러오니 그리기 순서가 초기화됨: 자동 %s, %s → %s" % [win._z_auto.button_pressed, str(xa_order.slice(0, 3)), str(win._order_from_list().slice(0, 3))]); quit(1); return
+	var xa_picked: PackedStringArray = win._picked_anim_names()
+	if xa_picked.size() != 2 or not xa_picked.has("Walk") or not xa_picked.has("Jog_Fwd") \
+			or win._rest_anim.get_item_text(win._rest_anim.selected) != "Walk" or absf(win._rest_time.value - 0.25) > 0.001:
+		printerr("다시 불러오니 고른 동작/레스트가 초기화됨: %s · 레스트 %s %.2f" % [str(xa_picked), win._rest_anim.get_item_text(win._rest_anim.selected), win._rest_time.value]); quit(1); return
+	if not win._status.text.contains("유지: 그리기 순서"):
+		printerr("상태줄에 유지 안내가 없음: %s" % win._status.text); quit(1); return
+	if not win._all_anims.has("Test_Extra") or win._all_anims.has("Bad_Bones") or win._all_anims.size() != xa_before + 1 \
+			or Array(win.baker.extra_anims) != ["Test_Extra"]:
+		printerr("추가 동작이 목록에 안 들어옴: 애니 %d → %d, extra %s" % [xa_before, win._all_anims.size(), str(win.baker.extra_anims)]); quit(1); return
+	if win.baker.extra_anim_warnings.size() != 2 or not win._status.text.contains("추가 동작 1개"):
+		printerr("추가 동작 경고/상태줄 이상: %s / %s" % [str(win.baker.extra_anim_warnings), win._status.text]); quit(1); return
+	# 경로를 고쳐 썼다면 Walk 와 똑같은 자세가 나온다(안 고쳤으면 트랙이 허공을 가리켜 레스트 자세 그대로)
+	var xa_bone: int = win.baker.skeleton.find_bone(win.baker.skeleton.get_bone_name((win.baker.rig.parts["L_Calf"] as DRRigModel.Part).root_bone))
+	win.baker.set_pose("Walk", 0.3)
+	var xa_p0: Transform3D = win.baker.skeleton.get_bone_global_pose(xa_bone)
+	win.baker.set_rest_pose()
+	win.baker.set_pose("Test_Extra", 0.3)
+	var xa_p1: Transform3D = win.baker.skeleton.get_bone_global_pose(xa_bone)
+	if not xa_p0.is_equal_approx(xa_p1):
+		printerr("추가 동작의 자세가 원본(Walk)과 다름 — 트랙 경로를 못 고쳐 씀"); quit(1); return
+	# 가져온 모델의 라이브러리는 그대로여야 한다(메모리에서 사본에만 얹음)
+	var xa_fresh := (load("res://models/UAL1.glb") as PackedScene).instantiate()
+	var xa_fresh_ap := xa_fresh.get_node("AnimationPlayer") as AnimationPlayer
+	var xa_leaked := xa_fresh_ap.has_animation("Test_Extra")
+	xa_fresh.free()
+	if xa_leaked:
+		printerr("추가 동작이 가져온 모델의 라이브러리에 새어 들어감"); quit(1); return
+	# 프리셋 왕복: 폴더가 저장되고, 빈 프리셋을 적용하면 칸이 비고 모델을 다시 불러 목록에서 빠진다
+	var xa_preset: DRPreset = win._collect_preset()
+	if xa_preset.extra_anim_dir != xa_dir or win._current_opts().extra_anim_dir != xa_dir:
+		printerr("추가 동작 폴더가 프리셋/옵션에 안 담김"); quit(1); return
+	xa_preset.extra_anim_dir = ""
+	win._apply_preset(xa_preset)
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if win._extra_edit.text != "" or win._all_anims.has("Test_Extra") or win._all_anims.size() != xa_before:
+		printerr("추가 동작 폴더를 비운 프리셋을 적용했는데 안 빠짐"); quit(1); return
+	print("30) 추가 동작 폴더 OK — 애니 %d → %d(Test_Extra, 공백→_), 경고 2건(없는 뼈 트랙 · 뼈 이름 전부 틀린 파일은 뺌), 자세 = 원본 Walk, 가져온 라이브러리 안 건드림, 프리셋 왕복 · 다시 불러와도 수동 그리기 순서·고른 동작 2개·레스트 Walk 25%% 유지" % [xa_before, xa_before + 1])
 
 	# ---- 창 자체를 캡처해서 배치 검사 ----
 	win._show_composite()

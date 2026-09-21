@@ -14,6 +14,7 @@ var model_path: String = ""
 
 # --- 위젯 ---
 var _model_edit: LineEdit
+var _extra_edit: LineEdit   # 추가 동작 폴더(선택) — 모델 파일 밖의 동작(Mixamo FBX 등)
 var _preview: TextureRect
 var _pv_area: Control
 var _zoom_label: Button
@@ -220,6 +221,23 @@ func _build_ui() -> void:
 	mrow.add_child(browse)
 	_tip(browse, "파일 탐색기로 모델 고르기")
 	left.add_child(mrow)
+	var xrow := HBoxContainer.new()
+	_extra_edit = LineEdit.new()
+	_extra_edit.placeholder_text = "추가 동작 폴더 (선택)"
+	_extra_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	xrow.add_child(_extra_edit)
+	_tip(_extra_edit, "모델 파일 밖에 있는 동작(예: Mixamo 에서 받은 .fbx)을 이 캐릭터에 얹습니다. 비워 두면 안 씁니다.\n" \
+		+ "폴더(res://) 안의 .fbx/.glb/.tscn/.res 를 읽고, 동작이 하나뿐인 파일은 **파일 이름이 곧 동작 이름**입니다.\n" \
+		+ "뼈대가 다른 출처(Mixamo 등)는 모델과 그 파일 양쪽의 임포트 설정(Skeleton3D → Retarget → Bone Map)에\n" \
+		+ "BoneMap + SkeletonProfileHumanoid 를 지정해 뼈 이름을 표준으로 맞춰 와야 합니다(Unity 의 Humanoid 에 해당).\n" \
+		+ "폴더를 바꾸거나 파일을 추가했으면 아래 `모델 불러오기` 를 다시 누르세요.")
+	_extra_edit.text_submitted.connect(func(_t): _on_load())
+	var xbrowse := Button.new()
+	xbrowse.text = "..."
+	xbrowse.pressed.connect(_on_browse_extra)
+	xrow.add_child(xbrowse)
+	_tip(xbrowse, "추가 동작 폴더 고르기")
+	left.add_child(xrow)
 	var load_btn := Button.new()
 	load_btn.text = "모델 불러오기 / 파트 분리"
 	load_btn.pressed.connect(_on_load)
@@ -408,6 +426,14 @@ func _build_ui() -> void:
 	_tip(find_here, "위에서 고른 애니메이션 **안에서** 가장 좋은 시점(%)만 찾습니다. 애니는 바뀌지 않습니다.\n" + find_tip \
 		+ "엎드리기·수영 계열을 따로 구울 때: 그 계열 애니를 위에 고르고 이 버튼.")
 	_tip(find_picked, "고른 동작들(없으면 전체)을 훑어 **어느 애니의 몇 %** 가 가장 좋은지 찾습니다. 애니가 바뀔 수 있습니다.\n" + find_tip)
+	var rest_now := Button.new()
+	rest_now.text = "지금 프레임을 레스트로"
+	rest_now.clip_text = true
+	rest_now.pressed.connect(_on_rest_from_current)
+	left.add_child(rest_now)
+	_tip(rest_now, "프리뷰에 지금 떠 있는 프레임(▶ 재생 옆에서 고른 애니 · 아래 위치 슬라이더)을 레스트 자세로 씁니다.\n" \
+		+ "재생을 `멈춤` 으로 두고 위치 슬라이더로 조각 그림이 가장 잘 나올 프레임을 고른 뒤 누르세요.\n" \
+		+ "레스트 자동은 꺼지고, 위 레스트 칸에 그 애니와 시점(%)이 들어갑니다.")
 	_set_rest_manual_enabled(false)
 
 	# --- 베이크 옵션 ---
@@ -893,11 +919,39 @@ func _on_browse() -> void:
 		_on_load())
 
 
+## 추가 동작 폴더 고르기. _file_dialog 와 같은 이유로 이 창의 자식으로 붙인다.
+func _on_browse_extra() -> void:
+	var efd := EditorFileDialog.new()
+	var dlg: Window = efd
+	if efd != null:
+		efd.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+		efd.access = EditorFileDialog.ACCESS_RESOURCES
+	else:
+		var f := FileDialog.new()
+		f.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+		f.access = FileDialog.ACCESS_RESOURCES
+		f.use_native_dialog = false
+		dlg = f
+	dlg.title = "추가 동작 폴더 — Dot Rigger"
+	dlg.connect("dir_selected", func(p):
+		dlg.queue_free()
+		_extra_edit.text = String(p)
+		if _model_edit.text.strip_edges() != "":
+			_on_load())
+	dlg.connect("canceled", func(): dlg.queue_free())
+	add_child(dlg)
+	if efd != null:
+		efd.popup_file_dialog()
+	else:
+		dlg.popup_centered_ratio(0.6)
+
+
 # ---------------------------------------------------------------- 프리셋
 
 func _collect_preset() -> DRPreset:
 	var p := DRPreset.new()
 	p.model_path = _model_edit.text.strip_edges()
+	p.extra_anim_dir = _extra_edit.text.strip_edges()
 	p.yaw = _yaw.value
 	p.pitch = _pitch.value
 	p.ortho = _ortho.value
@@ -940,8 +994,10 @@ func _collect_preset() -> DRPreset:
 
 func _apply_preset(p: DRPreset) -> void:
 	_loading = true
-	# 모델이 다르면 먼저 새로 불러온다(파트 목록/애니 목록이 여기서 채워진다)
-	if p.model_path != "" and p.model_path != _model_edit.text.strip_edges():
+	# 모델(또는 추가 동작 폴더)이 다르면 먼저 새로 불러온다(파트 목록/애니 목록이 여기서 채워진다)
+	var extra_changed := p.extra_anim_dir != _extra_edit.text.strip_edges()
+	_extra_edit.text = p.extra_anim_dir
+	if p.model_path != "" and (p.model_path != _model_edit.text.strip_edges() or extra_changed):
 		_model_edit.text = p.model_path
 		_on_load()
 	elif baker == null and p.model_path != "":
@@ -1060,7 +1116,9 @@ func _current_opts() -> DRBaker.Options:
 	o.ambient = _ambient.value
 	o.alpha_threshold = _alpha.value
 	o.color_levels = int(_levels.value)
-	if _rest_anim.selected >= 0:
+	o.extra_anim_dir = _extra_edit.text.strip_edges()
+	# 0번 = "(바인드 포즈)" → rest_anim 은 빈 값(02 C12: 예전엔 그 글자가 그대로 애니 이름으로 넘어갔다)
+	if _rest_anim.selected > 0:
 		o.rest_anim = _rest_anim.get_item_text(_rest_anim.selected)
 		# 슬라이더는 0~1 비율, 베이커는 초 단위. 이걸 안 넘기면 프리뷰는 슬라이더 시점으로 찍고
 		# 베이크는 항상 0% 로 찍어 파트 그림과 애니 기준이 어긋난다(02 C10).
@@ -1069,6 +1127,47 @@ func _current_opts() -> DRBaker.Options:
 			if rn != "":
 				o.rest_time = baker.anim_player.get_animation(rn).length * _rest_time.value
 	return o
+
+
+## 모델을 다시 불러온 뒤, 직전의 작업 상태(수동 그리기 순서 · 고른 동작 · 레스트)를 되살린다.
+## 파트 이름은 프로필이 정하므로 같은 캐릭터를 다른 파일로 바꿔도(예: models/UAL1.glb → source3d/UAL1_humanoid.glb) 그대로 맞는다.
+## 그리기 순서는 줄 구성이 같을 때만 되살린다(다른 종류의 모델이면 자동으로 둔다). 돌려주는 값 = 상태줄에 붙일 말.
+func _restore_work_state(keep: DRPreset) -> String:
+	var notes := PackedStringArray()
+	# 그리기 순서
+	if not keep.z_auto and keep.z_order.size() > 0:
+		var now_layers := baker.rig.layer_names()
+		var old_layers := baker.rig.normalize_layer_order(keep.z_order)
+		var a := Array(now_layers)
+		var b := Array(old_layers)
+		a.sort()
+		b.sort()
+		var same := a == b
+		for l in keep.z_order:      # 옛 목록에 지금 없는 줄이 있었다면 다른 모델로 본다
+			if not now_layers.has(String(l)):
+				same = false
+		if same:
+			_z_auto.set_pressed_no_signal(false)
+			_z_list.clear()
+			for l in old_layers:
+				_z_list.add_item(String(l))
+			notes.append("그리기 순서")
+	# 고른 동작 — 새 목록에 있는 이름만
+	var picked := 0
+	for an in keep.animations:
+		if _all_anims.has(String(an)):
+			_picked_anims[String(an)] = true
+			picked += 1
+	if picked > 0:
+		_fill_anim_list()
+		notes.append("고른 동작 %d개" % picked)
+	# 레스트 자세
+	for i in _rest_anim.item_count:
+		if _rest_anim.get_item_text(i) == keep.rest_anim and keep.rest_anim != "":
+			_rest_anim.select(i)
+			_rest_time.value = keep.rest_time
+			break
+	return ("  · 유지: " + ", ".join(notes)) if notes.size() > 0 else ""
 
 
 func _on_load() -> void:
@@ -1082,6 +1181,11 @@ func _on_load() -> void:
 	if scene_res == null:
 		_status.text = "모델을 로드하지 못했습니다: %s" % model_path
 		return
+	# 다시 불러오기(모델 파일 교체 · 추가 동작 폴더에 파일 추가)에서 작업 상태를 잃지 않게 붙잡아 둔다.
+	# 프리셋 적용 중(_loading)이면 프리셋이 곧 자기 값으로 채우므로 필요 없다.
+	var keep: DRPreset = null
+	if baker != null and not _loading:
+		keep = _collect_preset()
 	_teardown()
 	baker = DRBaker.new()
 	if not baker.setup(self, scene_res, profile, _current_opts()):
@@ -1118,12 +1222,18 @@ func _on_load() -> void:
 		_z_list.add_item(String(l))
 	_iso_parts = PackedStringArray()
 	_fit_sig = ""
+	var kept_note := _restore_work_state(keep) if keep != null else ""
 
 	var un := baker.split.unmapped_bones.size()
-	_status.text = "파트 %d개(순서 목록 %d줄) / 본 %d개 / 애니 %d개%s" % [
+	var ex_n := baker.extra_anims.size()
+	var ex_w := baker.extra_anim_warnings.size()
+	_status.text = "파트 %d개(순서 목록 %d줄) / 본 %d개 / 애니 %d개%s%s%s%s" % [
 		baker.rig.order.size(), baker.rig.layer_names().size(),
 		baker.skeleton.get_bone_count(), _all_anims.size(),
-		("  ⚠ 미매핑 본 %d개" % un) if un > 0 else ""]
+		(" (추가 동작 %d개)" % ex_n) if ex_n > 0 else "",
+		kept_note,
+		("  ⚠ 미매핑 본 %d개" % un) if un > 0 else "",
+		("  ⚠ 추가 동작 경고 %d건: %s" % [ex_w, baker.extra_anim_warnings[0]]) if ex_w > 0 else ""]
 	_fold("1.", true)   # 불러왔으면 모델 칸은 접어 스크롤을 줄인다
 	_refresh_preview()
 
@@ -2135,6 +2245,27 @@ func _scan_best_rest(cands: PackedStringArray) -> Dictionary:
 			if n % 24 == 0:
 				await get_tree().process_frame
 	return best
+
+
+## 프리뷰에 지금 떠 있는 프레임(재생 애니 + 위치)을 레스트로 — 자동을 끄고 레스트 칸에 값을 넣는다.
+## (09-18: "(바인드 포즈)" 버그 때문에 우연히 되던 "보고 있는 프레임이 레스트가 됨"을 정식 기능으로. 02 C12)
+func _on_rest_from_current() -> void:
+	if baker == null or baker.anim_player == null:
+		return
+	var an := baker.resolve_anim(_current_play_anim())
+	if an == "":
+		_status.text = "레스트로 쓸 애니가 없습니다 — ▶ 재생 옆에서 애니를 고르세요."
+		return
+	var length := maxf(baker.anim_player.get_animation(an).length, 0.0001)
+	var ratio := clampf(_play_t / length, 0.0, 1.0)
+	_rest_auto.button_pressed = false        # 칸이 풀린다(toggled → _set_rest_manual_enabled(true))
+	for i in _rest_anim.item_count:
+		if _rest_anim.get_item_text(i) == an:
+			_rest_anim.select(i)
+			break
+	_rest_time.value = ratio
+	_status.text = "레스트 자세 → %s %d%% (지금 프레임)" % [an, int(round(ratio * 100.0))]
+	_refresh_preview()
 
 
 ## 레스트 칸을 잠그거나 푼다(자동일 때 잠금)
