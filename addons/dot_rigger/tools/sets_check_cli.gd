@@ -136,6 +136,8 @@ func _run() -> void:
 	exw.auto_fit = false
 	exw.keep_previous = false
 	exw.outline_px = 1
+	exw.outline_style = DRExporter.OUTLINE_PIXEL_PERFECT   # 이 굽기는 선 색도 픽셀 퍼펙트(옆 도트 색의 톤)로 — 위 세트 굽기는 카툰
+	exw.outline_tone = 0.3
 	baker.opts.rest_anim = "Idle"
 	baker.opts.rest_time = 0.0
 	var resw: Dictionary = await exw.run()
@@ -168,6 +170,12 @@ func _run() -> void:
 		and wused.end.x <= whead.get_width() - 1 and wused.end.y <= whead.get_height() - 1,
 		"전체 실루엣 모드도 파트 그림에 1px 여유 (Head %s 실루엣 %s)" % [str(whead.get_size()) if whead else "-", str(wused)])
 	_check(String(_json(OUT.path_join("stand_whole/rig.json")).get("outline_mode", "")) == "whole", "rig.json outline_mode whole")
+	var wj := _json(OUT.path_join("stand_whole/rig.json"))
+	_check(w_ol_mat != null and bool(w_ol_mat.get_shader_parameter("outline_tone")) and absf(float(w_ol_mat.get_shader_parameter("outline_tone_strength")) - 0.3) < 0.001
+		and String(wj.get("outline_style", "")) == "pixel_perfect" and absf(float(wj.get("outline_tone", 0.0)) - 0.3) < 0.001,
+		"선 색 = 픽셀 퍼펙트 — 밑깔개 셰이더 outline_tone 켬·0.30 · rig.json outline_style %s" % wj.get("outline_style", ""))
+	_check(ol_mat != null and not bool(ol_mat.get_shader_parameter("outline_tone")) and String(rs0.get("outline_style", "")) == "cartoon",
+		"세트 굽기(기본)는 카툰 — outline_tone 꺼짐 · rig.json outline_style %s" % rs0.get("outline_style", ""))
 	# 장비도 밑깔개를 받는다
 	if wpup != null:
 		root.add_child(wpup)
@@ -239,6 +247,46 @@ func _run() -> void:
 		_check(bool(entries[1].get("z_order_manual", false)) and Array(entries[1].get("layer_order", [])).slice(0, 2) == ["R_UpperArm", "R_Thigh"]
 			and not bool(entries[0].get("z_order_manual", true)),
 			"sets.json 에 세트별 순서 기록 (crawl 수동 %s / stand 자동)" % str(Array(entries[1].get("layer_order", [])).slice(0, 2)))
+
+	print("[5] 세트를 빼거나 이름을 바꾸고 다시 구우면 옛 폴더를 치운다")
+	_check(Array(res.get("removed_dirs", PackedStringArray())).is_empty(), "첫 굽기는 치울 게 없다")
+	# 옛 세트 폴더 하나에는 툴이 만들지 않은 파일을 넣어 둔다 — 그 파일과 폴더는 남아야 한다
+	var st_note := OUT.path_join("crawl _ test/memo.txt")
+	var st_f := FileAccess.open(st_note, FileAccess.WRITE)
+	st_f.store_string("손으로 넣은 파일")
+	st_f.close()
+	# stand → "Stand"(대소문자만 바꿈: Windows 에서는 같은 폴더) · crawl 세트는 뺌 · 새 세트 하나
+	var st_sets: Array = [
+		{"name": "Stand", "rest_anim": "Idle", "rest_time": 0.0, "animations": PackedStringArray(["Idle"])},
+		{"name": "jog", "rest_anim": "Idle", "rest_time": 0.0, "animations": PackedStringArray(["Jog_Fwd"])},
+	]
+	var st_res: Dictionary = await sb.run(st_sets, OUT, {"fps": 12, "auto_fit": false, "margin": 0, "stretch": true, "smooth": true,
+		"outline_px": 1, "outline_color": Color.BLACK, "outline_whole": false})
+	_check(bool(st_res.get("ok", false)), "다시 굽기 ok (%s)" % String(st_res.get("error", "")))
+	_check(FileAccess.file_exists(OUT.path_join("Stand/puppet.tscn")) and FileAccess.file_exists(OUT.path_join("Stand/parts/Head.png")),
+		"대소문자만 바뀐 세트(stand → Stand)는 방금 구운 게 남는다")
+	var st_disk := DirAccess.get_directories_at(ProjectSettings.globalize_path(OUT))
+	_check(st_disk.has("Stand") and not st_disk.has("stand"), "디스크의 폴더 이름도 Stand 로 바뀐다 %s" % str(st_disk))
+	_check(FileAccess.file_exists(OUT.path_join("jog/puppet.tscn")), "새 세트 jog 있음")
+	_check(not FileAccess.file_exists(OUT.path_join("crawl _ test/puppet.tscn")) and not FileAccess.file_exists(OUT.path_join("crawl _ test/rig.json"))
+		and not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(OUT.path_join("crawl _ test/parts"))),
+		"빠진 세트(crawl _ test)의 씬·rig.json·parts 가 지워졌다")
+	_check(FileAccess.file_exists(st_note) and Array(st_res.get("left_dirs", PackedStringArray())) == ["crawl _ test"]
+		and Array(st_res.get("removed_dirs", PackedStringArray())).is_empty(),
+		"손으로 넣은 파일과 그 폴더는 남기고 left_dirs 로 알린다 %s" % str(st_res.get("left_dirs")))
+	_check(FileAccess.file_exists(OUT.path_join("stand_whole/puppet.tscn")),
+		"sets.json 에 없던 폴더(stand_whole)는 건드리지 않는다")
+	# 손으로 넣은 파일을 치우고 한 번 더 — 이번엔 jog 를 빼면 폴더째 없어져야 한다
+	var st_res2: Dictionary = await sb.run([st_sets[0]], OUT, {"fps": 12, "auto_fit": false, "margin": 0, "stretch": true, "smooth": true,
+		"outline_px": 1, "outline_color": Color.BLACK, "outline_whole": false})
+	_check(bool(st_res2.get("ok", false)) and Array(st_res2.get("removed_dirs", PackedStringArray())) == ["jog"]
+		and not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(OUT.path_join("jog"))),
+		"빠진 세트 jog 는 폴더째 없어진다 %s" % str(st_res2.get("removed_dirs")))
+	# sets.json 을 손으로 고쳐 바깥을 가리켜도 밖은 지우지 않는다
+	var st_guard := DRSetBaker._clean_stale(OUT, PackedStringArray(["..", "../sets_bake", "stand_whole/parts", ""]), PackedStringArray(["Stand"]))
+	_check(Array(st_guard["removed"]).is_empty() and Array(st_guard["left"]).is_empty()
+		and FileAccess.file_exists(OUT.path_join("stand_whole/parts/Head.png")) and FileAccess.file_exists(OUT.path_join("sets.json")),
+		"폴더 이름 하나가 아닌 값(.. · a/b · 빈 값)은 무시한다")
 
 	print("\n" + ("세트 검사 전부 통과" if _fail == 0 else "실패 %d건" % _fail))
 	quit(0 if _fail == 0 else 1)

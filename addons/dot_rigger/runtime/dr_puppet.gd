@@ -18,6 +18,7 @@ signal unequipped(slot: String)
 var _parts: Dictionary = {}      # part 이름 -> {bone, stretch, rest_head, rest_angle}
 var _equipped: Dictionary = {}   # slot -> Sprite2D
 var _equipped_outline: Dictionary = {}   # slot -> Sprite2D (전체 실루엣 밑깔개, 없으면 키 없음)
+var _z_follow: Dictionary = {}   # slot -> {art: 기준 파트의 Sprite2D, gap: int} — z_after_part 로 장착한 장비
 ## 본체 파트 스프라이트의 머티리얼(부드러운 도트 이동 셰이더). 장비도 같은 방식으로 그려야 결이 맞는다
 var _art_material: Material = null
 ## 본체 밑깔개의 머티리얼·z (전체 실루엣 아웃라인으로 구운 씬만). null 이면 밑깔개 없음
@@ -27,6 +28,17 @@ var _outline_z: int = -1
 
 func _ready() -> void:
 	rebuild_index()
+	set_process(false)
+
+
+## z_after_part 로 장착한 장비는 기준 파트의 z 를 따라간다(자동 순서로 구운 씬은 파트 z 가 프레임마다 바뀐다)
+func _process(_delta: float) -> void:
+	for slot in _z_follow.keys():
+		var f: Dictionary = _z_follow[slot]
+		var art := f["art"] as Sprite2D
+		var spr := _equipped.get(slot, null) as Sprite2D
+		if is_instance_valid(art) and is_instance_valid(spr):
+			spr.z_index = art.z_index + int(f["gap"])
 
 
 ## 씬 구조가 바뀌었을 때 다시 훑는다.
@@ -52,6 +64,7 @@ func _walk(n: Node, parent_head: Vector2) -> void:
 		"stretch": b.get_node_or_null("stretch"),
 		"rest_head": head,
 		"rest_angle": b.get_bone_angle(),
+		"art": b.get_node_or_null("stretch/art"),
 	}
 	if _art_material == null:
 		var art := b.get_node_or_null("stretch/art") as Sprite2D
@@ -75,6 +88,22 @@ func part_names() -> PackedStringArray:
 
 func has_part(part: String) -> bool:
 	return _parts.has(part)
+
+
+## 파트의 Bone2D (없으면 null). 조준처럼 애니메이션 위에 각도를 더할 때 쓴다.
+func get_bone(part: String) -> Bone2D:
+	if _parts.is_empty():
+		rebuild_index()
+	if not _parts.has(part):
+		return null
+	return _parts[part]["bone"] as Bone2D
+
+
+## 파트의 레스트 피벗(퍼펫 좌표 = 베이크 캔버스 좌표)
+func get_rest_head(part: String) -> Vector2:
+	if _parts.is_empty():
+		rebuild_index()
+	return Vector2(_parts[part]["rest_head"]) if _parts.has(part) else Vector2.ZERO
 
 
 ## 장비 장착. 같은 슬롯에 이미 있으면 교체한다.
@@ -101,6 +130,17 @@ func equip(item: DREquipItem) -> bool:
 	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	spr.z_as_relative = false
 	spr.z_index = item.z_index
+	if item.z_after_part != "":
+		var ref := (_parts[item.z_after_part]["art"] as Sprite2D) if _parts.has(item.z_after_part) else null
+		if ref == null:
+			push_warning("[DRPuppet] z_after_part 파트를 찾을 수 없습니다: %s — z_index %d 를 씁니다" % [item.z_after_part, item.z_index])
+		else:
+			var gap := _z_gap()
+			if gap == 0:
+				push_warning("[DRPuppet] 이 씬은 파트 z 간격이 1 이라 장비를 파트 사이에 끼울 수 없습니다(같은 z 로 둠). 다시 구우면 간격 10 으로 나옵니다.")
+			spr.z_index = ref.z_index + gap
+			_z_follow[item.slot] = {"art": ref, "gap": gap}
+			set_process(true)
 	spr.modulate = item.modulate
 	spr.material = _art_material
 	# 본체 파트 스프라이트와 완전히 같은 규격으로 배치한다.
@@ -129,12 +169,31 @@ func unequip(slot: String) -> void:
 	if is_instance_valid(n):
 		n.queue_free()
 	_equipped.erase(slot)
+	_z_follow.erase(slot)
+	if _z_follow.is_empty():
+		set_process(false)
 	if _equipped_outline.has(slot):
 		var o: Node = _equipped_outline[slot]
 		if is_instance_valid(o):
 			o.queue_free()
 		_equipped_outline.erase(slot)
 	unequipped.emit(slot)
+
+
+## 파트 사이에 장비가 끼어들 z 여유(파트 z 간격의 절반). 간격이 1 인 옛 씬은 0.
+func _z_gap() -> int:
+	var zs: Array = []
+	for k in _parts.keys():
+		var art := _parts[k]["art"] as Sprite2D
+		if art != null and not zs.has(art.z_index):
+			zs.append(art.z_index)
+	zs.sort()
+	var step := 0
+	for i in range(1, zs.size()):
+		var d := int(zs[i]) - int(zs[i - 1])
+		if d > 0 and (step == 0 or d < step):
+			step = d
+	return int(step / 2.0)
 
 
 func unequip_all() -> void:

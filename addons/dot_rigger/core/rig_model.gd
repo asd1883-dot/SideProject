@@ -2,6 +2,10 @@
 extends RefCounted
 class_name DRRigModel
 
+## 파트 z 값의 간격. 파트는 뒤에서부터 10, 20, 30 … 을 받는다 — 장비(무기·헬멧)가 두 파트 **사이**(+5)나 맨 뒤(5)에 그려질 자리를 남겨 두려는 것.
+## z_index 는 정수라 간격이 1 이면 사이에 끼울 수가 없다(09-21 까지 구운 씬이 그렇다 → 그런 씬은 DRPuppet 이 알아보고 같은 z 로 둔다).
+const Z_STEP := 10
+
 ## 파트 계층 구조와 3D->2D 투영 수학.
 ##
 ## 핵심 아이디어: 파트마다 "루트 본"과 그 본의 로컬 공간에 고정된 "tail 점"을 잡아두면,
@@ -279,7 +283,7 @@ func project_local(skel: Skeleton3D, cam: Camera3D, pose_cam: Camera3D = null) -
 	var k := 0
 	for pn in expand_layers(auto_layer_order(depth_of)):
 		if out.has(pn):
-			out[pn]["z"] = k
+			out[pn]["z"] = (k + 1) * Z_STEP
 			k += 1
 	return out
 

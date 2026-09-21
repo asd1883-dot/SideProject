@@ -11,6 +11,10 @@ class_name DRPreset
 @export var model_path: String = ""
 ## 추가 동작 폴더(res://). 모델 파일 밖의 동작(Mixamo FBX 등)을 같은 캐릭터에 얹는다. 파일 이름 = 동작 이름. "" = 안 씀
 @export_dir var extra_anim_dir: String = ""
+## 상하체 합성 동작 정의(창의 `상하체 합성…` 팝업). 각 { name, lower, upper, length_mode(0 하체 속도 · 1 한 번씩 · 2 상체 속도), loop }
+@export var composites: Array[Dictionary] = []
+## 상체로 칠 파트. 비면 기본(몸통·머리·두 팔)
+@export var composite_upper_parts: PackedStringArray = PackedStringArray()
 ## 사람이 알아보기 위한 메모. 동작에는 영향 없음.
 @export_multiline var note: String = ""
 
@@ -54,6 +58,12 @@ class_name DRPreset
 @export var outline_color: Color = Color.BLACK
 ## true = 전체 실루엣에만 선(기본), false = 파트마다 선
 @export var outline_whole: bool = true
+## 선의 색 방식 — 0 = 카툰(outline_color 한 색) · 1 = 픽셀 퍼펙트(선의 도트마다 바로 옆 몸 도트 색을 어둡게). 둘 중 하나.
+@export_enum("카툰 (한 색)", "픽셀 퍼펙트 (옆 도트 색의 톤)") var outline_style: int = 0
+## 픽셀 퍼펙트에서 옆 도트 색을 얼마나 어둡게 할지 (0 = 같은 색 · 1 = 검정)
+@export_range(0.0, 1.0, 0.05) var outline_tone: float = 0.45
+## 도트 격자 고정 — 도트 해상도로 그린 뒤 통째로 확대. 베이크하면 puppet_pixel.tscn 이 같이 나온다(부드러운 도트 이동은 꺼짐)
+@export var pixel_grid: bool = false
 ## 동작 평면화(2D 게임식). 켜면 팔다리 각도를 측면(pose_yaw) 시점에서 재고 위치는 강체·늘이기 없음.
 @export var planar: bool = false
 @export var pose_auto: bool = true

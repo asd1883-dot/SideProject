@@ -15,7 +15,11 @@ extends SceneTree
 ## --offset_x=0 --offset_y=0 캐릭터 화면 위치 이동(px, +x 오른쪽, +y 위). --nofit 일 때 의미 있음.
 ## --planar 동작 평면화(2D 게임식) · --pose_yaw=90 각도를 잴 시점(생략 = 자동 측면).
 ## --extra_anims=res://폴더 모델 파일 밖의 동작(Mixamo FBX 등)을 얹음. 파일 이름 = 동작 이름.
+## --composites="Crouch_Aim=Crouch_Fwd+Pistol_Aim_Neutral;…" 상하체 합성(하체+상체) · --composite_len=0|1|2|3 길이 맞춤 · --composite_noloop
+##   --composite_keep=1.0 상체 방향 유지(0~1, 앉기처럼 골반이 숙는 하체에서 상체를 세움) · --composite_pitch=10 몸통 각도 보정(도, + = 뒤로 젖힘)
+## --pixel_grid 도트 격자 고정 래퍼 puppet_pixel.tscn 도 같이 만듦(부드러운 도트 이동은 꺼짐).
 ## --outline=1 도트 아웃라인 두께(0~3) · --outline_color=000000 색(html) · --outline_parts 파트별 선(기본은 전체 실루엣).
+## --outline_style=pixel_perfect 선의 도트마다 옆 몸 도트 색을 어둡게(기본 cartoon = 한 색) · --outline_tone=0.45 어둡게 하는 정도.
 
 var _args := {}
 
@@ -71,6 +75,16 @@ func _run() -> void:
 	opts.color_levels = int(_arg("levels", "0"))
 	opts.alpha_threshold = float(_arg("alpha", "0.5"))
 	opts.extra_anim_dir = _arg("extra_anims", "")
+	# --composites="이름=하체+상체;이름2=하체2+상체2"  (이름= 은 생략 가능)
+	for spec in _arg("composites", "").split(";", false):
+		var s := String(spec)
+		var eq := s.find("=")
+		var body := s.substr(eq + 1)
+		var plus := body.find("+")
+		if plus > 0:
+			opts.composites.append({"name": s.substr(0, eq) if eq > 0 else "", "lower": body.substr(0, plus), "upper": body.substr(plus + 1),
+				"length_mode": int(_arg("composite_len", "0")), "loop": not _args.has("composite_noloop"),
+				"upper_keep": float(_arg("composite_keep", "0")), "upper_pitch": float(_arg("composite_pitch", "0"))})
 
 	var baker := DRBaker.new()
 	if not baker.setup(root, scene, profile, opts):
@@ -111,6 +125,9 @@ func _run() -> void:
 	ex.outline_px = int(_arg("outline", "0"))
 	ex.outline_color = Color(_arg("outline_color", "000000"))
 	ex.outline_whole = not _args.has("outline_parts")
+	ex.outline_style = DRExporter.OUTLINE_PIXEL_PERFECT if _arg("outline_style", "cartoon") == "pixel_perfect" else DRExporter.OUTLINE_CARTOON
+	ex.outline_tone = float(_arg("outline_tone", "0.45"))
+	ex.pixel_grid = _args.has("pixel_grid")
 	var zo := _arg("zorder", "")
 	if zo != "":
 		ex.z_override = PackedStringArray(zo.split(",", false))

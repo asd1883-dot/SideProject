@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://bqwiychscc8cy"]
+
+[ext_resource type="Script" uid="uid://khurpfdgd7l4" path="res://test/puppet_test.gd" id="1"]
+[ext_resource type="Script" uid="uid://bvhgjrw6mkild" path="res://addons/dot_rigger/runtime/dr_puppet_set.gd" id="2"]
+
+[node name="PuppetTest" type="Node2D" unique_id=339534302]
+script = ExtResource("1")
+
+[node name="Soldier" type="Node2D" parent="." unique_id=1559041082]
+position = Vector2(576, 520)
+scale = Vector2(1.5, 1.5)
+script = ExtResource("2")
+force_loop = true

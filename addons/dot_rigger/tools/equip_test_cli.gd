@@ -75,7 +75,7 @@ func _run() -> void:
 		printerr("장비 텍스처 로드 실패: ", tex_path); quit(1); return
 	# 이미지 좌상단을 파트 crop 원점 기준으로 배치
 	item.offset = crop + Vector2(float(_arg("dx", "0")), float(_arg("dy", "0")))
-	item.z_index = int(_arg("z", "30"))
+	item.z_index = int(_arg("z", "1000"))   # 파트 z 는 10, 20 … 150 — 그보다 크면 맨 앞
 	if not pup.equip(item):
 		printerr("장착 실패"); quit(1); return
 	print("장착 완료: slot=%s part=%s offset=%s z=%d" % [item.slot, item.part, item.offset, item.z_index])

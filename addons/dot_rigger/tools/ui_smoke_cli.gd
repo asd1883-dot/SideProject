@@ -65,7 +65,8 @@ func _run() -> void:
 		"_ambient", "_alpha", "_levels", "_bleed", "_rest_anim", "_anim_list", "_fps", "_stretch",
 		"_smooth", "_out_edit", "_keep_anims", "_bake_btn", "_z_auto", "_parts_tree",
 		"_off_x", "_off_y", "_play_anim", "_speed", "_scrub", "_sets_list", "_set_name",
-		"_planar", "_pose_auto", "_pose_yaw", "_rest_auto", "_outline_px", "_outline_color", "_outline_whole", "_extra_edit"]
+		"_planar", "_pose_auto", "_pose_yaw", "_rest_auto", "_outline_px", "_outline_color", "_outline_whole", "_extra_edit",
+		"_pixel_grid", "_composite_btn", "_outline_cartoon", "_outline_pp", "_outline_tone"]
 	var tip_missing := []
 	for tip_n in tip_names:
 		if (win.get(tip_n) as Control).tooltip_text == "":
@@ -1139,6 +1140,43 @@ func _run() -> void:
 		await process_frame
 	if win._rest_anim.get_item_text(win._rest_anim.selected) != "Jog_Fwd":
 		printerr("동작이 비었는데 레스트가 바뀜"); quit(1); return
+	var ar_jog_t: float = win._rest_time.value     # 28번 출력용 — 아래 28-1 이 레스트를 바꾸기 전에 적어 둔다
+	# 검색 중의 그냥 클릭도 "그것만" 이어야 레스트 자동이 방금 누른 동작을 따라간다(02 U14 — 09-21 사용자
+	# "목록을 클릭하면 레스트 자동이 반영되는데 검색해서 찾을 때는 안 된다": 가려진 선택이 남아 '추가' 가 되고 있었다)
+	win._picked_anims.clear()
+	win._picked_anims["Idle"] = true
+	win._picked_anims["Walk"] = true
+	win._fill_anim_list()
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	win._anim_filter.text = "crouch_idle"
+	win._anim_filter.text_changed.emit("crouch_idle")
+	var sr_i := -1
+	for i in win._anim_list.item_count:
+		if win._anim_list.get_item_text(i) == "Crouch_Idle":
+			sr_i = i
+	if sr_i < 0 or win._picked_anim_names().size() != 2:
+		printerr("검색 준비 이상: Crouch_Idle 줄 %d, 고른 것 %s" % [sr_i, str(win._picked_anim_names())]); quit(1); return
+	win._anim_list.deselect_all()
+	win._anim_list.select(sr_i, true)
+	win._sync_picked_from_list(false)             # Ctrl·Shift 클릭 경로 = 추가: 가려진 Idle·Walk 가 남는다
+	if win._picked_anim_names().size() != 3:
+		printerr("Ctrl/Shift 클릭(추가)인데 가려진 선택이 안 남음: %s" % str(win._picked_anim_names())); quit(1); return
+	win._on_anim_list_changed()                    # 그냥 클릭 경로(눌린 키 없음) = 그것만
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var sr_rest: String = win._rest_anim.get_item_text(win._rest_anim.selected)
+	if Array(win._picked_anim_names()) != ["Crouch_Idle"] or sr_rest != "Crouch_Idle":
+		printerr("검색 중 그냥 클릭: 고른 것 %s, 레스트 %s (기대 Crouch_Idle 하나 · 레스트 Crouch_Idle)" % [str(win._picked_anim_names()), sr_rest]); quit(1); return
+	print("28-1) 검색 중 클릭 OK — 가려진 선택 2개가 있어도 그냥 클릭 = 그것만 → 레스트 자동이 Crouch_Idle %.0f%% 로 따라옴 · Ctrl/Shift 경로는 추가(3개)" % (win._rest_time.value * 100.0))
+	win._anim_filter.text = ""
+	win._anim_filter.text_changed.emit("")
+	win._picked_anims.clear()
+	win._fill_anim_list()
 	var ar_set: Dictionary = win._set_from_current()
 	if not bool(ar_set.get("rest_auto", false)):
 		printerr("세트에 rest_auto 가 안 담김"); quit(1); return
@@ -1147,7 +1185,7 @@ func _run() -> void:
 		await process_frame
 	if win._rest_anim.disabled or not win._rest_time.editable:
 		printerr("자동을 껐는데 레스트 칸이 안 풀림"); quit(1); return
-	print("28) 레스트 자동 OK — Idle+Walk → Walk %.0f%% (칸 잠김, 베이커 반영) · Jog_Fwd 만 고르면 Jog_Fwd %.0f%% · 비우면 유지 · 끄면 풀림" % [ar_t * 100.0, win._rest_time.value * 100.0])
+	print("28) 레스트 자동 OK — Idle+Walk → Walk %.0f%% (칸 잠김, 베이커 반영) · Jog_Fwd 만 고르면 Jog_Fwd %.0f%% · 비우면 유지 · 끄면 풀림" % [ar_t * 100.0, ar_jog_t * 100.0])
 	for i in win._rest_anim.item_count:
 		if win._rest_anim.get_item_text(i) == "Idle":
 			win._rest_anim.select(i)
@@ -1346,6 +1384,288 @@ func _run() -> void:
 	print("31) 바인드 포즈 · 지금 프레임 OK — (바인드 포즈) = 본 %d개 전부 레스트(보던 Jog_Fwd 프레임 안 남음) · `지금 프레임을 레스트로` → 자동 꺼짐, Walk 40%%, opts %.3f초" % [bp_sk.get_bone_count(), win.baker.opts.rest_time])
 	win._picked_anims.clear()
 	win._fill_anim_list()
+	for i in win._rest_anim.item_count:
+		if win._rest_anim.get_item_text(i) == "Idle":
+			win._rest_anim.select(i)
+	win._rest_time.value = 0.0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+
+	# ---- 선의 색 방식: 카툰 / 픽셀 퍼펙트 — 둘 중 하나(토글). 픽셀 퍼펙트의 선 = 바로 옆 몸 도트 색을 어둡게 한 색 ----
+	# 09-21 사용자: "픽셀 퍼펙트는 색감에 맞게 그 결의 톤으로 들어가는 것 — 카툰 아웃라인과 같이 적용될 수 없으니 토글이어야"
+	win._smooth.button_pressed = false        # 도트 색을 그대로 비교하려고 경계 섞기를 끈다(프리뷰 배율 1)
+	win._mode_2d.button_pressed = true
+	win._outline_whole.button_pressed = true
+	win._outline_px.value = 0
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var ls_img0: Image = win._puppet_vp.get_texture().get_image()
+	if not win._outline_cartoon.button_pressed or win._outline_pp.button_pressed or win._outline_color.disabled or win._outline_tone.editable:
+		printerr("선 색 방식의 기본이 카툰이 아님"); quit(1); return
+	win._outline_px.value = 1
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var ls_img_c: Image = win._puppet_vp.get_texture().get_image()
+	win._outline_pp.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var ls_img_p: Image = win._puppet_vp.get_texture().get_image()
+	var ls_um := (win._puppet_bones["Torso"]["outline"] as Sprite2D).material as ShaderMaterial
+	if win._outline_cartoon.button_pressed or not win._outline_color.disabled or not win._outline_tone.editable \
+			or ls_um == null or not bool(ls_um.get_shader_parameter("outline_tone")) or absf(float(ls_um.get_shader_parameter("outline_tone_strength")) - 0.45) > 0.001:
+		printerr("픽셀 퍼펙트를 켰는데 카툰이 안 꺼지거나 칸·uniform 이상 (카툰 %s, 색 버튼 잠김 %s, %% 칸 풀림 %s)" % [
+			win._outline_cartoon.button_pressed, win._outline_color.disabled, win._outline_tone.editable]); quit(1); return
+	# 선 자리 = 아웃라인 없을 때 비어 있다가 생긴 픽셀. 카툰은 전부 검정, 픽셀 퍼펙트는 검정이 없고 옆 몸 도트 × (1 − 0.45)
+	var ls_ring := 0
+	var ls_c_black := 0
+	var ls_p_black := 0
+	var ls_match := 0
+	for y in range(1, ls_img0.get_height() - 1):
+		for x in range(1, ls_img0.get_width() - 1):
+			if ls_img0.get_pixel(x, y).a > 0.5 or ls_img_p.get_pixel(x, y).a < 0.5:
+				continue
+			ls_ring += 1
+			var cc := ls_img_c.get_pixel(x, y)
+			var cp := ls_img_p.get_pixel(x, y)
+			if cc.r < 0.1 and cc.g < 0.1 and cc.b < 0.1:
+				ls_c_black += 1
+			if cp.r < 0.06 and cp.g < 0.06 and cp.b < 0.06:
+				ls_p_black += 1
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var nb := ls_img0.get_pixel(x + d.x, y + d.y)
+				if nb.a > 0.5 and absf(cp.r - nb.r * 0.55) < 0.08 and absf(cp.g - nb.g * 0.55) < 0.08 and absf(cp.b - nb.b * 0.55) < 0.08:
+					ls_match += 1
+					break
+	var ls_ratio := 100.0 * float(ls_match) / float(maxi(ls_ring, 1))
+	if ls_ring < 200 or ls_c_black != ls_ring or ls_p_black > 0 or ls_ratio < 80.0 or _inner_changed(ls_img0, ls_img_p) > 0:
+		printerr("픽셀 퍼펙트 선 색 이상: 선 도트 %d개 — 카툰 검정 %d, 픽셀 퍼펙트 검정 %d, 옆 도트 × 0.55 와 맞는 비율 %.0f%%, 안쪽 바뀜 %d" % [
+			ls_ring, ls_c_black, ls_p_black, ls_ratio, _inner_changed(ls_img0, ls_img_p)]); quit(1); return
+	ls_img_p.save_png("res://puppet_test/_outline_pixel_perfect.png")
+	ls_img_c.save_png("res://puppet_test/_outline_cartoon.png")
+	# 베이크 설정·프리셋에 담기고, 프리셋으로 되돌아온다
+	var ls_cfg: Dictionary = win._bake_cfg()
+	var ls_preset: DRPreset = win._collect_preset()
+	if int(ls_cfg.get("outline_style", -1)) != DRExporter.OUTLINE_PIXEL_PERFECT or absf(float(ls_cfg.get("outline_tone", 0.0)) - 0.45) > 0.001 \
+			or ls_preset.outline_style != DRExporter.OUTLINE_PIXEL_PERFECT or absf(ls_preset.outline_tone - 0.45) > 0.001:
+		printerr("선 색 방식이 베이크 설정/프리셋에 안 담김"); quit(1); return
+	win._outline_cartoon.button_pressed = true
+	if win._outline_pp.button_pressed:
+		printerr("카툰을 켰는데 픽셀 퍼펙트가 안 꺼짐"); quit(1); return
+	ls_preset.outline_tone = 0.7
+	win._apply_preset(ls_preset)
+	while win._busy:
+		await process_frame
+	if not win._outline_pp.button_pressed or win._outline_cartoon.button_pressed or int(win._outline_tone.value) != 70:
+		printerr("프리셋의 픽셀 퍼펙트·70%% 가 안 돌아옴"); quit(1); return
+	print("34) 선 색 방식 OK — 카툰/픽셀 퍼펙트는 둘 중 하나 · 선 도트 %d개: 카툰 전부 검정, 픽셀 퍼펙트는 검정 0 · 옆 몸 도트 × 0.55 와 %.0f%% 일치 · 캐릭터 안쪽 바뀜 0 · 베이크 설정·프리셋 왕복(70%%)" % [ls_ring, ls_ratio])
+	win._outline_cartoon.button_pressed = true
+	win._outline_tone.value = 45
+	win._outline_px.value = 0
+	win._smooth.button_pressed = true
+	win._mode_2d.button_pressed = false
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+
+	# ---- 도트 격자 고정(상단 바): 부드러운 이동이 켜져 있어도 도트 해상도(배율 1)로 그리고 정수 픽셀에 붙인다 ----
+	win._smooth.button_pressed = true
+	win._mode_2d.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var px_scale0: float = win._puppet_scale
+	win._pixel_grid.button_pressed = true
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	var px_want: Vector2i = win.baker.opts.view_size + win._puppet_pad() * 2
+	var px_art_mat := (win._puppet_bones["Torso"]["art"] as Sprite2D).material as ShaderMaterial
+	if win._puppet_scale != 1.0 or win._puppet_vp.size != px_want or not win._puppet_vp.snap_2d_transforms_to_pixel \
+			or (px_art_mat != null and bool(px_art_mat.get_shader_parameter("smooth_edges"))) or not win._smooth.disabled \
+			or not bool(win._bake_cfg().get("pixel_grid", false)) or not win._collect_preset().pixel_grid:
+		printerr("도트 격자 고정 이상: 배율 %.2f, 뷰포트 %s(기대 %s), 정수 맞춤 %s, 부드러운 칸 잠김 %s" % [win._puppet_scale, str(win._puppet_vp.size), str(px_want),
+			win._puppet_vp.snap_2d_transforms_to_pixel, win._smooth.disabled]); quit(1); return
+	# 재생 중인 자세를 확대 캡처해도 도트가 격자에 맞아야 한다 — 뷰포트 자체가 배율 1 이므로 파트 그림 색만 나와야 한다(섞인 색 없음)
+	win.baker.set_pose("Jog_Fwd", 0.3)
+	win._pose_puppet(false)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var px_img: Image = win._puppet_vp.get_texture().get_image()
+	var px_soft := 0
+	for y in px_img.get_height():
+		for x in px_img.get_width():
+			var pa := px_img.get_pixel(x, y).a
+			if pa > 0.02 and pa < 0.98:
+				px_soft += 1
+	if px_soft > 0:
+		printerr("도트 격자 고정인데 반투명(섞인) 픽셀 %d개" % px_soft); quit(1); return
+	win._pixel_grid.button_pressed = false
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if win._smooth.disabled or win._puppet_vp.snap_2d_transforms_to_pixel or win._puppet_scale != px_scale0:
+		printerr("도트 격자 고정를 껐는데 안 돌아옴: 배율 %.2f(전 %.2f)" % [win._puppet_scale, px_scale0]); quit(1); return
+	print("32) 도트 격자 고정 OK — 부드러운 이동이 켜져 있어도 배율 %.2f → 1.00 · 뷰포트 %s · 정수 맞춤 · 반투명 픽셀 0 · 베이크 설정·프리셋에 담김 · 끄면 복귀" % [px_scale0, str(px_want)])
+	win._mode_2d.button_pressed = false
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+
+	# ---- 상하체 합성 팝업: 정의 → 적용 → 5번 목록에 나타남 → 프리셋 왕복 → 모델을 다시 불러와도 남음 ----
+	win._play.button_pressed = true                  # 창이 재생 중이어도 팝업을 열면 멈춰야 한다(같은 베이커의 자세를 둘이 바꾸면 안 됨)
+	await win._on_open_composites()
+	await process_frame
+	var cp_dlg: DRCompositeDialog = win._composite_dlg
+	if cp_dlg == null or cp_dlg.get_parent() != win or not cp_dlg.visible:
+		printerr("상하체 합성 팝업이 툴 창의 자식으로 안 뜸"); quit(1); return
+	if win._play.button_pressed:
+		printerr("팝업을 열었는데 창의 재생이 안 멈춤"); quit(1); return
+	# 줄바꿈 라벨 때문에 팝업이 수천 px 로 늘어난 적이 있다(09-21 첫 캡처 1084×5487)
+	if cp_dlg.size.y > 800 or cp_dlg.size.x > 1400:
+		printerr("상하체 합성 팝업이 너무 큼: %s" % str(cp_dlg.size)); quit(1); return
+	if cp_dlg._part_checks.size() != 15 or cp_dlg.get_upper_parts().size() != 8 or not cp_dlg.get_upper_parts().has("Torso") or cp_dlg.get_upper_parts().has("Hips"):
+		printerr("팝업의 상체 파트 기본값 이상: %s" % str(cp_dlg.get_upper_parts())); quit(1); return
+	cp_dlg._on_list_button("add")
+	cp_dlg._defs[0] = {"name": "Crouch_Aim", "lower": "Crouch_Fwd", "upper": "Pistol_Aim_Neutral", "length_mode": DRBaker.LEN_LOWER_SPEED, "loop": true}
+	cp_dlg._refresh_list()
+	cp_dlg._on_select(0)
+	if not cp_dlg._info.text.contains("길이") or cp_dlg._lower.get_item_text(cp_dlg._lower.selected) != "Crouch_Fwd":
+		printerr("팝업 편집 칸 이상: '%s' / 하체 %s" % [cp_dlg._info.text, cp_dlg._lower.get_item_text(cp_dlg._lower.selected)]); quit(1); return
+	# 팝업 안 프리뷰: `적용` 전인데도 고른 합성이 재생된다(숨은 동작이라 창의 목록에는 안 나온다)
+	var cp_ap: AnimationPlayer = win.baker.anim_player
+	if not cp_dlg._pv_ok or not cp_ap.has_animation(DRBaker.PREVIEW_ANIM) or cp_dlg._pv_tex.texture == null or absf(cp_dlg._pv_len - 2.0) > 0.01:
+		printerr("팝업 프리뷰가 안 만들어짐: ok %s, 길이 %.2f, 메시지 '%s'" % [cp_dlg._pv_ok, cp_dlg._pv_len, cp_dlg._pv_msg.text]); quit(1); return
+	var cp_t0: float = cp_dlg._pv_t
+	for _i in 12:
+		await process_frame
+	if cp_dlg._pv_t <= cp_t0 or cp_ap.current_animation != DRBaker.PREVIEW_ANIM:
+		printerr("팝업 프리뷰가 재생되지 않음 (t %.3f → %.3f, 지금 애니 '%s')" % [cp_t0, cp_dlg._pv_t, cp_ap.current_animation]); quit(1); return
+	cp_dlg._pv_play.button_pressed = false
+	cp_dlg._pv_scrub.value = 0.5                      # 슬라이더 → 그 시점의 자세
+	var cp_arm_mid: Transform3D = win.baker.skeleton.get_bone_pose(win.baker.skeleton.find_bone("upperarm_r"))
+	if absf(cp_dlg._pv_t - 1.0) > 0.01 or absf(cp_ap.current_animation_position - 1.0) > 0.02:
+		printerr("팝업 프리뷰 슬라이더가 안 먹힘 (t %.3f, 엔진 %.3f)" % [cp_dlg._pv_t, cp_ap.current_animation_position]); quit(1); return
+	# 상체 동작을 바꾸면 프리뷰가 바로 다시 만들어진다(같은 시점의 팔 자세가 달라짐)
+	cp_dlg._defs[0]["upper"] = "Pistol_Reload"
+	cp_dlg._on_select(0)
+	cp_dlg._pv_play.button_pressed = false
+	cp_dlg._pv_scrub.value = 0.5
+	var cp_arm_new: Transform3D = win.baker.skeleton.get_bone_pose(win.baker.skeleton.find_bone("upperarm_r"))
+	if cp_arm_mid.is_equal_approx(cp_arm_new):
+		printerr("상체 동작을 바꿨는데 팝업 프리뷰의 팔 자세가 그대로"); quit(1); return
+	# 길이 맞춤 4종이 다 있고, `상체 시간에 하체를 맞춤 (하체 1번)` 을 고르면 프리뷰 길이가 상체 길이가 된다
+	var cp_reload_len: float = cp_ap.get_animation("Pistol_Reload").length
+	cp_dlg._len_mode.select(cp_dlg._len_mode.get_item_index(DRBaker.LEN_ONCE_UPPER))
+	cp_dlg._store_fields(true)
+	if cp_dlg._len_mode.item_count != 4 or absf(cp_dlg._pv_len - cp_reload_len) > 0.01 or int(cp_dlg._defs[0]["length_mode"]) != DRBaker.LEN_ONCE_UPPER:
+		printerr("길이 맞춤 `상체 시간에 하체를 맞춤 (하체 1번)` 이상: 항목 %d개, 프리뷰 길이 %.2f (기대 %.2f)" % [cp_dlg._len_mode.item_count, cp_dlg._pv_len, cp_reload_len]); quit(1); return
+	if win._all_anims.has(DRBaker.PREVIEW_ANIM):
+		printerr("미리보기 동작이 창의 목록에 새어 나옴"); quit(1); return
+	# 상체 방향 유지 · 몸통 각도 보정 — 앉기(골반이 숙음) 위에 얹은 상체가 같이 숙는 것을 막는 칸. 바꾸면 프리뷰의 가슴 방향이 바뀐다
+	cp_dlg._defs[0] = {"name": "Crouch_Aim", "lower": "Crouch_Idle", "upper": "Idle", "length_mode": DRBaker.LEN_LOWER_SPEED, "loop": true}
+	cp_dlg._refresh_list()
+	cp_dlg._on_select(0)
+	cp_dlg._pv_play.button_pressed = false
+	cp_dlg._pv_scrub.value = 0.5
+	var cp_chest: int = win.baker.skeleton.find_bone("spine_03")
+	var cp_q0: Quaternion = win.baker.skeleton.get_bone_global_pose(cp_chest).basis.get_rotation_quaternion()
+	if int(cp_dlg._keep.value) != 0:
+		printerr("칸이 없던 예전 정의인데 방향 유지가 0%% 가 아님 (%d)" % int(cp_dlg._keep.value)); quit(1); return
+	cp_dlg._keep.value = 100
+	for _i in 3:
+		await process_frame
+	var cp_q1: Quaternion = win.baker.skeleton.get_bone_global_pose(cp_chest).basis.get_rotation_quaternion()
+	cp_dlg._pitch.value = 15
+	for _i in 3:
+		await process_frame
+	var cp_q2: Quaternion = win.baker.skeleton.get_bone_global_pose(cp_chest).basis.get_rotation_quaternion()
+	var cp_keep_deg := rad_to_deg(cp_q0.angle_to(cp_q1))
+	var cp_pitch_deg := rad_to_deg(cp_q1.angle_to(cp_q2))
+	if cp_keep_deg < 15.0 or absf(cp_pitch_deg - 15.0) > 0.6 or absf(float(cp_dlg._defs[0].get("upper_keep", 0.0)) - 1.0) > 0.001 \
+			or absf(float(cp_dlg._defs[0].get("upper_pitch", 0.0)) - 15.0) > 0.001 or cp_dlg._keep_lbl.text != "100%":
+		printerr("방향 유지·각도 보정 칸 이상: 가슴이 %.1f° 세워짐(기대 15°+) · 보정으로 %.1f° 더(기대 15°) · 정의 %s" % [cp_keep_deg, cp_pitch_deg, str(cp_dlg._defs[0])]); quit(1); return
+	cp_dlg._on_list_button("add")
+	if absf(float(cp_dlg._defs[1].get("upper_keep", 0.0)) - 1.0) > 0.001 or int(cp_dlg._keep.value) != 100:
+		printerr("새로 추가한 합성의 방향 유지 기본이 100%% 가 아님"); quit(1); return
+	cp_dlg._on_list_button("del")
+	cp_dlg._defs[0] = {"name": "Crouch_Aim", "lower": "Crouch_Fwd", "upper": "Pistol_Aim_Neutral", "length_mode": DRBaker.LEN_LOWER_SPEED, "loop": true,
+		"upper_keep": 1.0, "upper_pitch": 15.0}
+	cp_dlg._refresh_list()
+	cp_dlg._on_select(0)
+	cp_dlg._on_list_button("add")                     # 두 번째 — 이름을 비워 두면 `하체+상체`
+	cp_dlg._defs[1] = {"name": "", "lower": "Walk", "upper": "Pistol_Shoot", "length_mode": DRBaker.LEN_UPPER_SPEED, "loop": false}
+	var cp_n0: int = win._all_anims.size()
+	cp_dlg._on_confirmed()
+	cp_dlg.hide()
+	for _i in 3:
+		await process_frame
+	while win._busy:
+		await process_frame
+	if cp_ap.has_animation(DRBaker.PREVIEW_ANIM) or cp_dlg.is_processing():
+		printerr("팝업을 닫았는데 미리보기 동작이 남음"); quit(1); return
+	if not win._all_anims.has("Crouch_Aim") or not win._all_anims.has("Walk+Pistol_Shoot") or win._all_anims.size() != cp_n0 + 2 \
+			or not win._picked_anims.has("Crouch_Aim") or not win._status.text.contains("상하체 합성 2개"):
+		printerr("합성 적용 이상: 애니 %d → %d, 고른 것 %s, 상태줄 '%s'" % [cp_n0, win._all_anims.size(), str(win._picked_anim_names()), win._status.text]); quit(1); return
+	var cp_colored := false
+	for i in win._anim_list.item_count:
+		if win._anim_list.get_item_text(i) == "Crouch_Aim":
+			cp_colored = win._anim_list.get_item_custom_fg_color(i).is_equal_approx(win.COMPOSITE_COLOR) and win._anim_list.get_item_tooltip(i).contains("Crouch_Fwd")
+	if not cp_colored or not win._composite_btn.text.contains("2개"):
+		printerr("합성 동작이 목록에서 구분 안 됨(색·툴팁) 또는 버튼 글자 '%s'" % win._composite_btn.text); quit(1); return
+	# 다시 열면 합성으로 만든 동작은 재료 목록에 없어야 한다
+	await win._on_open_composites()
+	await process_frame
+	if cp_dlg._anims.has("Crouch_Aim") or cp_dlg._defs.size() != 2:
+		printerr("팝업을 다시 열었는데 재료 목록/정의 이상"); quit(1); return
+	cp_dlg.hide()
+	# 프리셋 왕복 + 모델 다시 불러오기
+	var cp_preset: DRPreset = win._collect_preset()
+	if cp_preset.composites.size() != 2 or String(cp_preset.composites[0]["upper"]) != "Pistol_Aim_Neutral" \
+			or absf(float(cp_preset.composites[0].get("upper_keep", 0.0)) - 1.0) > 0.001 or absf(float(cp_preset.composites[0].get("upper_pitch", 0.0)) - 15.0) > 0.001:
+		printerr("프리셋에 합성 정의(방향 유지·각도 보정 포함)가 안 담김: %s" % str(cp_preset.composites)); quit(1); return
+	win._on_load()
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if not win._all_anims.has("Crouch_Aim") or not win._picked_anims.has("Crouch_Aim"):
+		printerr("모델을 다시 불러오니 합성 동작이 사라짐"); quit(1); return
+	var cp_empty: DRPreset = cp_preset.duplicate(true)
+	var cp_none: Array[Dictionary] = []
+	cp_empty.composites = cp_none
+	cp_empty.animations = PackedStringArray()
+	win._apply_preset(cp_empty)
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if win._all_anims.has("Crouch_Aim") or win._all_anims.size() != cp_n0 or not win._composites.is_empty():
+		printerr("합성이 없는 프리셋을 적용했는데 안 빠짐 (애니 %d)" % win._all_anims.size()); quit(1); return
+	win._apply_preset(cp_preset)
+	while win._busy:
+		await process_frame
+	await win._refresh_preview()
+	while win._busy:
+		await process_frame
+	if not win._all_anims.has("Crouch_Aim") or not win._picked_anims.has("Crouch_Aim"):
+		printerr("합성이 있는 프리셋을 적용했는데 안 돌아옴"); quit(1); return
+	print("33) 상하체 합성 팝업 OK — 툴 창의 자식 · 파트 15칸(상체 8) · 팝업 안 프리뷰(적용 전 재생 · 슬라이더 · 상체 동작을 바꾸면 바로 다시 만듦 · 길이 맞춤 4종 · 닫으면 치움 · 창의 재생은 멈춤) · 상체 방향 유지 100%% → 가슴 %.0f° 세워짐 · 각도 보정 +15° → %.1f° · 정의 2개 적용 → 애니 %d → %d(하늘색·툴팁, 자동으로 고름, 빈 이름 = 하체+상체) · 재료 목록에서 제외 · 프리셋 왕복 · 다시 불러와도 유지" % [cp_keep_deg, cp_pitch_deg, cp_n0, cp_n0 + 2])
+	win._apply_preset(cp_empty)
+	while win._busy:
+		await process_frame
+	win._rest_auto.button_pressed = false
 	for i in win._rest_anim.item_count:
 		if win._rest_anim.get_item_text(i) == "Idle":
 			win._rest_anim.select(i)

@@ -15,6 +15,12 @@ var model_path: String = ""
 # --- 위젯 ---
 var _model_edit: LineEdit
 var _extra_edit: LineEdit   # 추가 동작 폴더(선택) — 모델 파일 밖의 동작(Mixamo FBX 등)
+## 상하체 합성 정의(팝업에서 편집) · 상체로 칠 파트(비면 기본) · 팝업 · 여는 버튼
+var _composites: Array = []
+var _composite_upper: PackedStringArray = PackedStringArray()
+var _composite_dlg: DRCompositeDialog
+var _composite_btn: Button
+const COMPOSITE_COLOR := Color(0.55, 0.85, 1.0)
 var _preview: TextureRect
 var _pv_area: Control
 var _zoom_label: Button
@@ -39,6 +45,11 @@ var _smooth: CheckBox
 var _outline_px: SpinBox
 var _outline_color: ColorPickerButton
 var _outline_whole: CheckBox   # 켬 = 전체 실루엣(기본) · 끔 = 파트별
+var _pixel_grid: CheckBox   # 켬 = 도트 해상도로 그린 뒤 통째로 확대(모든 도트가 같은 크기·격자)
+## 선의 색 방식 — 둘 중 하나(ButtonGroup). 카툰 = 한 색 · 픽셀 퍼펙트 = 옆 도트 색을 _outline_tone % 만큼 어둡게
+var _outline_cartoon: CheckBox
+var _outline_pp: CheckBox
+var _outline_tone: SpinBox
 ## 동작 평면화(2D 게임식) — 팔다리 각도를 측면 시점에서 재서 화면 안에서만 돌게 한다
 var _planar: CheckBox
 var _pose_auto: CheckBox
@@ -345,17 +356,19 @@ func _build_ui() -> void:
 		_sync_picked_from_list()
 		_fill_anim_list())
 	left.add_child(_anim_filter)
-	_tip(_anim_filter, "이름에 이 글자가 들어간 애니메이션만 아래 목록에 보여 줍니다. 선택은 유지됩니다.")
+	_tip(_anim_filter, "이름에 이 글자가 들어간 애니메이션만 아래 목록에 보여 줍니다. 검색어를 바꿔도 이미 고른 선택은 유지됩니다\n" \
+		+ "(가려져 안 보일 뿐 — 아래 `선택 N개` 에 이름이 나옵니다).")
 	_anim_list = ItemList.new()
 	_anim_list.select_mode = ItemList.SELECT_MULTI
 	_anim_list.custom_minimum_size = Vector2(0, 160)
 	left.add_child(_anim_list)
-	_tip(_anim_list, "베이크할 동작. Ctrl + 클릭 = 하나씩 추가, Shift + 클릭 = 범위 선택.\n" \
-		+ "검색어를 바꿔 가며 골라도 선택이 쌓입니다(아래 '선택 N개' 확인). 고른 동작에서 레스트 자세가 자동으로 정해집니다.")
+	_tip(_anim_list, "베이크할 동작. **그냥 클릭 = 그것만**(검색으로 가려진 선택도 풀립니다) · Ctrl + 클릭 = 하나씩 추가 · Shift + 클릭 = 범위 선택.\n" \
+		+ "여러 개를 검색어를 바꿔 가며 모으려면 Ctrl(또는 Shift)을 누른 채 고르세요 — 가려진 선택이 남습니다(아래 '선택 N개' 확인).\n" \
+		+ "고른 동작에서 레스트 자세가 자동으로 정해집니다.")
 	# 선택이 바뀌면 목록 상태를 기억해 둔다. 여러 칸이 한꺼번에 바뀌는 클릭도 있어 한 프레임 뒤에 읽는다
-	_anim_list.multi_selected.connect(func(_i, _on): _sync_picked_from_list.call_deferred())
-	_anim_list.item_selected.connect(func(_i): _sync_picked_from_list.call_deferred())
-	_anim_list.empty_clicked.connect(func(_p, _b): _sync_picked_from_list.call_deferred())
+	_anim_list.multi_selected.connect(func(_i, _on): _on_anim_list_changed.call_deferred())
+	_anim_list.item_selected.connect(func(_i): _on_anim_list_changed.call_deferred())
+	_anim_list.empty_clicked.connect(func(_p, _b): _on_anim_list_changed.call_deferred())
 	var acrow := HBoxContainer.new()
 	_anim_count = Label.new()
 	_anim_count.text = "선택 0개"
@@ -372,6 +385,15 @@ func _build_ui() -> void:
 	acrow.add_child(aclear)
 	left.add_child(acrow)
 	_tip(aclear, "고른 동작을 전부 해제합니다(검색으로 목록에 안 보이는 것까지).")
+	# 상하체 합성 — 설정은 팝업에서, 만든 동작은 위 목록에 다른 애니와 똑같이 나타난다(하늘색)
+	_composite_btn = Button.new()
+	_composite_btn.text = "상하체 합성…"
+	_composite_btn.clip_text = true
+	_composite_btn.pressed.connect(_on_open_composites)
+	left.add_child(_composite_btn)
+	_tip(_composite_btn, "하체는 한 동작에서, 상체는 다른 동작에서 가져와 새 동작을 만드는 팝업을 엽니다.\n" \
+		+ "예: 앉아 걷기(Crouch_Fwd) + 소총 조준(Rifle_Aiming_Idle) = 앉아 걸으며 조준.\n" \
+		+ "만든 동작은 위 목록에 하늘색으로 나타나고, 다른 애니처럼 고르고 · 세트에 담고 · 굽습니다. 프리셋에 같이 저장됩니다.")
 
 	# --- 레스트 자세: 파트 그림을 찍을 자세 하나. 자동이면 고른 동작에서 찾아 아래 칸에 넣는다 ---
 	_rest_auto = CheckBox.new()
@@ -573,7 +595,9 @@ func _build_ui() -> void:
 	rsplit.add_child(right)
 
 	# 상단 바 — 도트 스타일. 왼쪽(설정)·오른쪽(그리기 순서)·아래(파트 트리)에 이어 위쪽 빈 자리를 쓴다(09-16 사용자 요청).
-	var topbar := HBoxContainer.new()
+	# HFlowContainer — 항목이 늘어도 최소 너비가 커지지 않고 다음 줄로 넘어간다
+	# (HBox 였을 때 체크박스 하나를 더 넣자 가운데 열이 넓어져 오른쪽 열이 창 밖으로 밀렸다 — 스모크 16, 02 U8)
+	var topbar := HFlowContainer.new()
 	var tl := Label.new()
 	tl.text = "도트 스타일"
 	tl.add_theme_font_size_override("font_size", 13)
@@ -586,20 +610,47 @@ func _build_ui() -> void:
 	_outline_px.max_value = 3
 	_outline_px.step = 1
 	_outline_px.value = 0
-	_outline_px.tooltip_text = "카툰 렌더링처럼 캐릭터 바깥에 선을 그립니다. 값 = 선 두께(도트 수, 카메라로 확대해도 도트 단위), 0 = 없음.\n" \
-		+ "선을 어디에 그릴지는 옆의 `전체 실루엣` 체크가 정합니다.\n" \
+	_outline_px.tooltip_text = "캐릭터 가장자리에 선을 그립니다. 값 = 선 두께(도트 수, 카메라로 확대해도 도트 단위), 0 = 없음.\n" \
+		+ "선의 색은 옆의 `카툰` / `픽셀 퍼펙트` 중 하나가, 선을 어디에 그릴지는 `전체 실루엣` 체크가 정합니다.\n" \
 		+ "2D 순서 프리뷰와 베이크 결과(장비 포함)에 적용되고, 3D 모드에는 안 보입니다."
 	_outline_px.value_changed.connect(_on_style_changed)
 	topbar.add_child(_outline_px)
 	ol.tooltip_text = _outline_px.tooltip_text
 	ol.mouse_filter = Control.MOUSE_FILTER_PASS
+	# 선의 색 방식 — 둘 중 하나만(같은 ButtonGroup 이라 하나를 켜면 다른 하나가 꺼진다). 09-21 사용자 요청:
+	# "픽셀 퍼펙트는 색감에 맞게 그 결의 톤으로 들어가는 것 — 카툰 아웃라인과 같이 적용될 수 없으니 토글이어야"
+	var style_group := ButtonGroup.new()
+	_outline_cartoon = CheckBox.new()
+	_outline_cartoon.text = "카툰"
+	_outline_cartoon.button_group = style_group
+	_outline_cartoon.button_pressed = true
+	_outline_cartoon.tooltip_text = "선 전체를 옆 색 버튼의 **한 색**(보통 검정)으로 두릅니다 — 만화 같은 또렷한 윤곽.\n`픽셀 퍼펙트` 와 둘 중 하나만 켤 수 있습니다."
+	topbar.add_child(_outline_cartoon)
 	_outline_color = ColorPickerButton.new()
 	_outline_color.color = Color.BLACK
 	_outline_color.edit_alpha = false
 	_outline_color.custom_minimum_size = Vector2(44, 0)
-	_outline_color.tooltip_text = "아웃라인 색 (기본 검정)"
+	_outline_color.tooltip_text = "카툰 아웃라인의 색 (기본 검정). `픽셀 퍼펙트` 에서는 쓰이지 않습니다."
 	_outline_color.color_changed.connect(_on_style_changed)
 	topbar.add_child(_outline_color)
+	_outline_pp = CheckBox.new()
+	_outline_pp.text = "픽셀 퍼펙트"
+	_outline_pp.button_group = style_group
+	_outline_pp.tooltip_text = "선을 따로 두르는 게 아니라, 선의 도트마다 **바로 옆 몸 도트의 색을 어둡게** 해서 칠합니다.\n" \
+		+ "주황 살 옆은 짙은 주황, 보라 관절 옆은 짙은 보라 — 가장자리가 그 자리 색의 결·톤을 따라갑니다(손으로 찍은 도트 그림의 색 있는 외곽선).\n" \
+		+ "두께는 왼쪽 `아웃라인` 칸(1 권장), 어두운 정도는 오른쪽 `%` 칸. `카툰` 과 둘 중 하나만 켤 수 있습니다."
+	topbar.add_child(_outline_pp)
+	_outline_tone = SpinBox.new()
+	_outline_tone.min_value = 5
+	_outline_tone.max_value = 95
+	_outline_tone.step = 5
+	_outline_tone.value = 45
+	_outline_tone.suffix = "%"
+	_outline_tone.editable = false
+	_outline_tone.tooltip_text = "픽셀 퍼펙트에서 옆 도트 색을 얼마나 어둡게 할지. 낮을수록 몸 색에 가깝고(은은함), 높을수록 검정에 가깝습니다(또렷함). 기본 45%."
+	_outline_tone.value_changed.connect(_on_style_changed)
+	topbar.add_child(_outline_tone)
+	style_group.pressed.connect(func(_b): _on_style_changed(0))
 	_outline_whole = CheckBox.new()
 	_outline_whole.text = "전체 실루엣"
 	_outline_whole.button_pressed = true
@@ -607,6 +658,21 @@ func _build_ui() -> void:
 		+ "끔 = 파트마다 선 — 관절이 겹치는 곳에도 선이 생깁니다(종이 인형 느낌)."
 	_outline_whole.toggled.connect(_on_style_changed)
 	topbar.add_child(_outline_whole)
+	_pixel_grid = CheckBox.new()
+	_pixel_grid.text = "도트 격자 고정"
+	_pixel_grid.button_pressed = false
+	_pixel_grid.tooltip_text = "켜면 퍼펫을 **도트 해상도 그대로** 그린 뒤 통째로 확대합니다 — 파트가 돌아가도 도트가 기울어지지 않고,\n" \
+		+ "모든 도트가 같은 크기로 같은 격자에 놓입니다(정통 도트 그래픽). 위치도 정수 픽셀에 붙습니다.\n" \
+		+ "대신 1픽셀 미만의 움직임은 표현되지 않아 느린 동작에서 도트가 톡톡 튀어 보일 수 있습니다(부드러운 도트 이동과 반대 성격 — 켜면 그쪽은 꺼집니다).\n" \
+		+ "베이크하면 `puppet.tscn` 옆에 **`puppet_pixel.tscn`** 이 같이 나옵니다 — 게임에는 그걸 넣고 `pixel_scale`(정수)로 키우세요.\n" \
+		+ "2D 순서 프리뷰에서 확인할 수 있고 3D 모드에는 영향이 없습니다."
+	_pixel_grid.toggled.connect(func(_on):
+		if _smooth != null:
+			_smooth.disabled = _is_pixel_grid()
+		_apply_puppet_scale()
+		_layout_preview()
+		_refresh_preview())
+	topbar.add_child(_pixel_grid)
 	var oh := Label.new()
 	oh.text = "2D 순서 프리뷰 · 베이크 결과에 적용 (3D 모드에는 안 보임)"
 	oh.add_theme_font_size_override("font_size", 11)
@@ -952,6 +1018,11 @@ func _collect_preset() -> DRPreset:
 	var p := DRPreset.new()
 	p.model_path = _model_edit.text.strip_edges()
 	p.extra_anim_dir = _extra_edit.text.strip_edges()
+	var comp_copy: Array[Dictionary] = []
+	for c in _composites:
+		comp_copy.append((c as Dictionary).duplicate(true))
+	p.composites = comp_copy
+	p.composite_upper_parts = _composite_upper
 	p.yaw = _yaw.value
 	p.pitch = _pitch.value
 	p.ortho = _ortho.value
@@ -981,6 +1052,9 @@ func _collect_preset() -> DRPreset:
 	p.outline_px = int(_outline_px.value)
 	p.outline_color = _outline_color.color
 	p.outline_whole = _outline_whole.button_pressed
+	p.outline_style = DRExporter.OUTLINE_PIXEL_PERFECT if _is_outline_pixel_perfect() else DRExporter.OUTLINE_CARTOON
+	p.outline_tone = _outline_tone.value / 100.0
+	p.pixel_grid = _pixel_grid.button_pressed
 	p.planar = _planar.button_pressed
 	p.pose_auto = _pose_auto.button_pressed
 	p.pose_yaw = _pose_yaw.value
@@ -997,12 +1071,24 @@ func _apply_preset(p: DRPreset) -> void:
 	# 모델(또는 추가 동작 폴더)이 다르면 먼저 새로 불러온다(파트 목록/애니 목록이 여기서 채워진다)
 	var extra_changed := p.extra_anim_dir != _extra_edit.text.strip_edges()
 	_extra_edit.text = p.extra_anim_dir
+	# 상하체 합성 정의 — 모델을 (다시) 불러오면 setup 이 만들고, 같은 모델이면 합성만 다시 만든다
+	var comp_changed := str(p.composites) != str(_composites) or p.composite_upper_parts != _composite_upper
+	_composites = []
+	for c in p.composites:
+		_composites.append((c as Dictionary).duplicate(true))
+	_composite_upper = p.composite_upper_parts
 	if p.model_path != "" and (p.model_path != _model_edit.text.strip_edges() or extra_changed):
 		_model_edit.text = p.model_path
 		_on_load()
 	elif baker == null and p.model_path != "":
 		_model_edit.text = p.model_path
 		_on_load()
+	elif baker != null and comp_changed:
+		baker.opts.composites = _composites
+		baker.opts.composite_upper_parts = _composite_upper
+		baker.build_composites(_composites, _composite_upper)
+		_read_anim_names()
+		_refill_rest_anims("")
 
 	_yaw.value = p.yaw
 	_pitch.value = p.pitch
@@ -1024,6 +1110,12 @@ func _apply_preset(p: DRPreset) -> void:
 	_outline_px.value = p.outline_px
 	_outline_color.color = p.outline_color
 	_outline_whole.button_pressed = p.outline_whole
+	if p.outline_style == DRExporter.OUTLINE_PIXEL_PERFECT:
+		_outline_pp.button_pressed = true
+	else:
+		_outline_cartoon.button_pressed = true
+	_outline_tone.value = roundf(p.outline_tone * 100.0)
+	_pixel_grid.button_pressed = p.pixel_grid
 	_planar.button_pressed = p.planar
 	_pose_auto.button_pressed = p.pose_auto
 	_pose_yaw.value = p.pose_yaw
@@ -1117,6 +1209,8 @@ func _current_opts() -> DRBaker.Options:
 	o.alpha_threshold = _alpha.value
 	o.color_levels = int(_levels.value)
 	o.extra_anim_dir = _extra_edit.text.strip_edges()
+	o.composites = _composites
+	o.composite_upper_parts = _composite_upper
 	# 0번 = "(바인드 포즈)" → rest_anim 은 빈 값(02 C12: 예전엔 그 글자가 그대로 애니 이름으로 넘어갔다)
 	if _rest_anim.selected > 0:
 		o.rest_anim = _rest_anim.get_item_text(_rest_anim.selected)
@@ -1193,21 +1287,10 @@ func _on_load() -> void:
 		baker = null
 		return
 
-	# 애니메이션 목록
-	_all_anims = PackedStringArray()
+	# 애니메이션 목록 (모델 + 추가 동작 폴더 + 상하체 합성)
 	_picked_anims.clear()
-	if baker.anim_player != null:
-		for a in baker.anim_player.get_animation_list():
-			_all_anims.append(String(a))
-	_rest_anim.clear()
-	_rest_anim.add_item("(바인드 포즈)")
-	for a in _all_anims:
-		_rest_anim.add_item(a)
-	# Idle 계열을 기본 선택
-	for i in _rest_anim.item_count:
-		if _rest_anim.get_item_text(i).to_lower().begins_with("idle"):
-			_rest_anim.select(i)
-			break
+	_read_anim_names()
+	_refill_rest_anims("")            # Idle 계열을 기본 선택
 	_fill_anim_list()
 
 	# 파트 목록
@@ -1465,17 +1548,26 @@ func _smooth_material() -> ShaderMaterial:
 func _apply_part_material() -> void:
 	if _puppet_vp == null:
 		return
-	var smooth := _smooth != null and _smooth.button_pressed
+	var smooth := _smooth != null and _smooth.button_pressed and not _is_pixel_grid()   # 도트 격자 고정이면 경계를 섞지 않는다
 	var opx := int(_outline_px.value) if _outline_px != null else 0
 	var whole := _outline_whole == null or _outline_whole.button_pressed
 	var ocol: Color = _outline_color.color if _outline_color != null else Color.BLACK
 	var part_opx := opx if not whole else 0
+	# 선의 색 방식: 픽셀 퍼펙트면 옆 도트 색의 톤, 아니면 카툰(한 색). 색 버튼·% 칸은 자기 방식일 때만 풀린다
+	var tone_on := _is_outline_pixel_perfect()
+	var tone_v := (_outline_tone.value / 100.0) if _outline_tone != null else 0.45
+	if _outline_color != null:
+		_outline_color.disabled = tone_on
+	if _outline_tone != null:
+		_outline_tone.editable = tone_on
 	var mat: Material = null
 	if smooth or part_opx > 0:
 		var sm := _smooth_material()
 		sm.set_shader_parameter("smooth_edges", smooth)
 		sm.set_shader_parameter("outline_px", part_opx)
 		sm.set_shader_parameter("outline_color", ocol)
+		sm.set_shader_parameter("outline_tone", tone_on)
+		sm.set_shader_parameter("outline_tone_strength", tone_v)
 		mat = sm
 	var ol_mat: Material = null
 	if opx > 0 and whole:
@@ -1486,6 +1578,8 @@ func _apply_part_material() -> void:
 		_outline_mat.set_shader_parameter("smooth_edges", smooth)
 		_outline_mat.set_shader_parameter("outline_px", opx)
 		_outline_mat.set_shader_parameter("outline_color", ocol)
+		_outline_mat.set_shader_parameter("outline_tone", tone_on)
+		_outline_mat.set_shader_parameter("outline_tone_strength", tone_v)
 		ol_mat = _outline_mat
 	for pname in _puppet_bones.keys():
 		var nodes: Dictionary = _puppet_bones[pname]
@@ -1496,6 +1590,15 @@ func _apply_part_material() -> void:
 		if ol.material != ol_mat:
 			ol.material = ol_mat
 		ol.visible = ol_mat != null and art.visible
+
+
+func _is_pixel_grid() -> bool:
+	return _pixel_grid != null and _pixel_grid.button_pressed
+
+
+## 선의 색 방식이 픽셀 퍼펙트(옆 도트 색의 톤)인가. 아니면 카툰(한 색)
+func _is_outline_pixel_perfect() -> bool:
+	return _outline_pp != null and _outline_pp.button_pressed
 
 
 ## 상단 바(아웃라인)가 바뀌면 — 셰이더 값만 바꾸면 되므로 파트 캐시는 그대로
@@ -1511,7 +1614,11 @@ func _on_style_changed(_v) -> void:
 func _apply_puppet_scale() -> void:
 	if _puppet_vp == null or baker == null:
 		return
-	var on := _smooth != null and _smooth.button_pressed
+	# 도트 격자 고정: 도트 해상도(배율 1)로 그리고 프리뷰가 통째로 확대한다 → 회전한 파트도 도트 격자에 다시 찍혀
+	# 모든 도트가 같은 크기·같은 격자. 자식의 위치도 정수 픽셀에 붙인다(베이크의 puppet_pixel.tscn 과 같은 설정).
+	var pixel := _is_pixel_grid()
+	_puppet_vp.snap_2d_transforms_to_pixel = pixel
+	var on := _smooth != null and _smooth.button_pressed and not pixel
 	var vs := Vector2(baker.opts.view_size)
 	var pad := Vector2(_puppet_pad())
 	var r := 1.0
@@ -1779,15 +1886,138 @@ func _fill_anim_list() -> void:
 	for a in _all_anims:
 		if f == "" or a.to_lower().contains(f):
 			var idx := _anim_list.add_item(a)
+			if baker != null and baker.composite_anims.has(a):     # 상하체 합성으로 만든 동작
+				_anim_list.set_item_custom_fg_color(idx, COMPOSITE_COLOR)
+				_anim_list.set_item_tooltip(idx, _composite_tooltip(a))
 			if _picked_anims.has(a):
 				_anim_list.select(idx, false)
 	_update_anim_count()
+	if _composite_btn != null:
+		_composite_btn.text = "상하체 합성…" if _composites.is_empty() else "상하체 합성… (%d개)" % _composites.size()
+
+
+## 모델(+추가 동작 폴더 + 상하체 합성)의 애니 이름을 다시 읽는다
+func _read_anim_names() -> void:
+	_all_anims = PackedStringArray()
+	if baker != null and baker.anim_player != null:
+		for a in baker.anim_player.get_animation_list():
+			if String(a).begins_with("__"):
+				continue              # 숨은 동작(팝업 미리보기 DRBaker.PREVIEW_ANIM)
+			_all_anims.append(String(a))
+
+
+## 레스트 드롭다운을 다시 채운다. keep = 다시 골라 둘 애니 이름("" 이면 Idle 계열을 기본 선택)
+func _refill_rest_anims(keep: String) -> void:
+	_rest_anim.clear()
+	_rest_anim.add_item("(바인드 포즈)")
+	for a in _all_anims:
+		_rest_anim.add_item(a)
+	var want := -1
+	for i in _rest_anim.item_count:
+		var t := _rest_anim.get_item_text(i)
+		if keep != "" and t == keep:
+			want = i
+			break
+		if keep == "" and want < 0 and i > 0 and t.to_lower().begins_with("idle"):
+			want = i
+	if want >= 0:
+		_rest_anim.select(want)
+
+
+func _composite_tooltip(anim_name: String) -> String:
+	if baker == null:
+		return ""
+	for info in baker.composite_info:
+		var d: Dictionary = info
+		if String(d.get("name", "")) == anim_name:
+			return "상하체 합성 — 하체 %s × %d + 상체 %s · %.2f초%s" % [d.get("lower", ""), int(d.get("lower_cycles", 1)),
+				d.get("upper", ""), float(d.get("length", 0.0)), " · 반복" if bool(d.get("loop", false)) else ""]
+	return ""
+
+
+## 상하체 합성 팝업을 연다. 에디터 본체가 아니라 이 창의 자식으로 붙인다(파일 대화상자와 같은 이유 — 02 U4).
+func _on_open_composites() -> void:
+	if baker == null:
+		_status.text = "먼저 모델을 불러오세요."
+		return
+	if _composite_dlg == null or not is_instance_valid(_composite_dlg):
+		_composite_dlg = DRCompositeDialog.new()
+		_composite_dlg.applied.connect(_on_composites_applied)
+		_composite_dlg.closed.connect(_on_composite_dialog_closed)
+		add_child(_composite_dlg)
+	while _busy:                       # 팝업의 프리뷰가 베이커의 자세를 움직인다 — 창의 렌더가 끝난 뒤에 연다
+		await get_tree().process_frame
+	# 팝업이 떠 있는 동안 창의 재생은 멈춘다(둘이 같은 베이커의 자세를 서로 바꾸면 안 된다)
+	if _play != null and _play.button_pressed:
+		_play.button_pressed = false
+	var src := PackedStringArray()
+	var lengths := {}
+	for a in _all_anims:
+		if baker.composite_anims.has(a):
+			continue                  # 합성으로 만든 것은 재료로 쓰지 않는다
+		src.append(a)
+		lengths[a] = baker.anim_player.get_animation(a).length
+	_composite_dlg.open_with(baker, src, lengths, baker.rig.order, _composites, _composite_upper)
+	_composite_dlg.popup_centered(Vector2i(1080, 620))
+
+
+## 팝업이 닫혔다(적용이든 닫기든) — 팝업 프리뷰가 움직여 놓은 자세·파트 표시를 창의 상태로 되돌린다
+func _on_composite_dialog_closed() -> void:
+	if baker == null:
+		return
+	_refresh_preview()
+
+
+## 팝업의 `적용` — 정의를 기억하고, 모델을 다시 불러오지 않은 채 합성 동작만 다시 만들어 목록에 반영한다
+func _on_composites_applied(defs: Array, upper_parts: PackedStringArray, auto_pick: bool) -> void:
+	_composites = []
+	for d in defs:
+		_composites.append((d as Dictionary).duplicate(true))
+	_composite_upper = upper_parts
+	await _rebuild_composites(auto_pick)
+
+
+func _rebuild_composites(auto_pick: bool) -> void:
+	if baker == null:
+		return
+	while _busy:                       # 렌더가 도는 중에 애니를 갈아 끼우지 않는다
+		await get_tree().process_frame
+	var old := baker.composite_anims.duplicate()
+	var rest_name := _rest_anim.get_item_text(_rest_anim.selected) if _rest_anim.selected > 0 else ""
+	baker.opts.composites = _composites
+	baker.opts.composite_upper_parts = _composite_upper
+	baker.build_composites(_composites, _composite_upper)
+	_read_anim_names()
+	for n in old:                      # 없어진 합성은 고른 목록에서 뺀다
+		if not baker.composite_anims.has(n):
+			_picked_anims.erase(n)
+	if auto_pick:
+		for n in baker.composite_anims:
+			_picked_anims[n] = true
+	_refill_rest_anims(rest_name if _all_anims.has(rest_name) else "")
+	_fill_anim_list()
+	_auto_rest_key = ""                # 고른 동작이 바뀌었을 수 있다 → 레스트 자동이 다시 찾는다
+	_part_sig = ""                     # 레스트가 합성 동작이었다면 내용이 바뀌었을 수 있다 → 파트를 다시 찍는다
+	var w := baker.composite_warnings
+	_status.text = "상하체 합성 %d개 적용%s" % [baker.composite_anims.size(),
+		("  ⚠ %d건: %s" % [w.size(), w[0]]) if w.size() > 0 else ""]
+	await _refresh_preview()
+
+
+## 사용자가 목록을 눌렀다. **그냥 클릭 = 그것만**(검색으로 가려진 선택까지 푼다), **Ctrl·Shift + 클릭 = 추가**(가려진 선택은 남는다).
+## 검색을 안 할 때의 목록은 원래 그렇게 동작한다(그냥 클릭하면 나머지가 풀림). 검색 중에는 가려진 선택이 남아
+## "이것만" 이 아니라 "추가" 가 되는 바람에, 레스트 자동이 방금 누른 동작을 따라가지 않았다(02 U14).
+func _on_anim_list_changed() -> void:
+	var additive := Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_META)
+	_sync_picked_from_list(not additive)
 
 
 ## 목록에 지금 보이는 항목의 선택 상태를 _picked_anims 에 옮긴다.
-## 검색으로 숨은 항목의 선택은 건드리지 않는다.
-func _sync_picked_from_list() -> void:
+## replace_hidden = false 면 검색으로 숨은 항목의 선택은 건드리지 않는다(검색어를 바꿀 때 · Ctrl/Shift 클릭).
+func _sync_picked_from_list(replace_hidden: bool = false) -> void:
 	var before := _picked_anim_names()
+	if replace_hidden:
+		_picked_anims.clear()
 	for i in _anim_list.item_count:
 		var n := _anim_list.get_item_text(i)
 		if _anim_list.is_selected(i):
@@ -2047,6 +2277,12 @@ func _on_bake() -> void:
 					ln += " ⚠ " + String(e["dropped_reason"])
 				lines.append(ln)
 			msg = "완료 — 세트 %d개 → %s/sets.json\n%s" % [lines.size(), out, "\n".join(lines)]
+			var removed: PackedStringArray = res.get("removed_dirs", PackedStringArray())
+			if removed.size() > 0:
+				msg += "\n목록에서 빠진 옛 세트 폴더 %d개를 치웠습니다: %s" % [removed.size(), ", ".join(removed)]
+			var left: PackedStringArray = res.get("left_dirs", PackedStringArray())
+			if left.size() > 0:
+				msg += "\n⚠ 옛 세트 폴더에 다른 파일이 있어 남겼습니다: %s" % ", ".join(left)
 		else:
 			msg = "완료 — 파트 %d개, 애니 %d개 → %s" % [
 				res["parts"].size(), res["animations"].size(), res["scene"]]
@@ -2072,6 +2308,9 @@ func _bake_cfg() -> Dictionary:
 		"outline_px": int(_outline_px.value),
 		"outline_color": _outline_color.color,
 		"outline_whole": _outline_whole.button_pressed,
+		"outline_style": DRExporter.OUTLINE_PIXEL_PERFECT if _is_outline_pixel_perfect() else DRExporter.OUTLINE_CARTOON,
+		"outline_tone": _outline_tone.value / 100.0,
+		"pixel_grid": _pixel_grid.button_pressed,
 		"keep_previous": _keep_anims.button_pressed,
 		"z_override": _current_z_override(),
 	}

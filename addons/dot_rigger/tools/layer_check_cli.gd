@@ -223,7 +223,7 @@ func _check_split(scene: PackedScene) -> void:
 		for side in ["L", "R"]:
 			var fz := int(loc[side + "_Foot"]["z"])
 			var tz := int(loc[side + "_Toe"]["z"])
-			if tz != fz + 1:
+			if tz != fz + DRRigModel.Z_STEP:
 				adjacent = false
 				bad = "(t=%.2f %s 발 z=%d 발가락 z=%d)" % [t, side, fz, tz]
 	for toe in lo.keys():
@@ -272,7 +272,7 @@ func _check_split(scene: PackedScene) -> void:
 			continue
 		var tz := (toe_bone.get_node("stretch/art") as Sprite2D).z_index
 		var fz := (foot_bone.get_node("stretch/art") as Sprite2D).z_index
-		_check(tz == fz + 1, "%s 씬 z_index 발 %d / 발가락 %d" % [side, fz, tz])
+		_check(tz == fz + DRRigModel.Z_STEP, "%s 씬 z_index 발 %d / 발가락 %d" % [side, fz, tz])
 		var path := NodePath(String(pup.get_path_to(toe_bone)) + ":rotation")
 		var tr := a.find_track(path, Animation.TYPE_VALUE)
 		var rlo := INF

@@ -26,6 +26,11 @@ class_name DREquipItem
 ## 앞에 그리려면 크게, 뒤에 그리려면 작게 준다.
 @export var z_index: int = 0
 
+## 그리기 순서를 "이 파트 바로 앞"으로 정한다(예: "Torso" = 몸통 바로 앞 · 몸통보다 앞 순서인 파트들의 뒤). 비면 위의 z_index(절대값)를 쓴다.
+## 파트의 z 는 세트마다 다르고 자동 순서로 구운 씬은 프레임마다도 바뀌므로, 절대값보다 이쪽이 안전하다 — 퍼펫이 그 파트의 z 를 매 프레임 따라간다.
+## (파트 z 간격이 10 인 씬이어야 사이에 낀다. 09-21 이전에 구운 씬은 간격이 1 이라 그 파트와 같은 z 가 된다 → 다시 구울 것.)
+@export var z_after_part: String = ""
+
 ## 파트의 단축 보정(stretch)을 같이 따를지. 보통 true.
 ## 헬멧처럼 파트에 밀착된 것은 true, 깃발처럼 매달린 것은 false 가 자연스럽다.
 @export var follow_stretch: bool = true

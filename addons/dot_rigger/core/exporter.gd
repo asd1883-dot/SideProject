@@ -24,6 +24,13 @@ const SMOOTH_SHADER := "res://addons/dot_rigger/runtime/smooth_pixel.gdshader"
 ## 도트 아웃라인(카툰 선). 0 = 없음, 1~3 = 도트 두께. 방식은 outline_whole 이 정한다.
 var outline_px: int = 0
 var outline_color: Color = Color.BLACK
+## 선의 색을 정하는 방식 — 둘 중 하나.
+##   OUTLINE_CARTOON       선 전체가 outline_color 한 색(보통 검정)
+##   OUTLINE_PIXEL_PERFECT 선의 도트마다 바로 옆 몸 도트의 색을 outline_tone 만큼 어둡게(그 자리 색의 톤을 따라가는 가장자리)
+const OUTLINE_CARTOON := 0
+const OUTLINE_PIXEL_PERFECT := 1
+var outline_style: int = OUTLINE_CARTOON
+var outline_tone: float = 0.45
 ## true = 캐릭터 전체 실루엣에만 선(기본), false = 파트마다 선(관절 겹침에도).
 ## 전체 실루엣은 파트마다 "밑깔개" 스프라이트(stretch/outline)를 하나 더 두고 모든 파트 뒤(OUTLINE_Z)에 깐다 —
 ## 같은 셰이더의 outline_only 모드가 부풀린 실루엣을 선 색으로 그리고, 파트 본체가 그 위를 덮어 바깥 테두리만 남는다.
@@ -31,6 +38,15 @@ var outline_whole: bool = true
 ## 밑깔개의 절대 z. 파트 z 는 0 부터(뒤 -> 앞)라 그 바로 뒤
 const OUTLINE_Z := -1
 const OUTLINE_NODE := "outline"
+
+## 도트 격자 고정 — puppet.tscn 옆에 puppet_pixel.tscn(DRPixelPuppet 래퍼)을 같이 만든다.
+## 래퍼가 퍼펫을 도트 해상도의 SubViewport 에 그려 정수 배로 키우므로 파트가 돌아도 도트가 기울지 않는다.
+## 배율 1 로 그려질 것이므로 경계를 섞는 부드러운 도트 이동은 붙이지 않는다(붙이면 1배에서 흐려질 뿐).
+var pixel_grid: bool = false
+const PIXEL_SCRIPT := "res://addons/dot_rigger/runtime/dr_pixel_puppet.gd"
+const PIXEL_SCENE := "puppet_pixel.tscn"
+## 움직임 범위 바깥에 더 두는 여유(도트)
+const PIXEL_PAD := 2
 
 ## 그리기 순서 수동 지정 — 레이어 이름, 뒤 -> 앞. 비어 있으면 3D 깊이로 자동 계산한다.
 ## 값이 있으면 그 순서를 모든 프레임에 고정하고, 프레임별 z 트랙을 만들지 않는다.
@@ -86,6 +102,9 @@ func apply_cfg(cfg: Dictionary) -> void:
 	if cfg.has("outline_color"):
 		outline_color = Color(cfg["outline_color"])
 	outline_whole = bool(cfg.get("outline_whole", outline_whole))
+	outline_style = int(cfg.get("outline_style", outline_style))
+	outline_tone = clampf(float(cfg.get("outline_tone", outline_tone)), 0.0, 1.0)
+	pixel_grid = bool(cfg.get("pixel_grid", pixel_grid))
 	if cfg.has("z_override"):
 		z_override = PackedStringArray(cfg["z_override"])
 
@@ -154,13 +173,14 @@ func run() -> Dictionary:
 	# 5) 저장
 	_write_json()
 	var scene_path := out_dir.path_join("puppet.tscn")
-	var err := _build_and_save_scene(scene_path)
+	var err := _save_scenes()
 
 	return {
 		"ok": err == OK,
 		"parts": _part_crop.keys(),
 		"animations": _anim_data.keys(),
 		"scene": scene_path,
+		"pixel_scene": out_dir.path_join(PIXEL_SCENE) if pixel_grid else "",
 		"json": out_dir.path_join("rig.json"),
 		"kept": kept_anims,
 		"dropped_reason": dropped_reason,
@@ -264,7 +284,113 @@ func resolve_z_order() -> PackedStringArray:
 ## 에디터에서 PNG 임포트가 끝난 뒤 다시 호출하면, 씬이 임베드된 이미지 대신
 ## 임포트된 텍스처 파일을 참조하도록 다시 저장한다.
 func rebuild_scene() -> int:
-	return _build_and_save_scene(out_dir.path_join("puppet.tscn"))
+	return _save_scenes()
+
+
+## puppet.tscn (+ 도트 격자 고정면 puppet_pixel.tscn). 끄고 다시 구우면 예전 래퍼는 지운다(낡은 범위가 남지 않게).
+func _save_scenes() -> int:
+	var err := _build_and_save_scene(out_dir.path_join("puppet.tscn"))
+	if err != OK:
+		return err
+	var pixel_path := out_dir.path_join(PIXEL_SCENE)
+	if pixel_grid:
+		return _build_pixel_scene(pixel_path)
+	if FileAccess.file_exists(pixel_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(pixel_path))
+	return OK
+
+
+## 레스트 + 구운 모든 애니의 모든 프레임에서 파트 그림이 닿는 범위(캔버스 좌표, 도트).
+## 도트 격자 고정 래퍼의 SubViewport 가 이 범위를 담아야 엎드리기·구르기처럼 캔버스를 벗어나는 동작도 안 잘린다.
+## 씬 조립(_build_and_save_scene)과 같은 식: 본 = 부모 × T(p)R(r), 그림 = R(레스트각) S(s,1) R(−레스트각) (캔버스 점 − 레스트 머리)
+func pixel_bounds() -> Rect2i:
+	var frames: Array = [{"parts": {}}]      # 빈 프레임 = 레스트 자세
+	for aname in _anim_data.keys():
+		for fr in (_anim_data[aname] as Dictionary).get("frames", []):
+			frames.append(fr)
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for fr in frames:
+		var pd: Dictionary = (fr as Dictionary).get("parts", {})
+		var xf := {}
+		for pname in baker.rig.order:        # 부모가 먼저 나오는 순서
+			if not _part_crop.has(pname):
+				continue
+			var p: DRRigModel.Part = baker.rig.parts[pname]
+			var parent_xf := Transform2D.IDENTITY
+			var parent_head := Vector2.ZERO
+			if p.parent != "" and xf.has(p.parent):
+				parent_xf = xf[p.parent]
+				parent_head = _rest_head(p.parent)
+			var pos := _rest_head(pname) - parent_head
+			var rot := 0.0
+			var s := 1.0
+			if pd.has(pname):
+				var e: Dictionary = pd[pname]
+				var pa: Array = e["p"]
+				pos = Vector2(float(pa[0]), float(pa[1]))
+				rot = float(e["r"])
+				if apply_stretch and not baker.rig.no_stretch.has(pname):
+					s = clampf(float(e.get("s", 1.0)), 1.0 / stretch_limit, stretch_limit)
+			var g: Transform2D = parent_xf * Transform2D(rot, pos)
+			xf[pname] = g
+			var ra := _rest_angle(pname)
+			var m := Transform2D(ra, Vector2.ZERO) * Transform2D(0.0, Vector2(s, 1.0), 0.0, Vector2.ZERO) * Transform2D(-ra, Vector2.ZERO)
+			var crop: Rect2i = _part_crop[pname]
+			for corner in [Vector2(crop.position), Vector2(crop.end.x, crop.position.y), Vector2(crop.end), Vector2(crop.position.x, crop.end.y)]:
+				var pt: Vector2 = g * (m * (corner - _rest_head(pname)))
+				lo = lo.min(pt)
+				hi = hi.max(pt)
+	if lo.x == INF:
+		return Rect2i(Vector2i.ZERO, baker.opts.view_size)
+	var pad := float(PIXEL_PAD)
+	var r := Rect2(lo - Vector2(pad, pad), (hi - lo) + Vector2(pad, pad) * 2.0)
+	var p0 := Vector2i(floori(r.position.x), floori(r.position.y))
+	var p1 := Vector2i(ceili(r.end.x), ceili(r.end.y))
+	return Rect2i(p0, p1 - p0)
+
+
+func _build_pixel_scene(path: String) -> int:
+	var inner_ps := ResourceLoader.load(out_dir.path_join("puppet.tscn"), "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	if inner_ps == null:
+		return ERR_CANT_OPEN
+	var b := pixel_bounds()
+	var root := Node2D.new()
+	root.name = "PuppetPixel"
+	var view := SubViewport.new()
+	view.name = "View"
+	view.size = b.size
+	view.transparent_bg = true
+	view.disable_3d = true
+	view.snap_2d_transforms_to_pixel = true
+	view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
+	view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	root.add_child(view)
+	var inner := inner_ps.instantiate() as Node2D
+	inner.name = "Puppet"
+	inner.position = Vector2(-b.position)
+	view.add_child(inner)
+	var screen := Sprite2D.new()
+	screen.name = "Screen"
+	screen.centered = false
+	screen.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	screen.position = Vector2(b.position)
+	root.add_child(screen)
+	# 인스턴스의 안쪽 노드까지 owner 를 주면 씬에 통째로 풀려 저장된다 → 세 노드만 직접 준다(puppet.tscn 은 참조로 남음)
+	view.owner = root
+	inner.owner = root
+	screen.owner = root
+	var script := load(PIXEL_SCRIPT)
+	if script != null:
+		root.set_script(script)
+		root.set("view_size", b.size)
+		root.set("view_origin", -b.position)
+	var ps := PackedScene.new()
+	var err := ps.pack(root)
+	if err == OK:
+		err = ResourceSaver.save(ps, path)
+	root.free()
+	return err
 
 
 func _project_anim(aname: String) -> Dictionary:
@@ -386,17 +512,38 @@ func _write_json() -> void:
 		"z_order": resolve_z_order(),        # 뒤 -> 앞
 		"layer_order": resolve_layer_order(),   # 그리기 순서 목록(레이어) 뒤 -> 앞
 		"z_order_manual": z_override.size() > 0,
-		"smooth_pixel": smooth_pixel,   # 파트 스프라이트에 runtime/smooth_pixel.gdshader 를 붙였는지
+		"smooth_pixel": smooth_pixel and not pixel_grid,   # 파트 스프라이트에 경계 섞기(부드러운 도트 이동)를 켰는지
+		"pixel_grid": pixel_grid,   # true 면 puppet_pixel.tscn(DRPixelPuppet 래퍼)이 같이 있다
+		"pixel_view": _pixel_view_json(),  # 래퍼 SubViewport 의 크기와 그 안의 퍼펫 원점(도트) — 모든 애니의 움직임 범위
 		"outline_px": outline_px,       # 도트 아웃라인 두께(0 = 없음)
 		"outline_color": outline_color.to_html(),
+		"outline_style": "pixel_perfect" if outline_style == OUTLINE_PIXEL_PERFECT else "cartoon",   # 선 색: 픽셀 퍼펙트 = 옆 도트 색을 어둡게 · 카툰 = 한 색
+		"outline_tone": outline_tone,   # 픽셀 퍼펙트일 때 어둡게 하는 정도(0 = 같은 색 · 1 = 검정)
 		"outline_mode": "whole" if outline_whole else "parts",   # whole = 파트마다 밑깔개(stretch/outline, z −1) · parts = 파트 셰이더
 		"animations": _anim_data,
+		"composites": _baked_composites(),   # 이 폴더에 구운 동작 중 상하체 합성인 것의 정의(하체·상체 애니, 길이 맞춤, 상체 파트)
 		"unmapped_bones": baker.split.unmapped_bones,
 	}
 	var f := FileAccess.open(out_dir.path_join("rig.json"), FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(doc, "\t"))
 		f.close()
+
+
+func _pixel_view_json() -> Dictionary:
+	if not pixel_grid:
+		return {}
+	var b := pixel_bounds()
+	return {"size": [b.size.x, b.size.y], "origin": [-b.position.x, -b.position.y]}
+
+
+## 구운 동작 가운데 상하체 합성으로 만든 것의 정의만 추린다
+func _baked_composites() -> Array:
+	var out: Array = []
+	for info in baker.composite_info:
+		if _anim_data.has(String((info as Dictionary).get("name", ""))):
+			out.append(info)
+	return out
 
 
 func _build_and_save_scene(path: String) -> int:
@@ -415,27 +562,32 @@ func _build_and_save_scene(path: String) -> int:
 	var zorder := resolve_z_order()
 	var z_of := {}
 	for i in zorder.size():
-		z_of[zorder[i]] = i
+		z_of[zorder[i]] = (i + 1) * DRRigModel.Z_STEP   # 10, 20, 30 … — 사이(+5)와 맨 뒤(5)에 장비가 끼어들 자리를 남긴다
 
 	# 모든 파트가 머티리얼 하나를 같이 쓴다(씬에 한 번만 저장됨). 부드러운 이동이나 파트별 아웃라인 중 하나라도 켜면 붙인다
 	var part_outline := outline_px if not outline_whole else 0
+	var use_smooth := smooth_pixel and not pixel_grid   # 도트 격자 고정는 배율 1 로 그려지므로 경계를 섞지 않는다
 	var smooth_mat: ShaderMaterial = null
 	var outline_mat: ShaderMaterial = null   # 전체 실루엣 밑깔개용(같은 셰이더, outline_only)
 	var sh := load(SMOOTH_SHADER) as Shader
-	if sh == null and (smooth_pixel or outline_px > 0):
+	if sh == null and (use_smooth or outline_px > 0):
 		push_warning("[DotRigger] 파트 셰이더를 찾을 수 없습니다: %s" % SMOOTH_SHADER)
-	if sh != null and (smooth_pixel or part_outline > 0):
+	if sh != null and (use_smooth or part_outline > 0):
 		smooth_mat = ShaderMaterial.new()
 		smooth_mat.shader = sh
-		smooth_mat.set_shader_parameter("smooth_edges", smooth_pixel)
+		smooth_mat.set_shader_parameter("smooth_edges", use_smooth)
 		smooth_mat.set_shader_parameter("outline_px", part_outline)
 		smooth_mat.set_shader_parameter("outline_color", outline_color)
+		smooth_mat.set_shader_parameter("outline_tone", outline_style == OUTLINE_PIXEL_PERFECT)
+		smooth_mat.set_shader_parameter("outline_tone_strength", outline_tone)
 	if sh != null and outline_px > 0 and outline_whole:
 		outline_mat = ShaderMaterial.new()
 		outline_mat.shader = sh
-		outline_mat.set_shader_parameter("smooth_edges", smooth_pixel)
+		outline_mat.set_shader_parameter("smooth_edges", use_smooth)
 		outline_mat.set_shader_parameter("outline_px", outline_px)
 		outline_mat.set_shader_parameter("outline_color", outline_color)
+		outline_mat.set_shader_parameter("outline_tone", outline_style == OUTLINE_PIXEL_PERFECT)
+		outline_mat.set_shader_parameter("outline_tone_strength", outline_tone)
 		outline_mat.set_shader_parameter("outline_only", true)
 
 	var bones := {}   # part -> Bone2D

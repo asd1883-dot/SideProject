@@ -1,3 +1,7 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# 라이선스 확인 전까지 올리지 않는다 - 무료로 받은 Kar98k 모델과 그걸 구운 그림 (이 저장소는 공개)
+/source3d/weapons/kar98k/
+/equip/kar98k/

@@ -28,6 +28,7 @@
 			],
 			"name": "Idle",
 			"ok": true,
+			"pixel_scene": "",
 			"rest_anim": "Idle",
 			"rest_time": 0.0666666666666667,
 			"rest_time_sec": 0.166666666666667,
@@ -37,9 +38,9 @@
 		},
 		{
 			"animations": [
-				"Walk"
+				"Crouch_Idle+Idle"
 			],
-			"dir": "Walk",
+			"dir": "Crouch_Idle+Idle",
 			"dropped_reason": "",
 			"index": 1,
 			"kept": [],
@@ -60,20 +61,21 @@
 				"R_Forearm",
 				"R_Hand"
 			],
-			"name": "Walk",
+			"name": "Crouch_Idle+Idle",
 			"ok": true,
-			"rest_anim": "Walk",
-			"rest_time": 0.875,
-			"rest_time_sec": 1.16666670143604,
-			"rig": "Walk/rig.json",
-			"scene": "Walk/puppet.tscn",
+			"pixel_scene": "",
+			"rest_anim": "Crouch_Idle+Idle",
+			"rest_time": 0.0,
+			"rest_time_sec": 0.0,
+			"rig": "Crouch_Idle+Idle/rig.json",
+			"scene": "Crouch_Idle+Idle/puppet.tscn",
 			"z_order_manual": true
 		},
 		{
 			"animations": [
-				"Sprint"
+				"Rifle_Aiming_Idle"
 			],
-			"dir": "Sprint",
+			"dir": "Rifle_Aiming_Idle",
 			"dropped_reason": "",
 			"index": 2,
 			"kept": [],
@@ -94,13 +96,14 @@
 				"R_Forearm",
 				"R_Hand"
 			],
-			"name": "Sprint",
+			"name": "Rifle_Aiming_Idle",
 			"ok": true,
-			"rest_anim": "Sprint",
-			"rest_time": 0.625,
-			"rest_time_sec": 0.416666679084301,
-			"rig": "Sprint/rig.json",
-			"scene": "Sprint/puppet.tscn",
+			"pixel_scene": "",
+			"rest_anim": "Rifle_Aiming_Idle",
+			"rest_time": 0.194444444444444,
+			"rest_time_sec": 0.602777777777778,
+			"rig": "Rifle_Aiming_Idle/rig.json",
+			"scene": "Rifle_Aiming_Idle/puppet.tscn",
 			"z_order_manual": true
 		}
 	],
