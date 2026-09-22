@@ -41,6 +41,10 @@ signal animation_changed(anim: StringName, set_name: String)
 @export_range(1.0, 60.0, 1.0) var aim_speed: float = 14.0
 ## 목표가 등 뒤로 가면 돌아본다
 @export var auto_face: bool = true
+## 재생 배속(0 = 멈춤 — 조준은 그대로 따라간다)
+@export_range(0.0, 4.0, 0.05) var speed_scale: float = 1.0
+## 에디터 안에서도 재생한다(툴 창의 미리보기용 — 씬에 놓은 노드는 false 로 두어 첫 자세만 보인다)
+var run_in_editor: bool = false
 
 var _entries: Array = []            # [{name, dir, puppet: DRPuppet, player: AnimationPlayer, anims: PackedStringArray, origin: Vector2}]
 var _anim_to_set: Dictionary = {}   # 동작 이름 -> _entries 번호
@@ -253,12 +257,12 @@ func _remove_aim() -> void:
 func _process(delta: float) -> void:
 	if _active < 0:
 		return
-	if Engine.is_editor_hint():
+	if Engine.is_editor_hint() and not run_in_editor:
 		return                       # 에디터에 놓았을 때는 첫 동작의 첫 자세만 보인다
 	# 1) 지난 프레임에 더한 조준 각도를 뺀다 — 애니가 멈춰 있어도 각도가 쌓이지 않게
 	_remove_aim()
 	# 2) 애니메이션 진행(수동)
-	(_entries[_active]["player"] as AnimationPlayer).advance(delta)
+	(_entries[_active]["player"] as AnimationPlayer).advance(delta * speed_scale)
 	# 3) 바라보는 쪽 + 조준 각도
 	var want := 0.0
 	var bone := _aim_bone()

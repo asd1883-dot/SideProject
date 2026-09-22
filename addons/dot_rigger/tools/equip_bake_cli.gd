@@ -6,6 +6,7 @@ extends SceneTree
 ##       --preset=res://UAL1_preset.tres --sets=res://puppet/sets.json \
 ##       --weapon=res://source3d/weapons/kar98k/Kar98_obj.obj --id=kar98k \
 ##       --grip_node=trigger --grip_offset=0,-0.01,-0.05 --hide=bullets,bullet --z_after=Torso --shots
+##       [--adj_pos=좌우,위아래,앞뒤(m) --adj_rot=총구위아래,좌우틀기,굴리기(도) --scale=1]   ← 창의 조정과 같은 값
 ##
 ##   --preset       캐릭터 프리셋(.tres) — 모델 · 추가 동작 폴더 · 도트화 값(명암 단계 등)을 세트를 구울 때와 같게
 ##   --model / --extra_anims   프리셋 없이 직접 줄 때
@@ -73,41 +74,44 @@ func _run() -> void:
 	await process_frame
 
 	var weapon_path := _arg("weapon", "")
-	var ws := load(weapon_path) as PackedScene
-	if ws == null:
-		printerr("무기 모델을 씬으로 열 수 없습니다(OBJ 는 가져오기 형식을 Scene 으로): ", weapon_path); quit(1); return
+	var wres := load(weapon_path)
+	if wres == null or not (wres is PackedScene or wres is Mesh):
+		printerr("무기 모델을 열 수 없습니다: ", weapon_path); quit(1); return
 	var eb := DREquipBaker.new()
 	eb.baker = baker
 	eb.sets_json = _arg("sets", "res://puppet/sets.json")
-	eb.weapon_scene = ws
-	eb.weapon_path = weapon_path
+	eb.set_weapon(wres, weapon_path)
 	eb.id = _arg("id", weapon_path.get_file().get_basename())
 	eb.slot = _arg("slot", "weapon")
 	eb.attach_part = _arg("part", "R_Hand")
+	eb.support_part = _arg("support", "L_Hand")
+	eb.forward = _vec3(_arg("forward", "0,0,1"), Vector3(0, 0, 1))
+	eb.grip_node = _arg("grip_node", "")
+	eb.grip_offset = _vec3(_arg("grip_offset", "0,0,0"), Vector3.ZERO)
+	eb.weapon_scale = float(_arg("scale", "1"))
 	eb.z_after_part = _arg("z_after", "")
 	eb.out_dir = _arg("out", "res://equip")
 	if _args.has("hide"):
 		eb.hidden_nodes = PackedStringArray(_arg("hide").split(",", false))
+	if not (wres is PackedScene):
+		print("[장비] ⚠ 무기가 한 덩어리(Mesh)입니다 — 파트별로 숨기려면 가져오기 형식을 Scene 으로")
 
 	# 자동 그립 — 소총을 든 세트의 레스트 자세에서
 	var sets := eb.read_sets()
 	if sets.is_empty():
 		printerr("세트를 읽지 못했습니다: ", eb.sets_json); quit(1); return
-	var grip_set: Dictionary = sets[0]
+	var grip_set: Dictionary = DREquipBaker.pick_grip_set(sets)
 	var want := _arg("grip_from", "")
 	for s in sets:
-		var sd: Dictionary = s
-		var rest := String((sd["rig"] as Dictionary).get("view", {}).get("rest_anim", "")).to_lower()
-		if (want != "" and String(sd["name"]) == want) or (want == "" and (rest.contains("rifle") or rest.contains("aim"))):
-			grip_set = sd
-			break
+		if want != "" and String((s as Dictionary)["name"]) == want:
+			grip_set = s
 	if not eb.apply_set(grip_set):
 		printerr("그립을 잡을 세트를 세울 수 없습니다: ", ", ".join(eb.warnings)); quit(1); return
-	var forward := _vec3(_arg("forward", "0,0,1"), Vector3(0, 0, 1))
-	var gp := eb.grip_point_guess(_arg("grip_node", ""), forward) + _vec3(_arg("grip_offset", "0,0,0"), Vector3.ZERO)
-	if not eb.auto_grip(_arg("support", "L_Hand"), forward, gp):
+	if not eb.auto_grip():
 		printerr("자동 그립 실패: ", ", ".join(eb.warnings)); quit(1); return
-	print("[장비] 그립 기준 세트 = %s · 무기 노드 %s · 그립 점 %s" % [grip_set["name"], str(eb.weapon_node_names()), str(gp)])
+	eb.adj_pos = _vec3(_arg("adj_pos", "0,0,0"), Vector3.ZERO)   # 무기 축 기준 m: 좌우, 위아래, 앞뒤
+	eb.adj_rot = _vec3(_arg("adj_rot", "0,0,0"), Vector3.ZERO)   # 도: 총구 위(+)/아래, 좌우 틀기, 굴리기
+	print("[장비] 그립 기준 세트 = %s · 무기 노드 %s" % [grip_set["name"], str(eb.weapon_node_names())])
 
 	var shots := _args.has("shots")
 	if shots:
@@ -116,7 +120,7 @@ func _run() -> void:
 			var sd: Dictionary = s
 			if eb.apply_set(sd):
 				await RenderingServer.frame_post_draw
-				var img3: Image = await eb.render_with_character()
+				var img3: Image = await eb.render_with_character(String(sd["name"]))
 				img3.save_png("res://puppet_test/_equip3d_%s.png" % String(sd["dir"]).validate_filename())
 
 	var res: Dictionary = await eb.run()

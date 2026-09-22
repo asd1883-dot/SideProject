@@ -3,11 +3,46 @@
 	"sets": [
 		{
 			"animations": [
+				"Firing_Rifle"
+			],
+			"dir": "Firing_Rifle",
+			"dropped_reason": "",
+			"index": 0,
+			"kept": [],
+			"layer_order": [
+				"L_UpperArm",
+				"L_Hand",
+				"L_Forearm",
+				"L_Foot",
+				"L_Thigh",
+				"L_Calf",
+				"Torso",
+				"Head",
+				"Hips",
+				"R_Foot",
+				"R_Thigh",
+				"R_Calf",
+				"R_UpperArm",
+				"R_Forearm",
+				"R_Hand"
+			],
+			"name": "Firing_Rifle",
+			"ok": true,
+			"pixel_scene": "",
+			"rest_anim": "Firing_Rifle",
+			"rest_time": 0.571428571428571,
+			"rest_time_sec": 0.666666666666667,
+			"rig": "Firing_Rifle/rig.json",
+			"scene": "Firing_Rifle/puppet.tscn",
+			"z_order_manual": true
+		},
+		{
+			"animations": [
 				"Idle"
 			],
 			"dir": "Idle",
 			"dropped_reason": "",
-			"index": 0,
+			"index": 1,
 			"kept": [],
 			"layer_order": [
 				"L_UpperArm",
@@ -38,44 +73,10 @@
 		},
 		{
 			"animations": [
-				"Crouch_Idle+Idle"
+				"Crouch_Idle+Firing_Rifle",
+				"Idle"
 			],
-			"dir": "Crouch_Idle+Idle",
-			"dropped_reason": "",
-			"index": 1,
-			"kept": [],
-			"layer_order": [
-				"L_UpperArm",
-				"L_Hand",
-				"L_Forearm",
-				"L_Foot",
-				"L_Thigh",
-				"L_Calf",
-				"Torso",
-				"Head",
-				"Hips",
-				"R_Foot",
-				"R_Thigh",
-				"R_Calf",
-				"R_UpperArm",
-				"R_Forearm",
-				"R_Hand"
-			],
-			"name": "Crouch_Idle+Idle",
-			"ok": true,
-			"pixel_scene": "",
-			"rest_anim": "Crouch_Idle+Idle",
-			"rest_time": 0.0,
-			"rest_time_sec": 0.0,
-			"rig": "Crouch_Idle+Idle/rig.json",
-			"scene": "Crouch_Idle+Idle/puppet.tscn",
-			"z_order_manual": true
-		},
-		{
-			"animations": [
-				"Rifle_Aiming_Idle"
-			],
-			"dir": "Rifle_Aiming_Idle",
+			"dir": "Crouch_Idle+Firing_Rifle",
 			"dropped_reason": "",
 			"index": 2,
 			"kept": [],
@@ -96,14 +97,14 @@
 				"R_Forearm",
 				"R_Hand"
 			],
-			"name": "Rifle_Aiming_Idle",
+			"name": "Crouch_Idle+Firing_Rifle",
 			"ok": true,
 			"pixel_scene": "",
-			"rest_anim": "Rifle_Aiming_Idle",
-			"rest_time": 0.194444444444444,
-			"rest_time_sec": 0.602777777777778,
-			"rig": "Rifle_Aiming_Idle/rig.json",
-			"scene": "Rifle_Aiming_Idle/puppet.tscn",
+			"rest_anim": "Crouch_Idle+Firing_Rifle",
+			"rest_time": 0.357142857142857,
+			"rest_time_sec": 0.416666666666667,
+			"rig": "Crouch_Idle+Firing_Rifle/rig.json",
+			"scene": "Crouch_Idle+Firing_Rifle/puppet.tscn",
 			"z_order_manual": true
 		}
 	],

@@ -71,7 +71,8 @@ P="C:/<경로>/SideProject"
 "$G" --path "$P" --resolution 400x300  --script res://addons/dot_rigger/tools/retarget_check_cli.gd   # ⑩ Mixamo 접목 (source3d 없으면 건너뜀)
 "$G" --path "$P" --resolution 400x300  --script res://addons/dot_rigger/tools/composite_check_cli.gd  # ⑪ 상하체 합성
 "$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/pixel_check_cli.gd      # ⑫ 도트 격자 고정 (창이 900x700 이상이어야 함)
-"$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/puppet_set_check_cli.gd # ⑬ 런타임 DRPuppetSet (세트 묶기 · 조준)
+"$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/puppet_set_check_cli.gd # ⑬ 런타임 DRPuppetSet (세트 묶기 · 조준 · 장비)
+"$G" --path "$P" --resolution 1240x800 --script res://addons/dot_rigger/tools/equip_window_smoke_cli.gd # ⑭ 장비 굽기 창 (res://puppet 세트 3개 + kar98k 무기 필요)
 ```
 
 **PowerShell**
@@ -95,7 +96,8 @@ $P = "C:\<경로>\SideProject"
 | ⑩ `retarget_check_cli` | `접목 검사 전부 통과` — 표준 뼈대로 다시 가져온 UAL 의 기존 동작이 원본과 같은 자세(몸 5mm · 손가락 1cm 미만) · `source3d/mixamo` 파일 전부 경고 없이 얹힘 · 파트 15 · 미매핑 0 · 힙 높이 · 굽기 | ✓ (09-18, 옛 사본에서. 몸 4.3mm · 손가락 4.9mm · Mixamo 7개) |
 | ⑪ `composite_check_cli` | `상하체 합성 검사 전부 통과` — 길이·반복 규칙 3종 · 뼈 자세 72개(다리·힙 = 하체 애니 / 팔·몸통 = 상체 애니) 어긋남 0 · 경고 2종 · 다시 만들기 · 라이브러리 안 샘 · 굽기·rig.json | ✓ (09-21) |
 | ⑫ `pixel_check_cli` | `도트 격자 고정 검사 전부 통과` — `puppet_pixel.tscn` 구조 · 3배에서 3×3 칸 섞임 0/16,811(대조 1,106/1,703) · 전 프레임이 뷰포트 안 · extra_margin · 끄면 삭제 | ✓ (09-21) |
-| ⑬ `puppet_set_check_cli` | `퍼펫 세트 검사 전부 통과` — 세트 2개를 이름만으로 재생 · 발 자리(서기·앉기 모두 원점 y + 1px) · 조준 −16.7° 정확 · 한계 30° · 멈춘 애니 위 300프레임 각도 변화 0 · 끄면 복귀 · 좌우 반전 | ✓ (09-21) |
+| ⑬ `puppet_set_check_cli` | `퍼펫 세트 검사 전부 통과` — 세트 2개를 이름만으로 재생 · 발 자리(서기·앉기 모두 원점 y + 1px) · 조준 −16.7° 정확 · 한계 30° · 멈춘 애니 위 300프레임 각도 변화 0 · 끄면 복귀 · 좌우 반전 · [5] 장비(모든 세트 · z = 파트 + 5 · 교체 · reload) | ✓ (09-21) |
+| ⑭ `equip_window_smoke_cli` | `장비 창 스모크 전부 통과` — 불러오기(세트 3 · 무기 파트 6 · 자동 그립 = Rifle_Aiming_Idle · 방아쇠 그립) · 2D(세트 3 임시 굽기 · **앞 조각 L_Hand 126px·Torso 8px, 무기 z + 1, 파트 뼈에**) · 기즈모(오른쪽 10px → 그림 10px · 링 15° → 화면 총열 15°, 붙일 손 0.0000m 제자리 · 받치는 손 기준 −10° 제자리 · 리셋 · 드래그 흉내 위 20px) · 이 자세만(Idle 만 12px · Hips 앞) · 조준 −24.9° · 3D 보기(무기만 1699px · ×3) · 굽기(equip.json v2 · 앞 조각 파일 2) · 다시 열기 | ✓ (09-22, 옛 사본. ⚠ 사용자 세트(z 간격 1) 경고가 뜨는 게 정상) |
 | `bake_cli` → `preview_cli` | `결과: { "ok": true ... }` → 구운 씬이 트랙 60개로 재생 | ✓ |
 | `compare_cli` | 3D 렌더 대비 2D 순서 합성 불일치 %. 합격선 없음, **각도 비교용** | 192px·Idle·자동 순서, **09-15 셰이더 수정(02 C9) 후**: 정측면 9.4% · −45° **3.9%** · −55° 7.8% · −65° 11.4% (09-14 의 4.3~5.9% 는 3D 기준이 틀린 값) |
 

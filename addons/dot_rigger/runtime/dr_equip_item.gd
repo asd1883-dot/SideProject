@@ -36,3 +36,8 @@ class_name DREquipItem
 @export var follow_stretch: bool = true
 
 @export var modulate: Color = Color.WHITE
+
+## 앞 조각 — 이 장비보다 **앞에 있는 파트의 그 부분**만 따로 찍은 그림들. [{ part: String, texture: Texture2D, offset: Vector2 }]
+## 총을 쥔 손가락처럼 장비 앞에 와야 하는 부분이 장비 바로 위(z + 1)에 그 파트를 따라 그려진다(Spine 의 손 앞/뒤 나누기를 자동으로).
+## 장비 굽기 창이 3D 깊이로 만들어 equip.json 에 같이 남긴다.
+@export var overlays: Array = []

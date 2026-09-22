@@ -6,16 +6,20 @@ extends EditorPlugin
 
 const MENU_ITEM := "Dot Rigger (3D → 2D 컷아웃)"
 const MENU_RESET := "Dot Rigger — 창 새로 만들기 (초기화)"
+const MENU_EQUIP := "Dot Rigger — 장비 굽기 (무기·헬멧)"
 
 var _window: DRMainWindow
+var _equip_window: DREquipWindow
 
 
 func _enter_tree() -> void:
 	add_tool_menu_item(MENU_ITEM, _open)
 	add_tool_menu_item(MENU_RESET, _reopen)
+	add_tool_menu_item(MENU_EQUIP, _open_equip)
 
 
 func _exit_tree() -> void:
+	remove_tool_menu_item(MENU_EQUIP)
 	remove_tool_menu_item(MENU_ITEM)
 	remove_tool_menu_item(MENU_RESET)
 	_free_window()
@@ -25,6 +29,9 @@ func _free_window() -> void:
 	if is_instance_valid(_window):
 		_window.queue_free()
 	_window = null
+	if is_instance_valid(_equip_window):
+		_equip_window.queue_free()
+	_equip_window = null
 
 
 ## 창을 닫아도 hide() 만 되므로 인스턴스는 살아 있다.
@@ -41,3 +48,11 @@ func _open() -> void:
 func _reopen() -> void:
 	_free_window()
 	_open()
+
+
+## 장비(무기·헬멧) 굽기 창 — 캐릭터 프리셋 + sets.json + 무기 모델을 읽어 그립을 맞추고 모든 세트에 맞춰 굽는다
+func _open_equip() -> void:
+	if not is_instance_valid(_equip_window):
+		_equip_window = DREquipWindow.new()
+		EditorInterface.get_base_control().add_child(_equip_window)
+	_equip_window.popup_centered(Vector2i(1240, 800))

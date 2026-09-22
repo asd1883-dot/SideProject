@@ -19,6 +19,7 @@ var _parts: Dictionary = {}      # part 이름 -> {bone, stretch, rest_head, res
 var _equipped: Dictionary = {}   # slot -> Sprite2D
 var _equipped_outline: Dictionary = {}   # slot -> Sprite2D (전체 실루엣 밑깔개, 없으면 키 없음)
 var _z_follow: Dictionary = {}   # slot -> {art: 기준 파트의 Sprite2D, gap: int} — z_after_part 로 장착한 장비
+var _equipped_overlays: Dictionary = {}   # slot -> Array[Sprite2D] — 앞 조각(장비 위에 그리는 파트 조각)
 ## 본체 파트 스프라이트의 머티리얼(부드러운 도트 이동 셰이더). 장비도 같은 방식으로 그려야 결이 맞는다
 var _art_material: Material = null
 ## 본체 밑깔개의 머티리얼·z (전체 실루엣 아웃라인으로 구운 씬만). null 이면 밑깔개 없음
@@ -39,6 +40,9 @@ func _process(_delta: float) -> void:
 		var spr := _equipped.get(slot, null) as Sprite2D
 		if is_instance_valid(art) and is_instance_valid(spr):
 			spr.z_index = art.z_index + int(f["gap"])
+			for o in _equipped_overlays.get(slot, []):
+				if is_instance_valid(o):
+					(o as Sprite2D).z_index = spr.z_index + 1
 
 
 ## 씬 구조가 바뀌었을 때 다시 훑는다.
@@ -156,6 +160,30 @@ func equip(item: DREquipItem) -> bool:
 		host.add_child(ol)
 		_equipped_outline[item.slot] = ol
 	host.add_child(spr)
+	# 앞 조각 — 파트의 그 부분을 파트에 붙여 장비 바로 위에
+	var ovs: Array = []
+	for o in item.overlays:
+		var od: Dictionary = o
+		var pn := String(od.get("part", ""))
+		if not _parts.has(pn) or od.get("texture") == null:
+			continue
+		var pinfo: Dictionary = _parts[pn]
+		var phost: Node2D = pinfo["stretch"] if pinfo["stretch"] != null else pinfo["bone"]
+		var pra: float = pinfo["rest_angle"]
+		var os := Sprite2D.new()
+		os.name = "equip_%s_front_%s" % [item.slot, pn]
+		os.texture = od["texture"]
+		os.centered = false
+		os.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		os.z_as_relative = false
+		os.z_index = spr.z_index + 1
+		os.modulate = item.modulate
+		os.material = _art_material
+		os.rotation = -pra
+		os.position = (Vector2(od.get("offset", Vector2.ZERO)) - Vector2(pinfo["rest_head"])).rotated(-pra)
+		phost.add_child(os)
+		ovs.append(os)
+	_equipped_overlays[item.slot] = ovs
 
 	_equipped[item.slot] = spr
 	equipped.emit(item.slot, item)
@@ -169,6 +197,10 @@ func unequip(slot: String) -> void:
 	if is_instance_valid(n):
 		n.queue_free()
 	_equipped.erase(slot)
+	for o in _equipped_overlays.get(slot, []):
+		if is_instance_valid(o):
+			(o as Node).queue_free()
+	_equipped_overlays.erase(slot)
 	_z_follow.erase(slot)
 	if _z_follow.is_empty():
 		set_process(false)
@@ -203,6 +235,11 @@ func unequip_all() -> void:
 
 func get_equipped(slot: String) -> Sprite2D:
 	return _equipped.get(slot, null)
+
+
+## 장비의 앞 조각 스프라이트들(없으면 빈 배열)
+func get_equipped_overlays(slot: String) -> Array:
+	return _equipped_overlays.get(slot, [])
 
 
 ## 장비의 전체 실루엣 밑깔개(없으면 null — 파트별 아웃라인이거나 아웃라인 없이 구운 씬)
