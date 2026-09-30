@@ -20,6 +20,9 @@ var _equipped: Dictionary = {}   # slot -> Sprite2D
 var _equipped_outline: Dictionary = {}   # slot -> Sprite2D (전체 실루엣 밑깔개, 없으면 키 없음)
 var _z_follow: Dictionary = {}   # slot -> {art: 기준 파트의 Sprite2D, gap: int} — z_after_part 로 장착한 장비
 var _equipped_overlays: Dictionary = {}   # slot -> Array[Sprite2D] — 앞 조각(장비 위에 그리는 파트 조각)
+var _hidden_parts: Dictionary = {}       # slot -> PackedStringArray — 장비를 드는 동안 안 그리는 파트
+var _raised: Dictionary = {}             # slot -> [{art, orig, rank}] — 장비를 드는 동안 장비 위로 올린 파트(z 를 매 프레임 덮어씀)
+var _ov_follow: Array = []               # [{spr, art}] — 총 조각(파트 위에 얹는 장비 부분): 그 파트의 z + 1 을 매 프레임 따라간다
 ## 본체 파트 스프라이트의 머티리얼(부드러운 도트 이동 셰이더). 장비도 같은 방식으로 그려야 결이 맞는다
 var _art_material: Material = null
 ## 본체 밑깔개의 머티리얼·z (전체 실루엣 아웃라인으로 구운 씬만). null 이면 밑깔개 없음
@@ -34,6 +37,19 @@ func _ready() -> void:
 
 ## z_after_part 로 장착한 장비는 기준 파트의 z 를 따라간다(자동 순서로 구운 씬은 파트 z 가 프레임마다 바뀐다)
 func _process(_delta: float) -> void:
+	for slot in _raised.keys():
+		var ws := _equipped.get(slot, null) as Sprite2D
+		if not is_instance_valid(ws):
+			continue
+		for r in _raised[slot]:
+			var ra := (r as Dictionary)["art"] as Sprite2D
+			if is_instance_valid(ra):
+				ra.z_index = ws.z_index + 1 + int((r as Dictionary)["rank"])
+	for f in _ov_follow:
+		var fs := (f as Dictionary)["spr"] as Sprite2D
+		var fa := (f as Dictionary)["art"] as Sprite2D
+		if is_instance_valid(fs) and is_instance_valid(fa):
+			fs.z_index = fa.z_index + 1
 	for slot in _z_follow.keys():
 		var f: Dictionary = _z_follow[slot]
 		var art := f["art"] as Sprite2D
@@ -41,7 +57,7 @@ func _process(_delta: float) -> void:
 		if is_instance_valid(art) and is_instance_valid(spr):
 			spr.z_index = art.z_index + int(f["gap"])
 			for o in _equipped_overlays.get(slot, []):
-				if is_instance_valid(o):
+				if is_instance_valid(o) and (o as Sprite2D).get_meta("kind", "part") == "part":
 					(o as Sprite2D).z_index = spr.z_index + 1
 
 
@@ -148,8 +164,12 @@ func equip(item: DREquipItem) -> bool:
 	spr.modulate = item.modulate
 	spr.material = _art_material
 	# 본체 파트 스프라이트와 완전히 같은 규격으로 배치한다.
-	spr.rotation = -ra
-	spr.position = (item.offset - Vector2(info["rest_head"])).rotated(-ra)
+	# 그림은 캔버스(레스트) 방향 그대로다. stretch 는 레스트 각(ra)만큼 돌아 있어 −ra 로 되돌리고,
+	# 뼈(레스트 회전 0)에 바로 붙일 때는 돌리지 않는다(09-29: 뼈에 붙이면서도 −ra 를 줘서 총이 레스트 각만큼 틀어졌다)
+	var on_stretch: bool = host == info["stretch"]
+	spr.rotation = (-ra if on_stretch else 0.0) + item.angle
+	spr.set_meta("equip_angle", item.angle)
+	spr.position = (item.offset - Vector2(info["rest_head"])).rotated(-ra if on_stretch else 0.0)
 	if _outline_material != null:
 		# 전체 실루엣 밑깔개 — 본체와 같은 자리·같은 z(모든 파트 뒤)
 		var ol := spr.duplicate() as Sprite2D
@@ -165,23 +185,53 @@ func equip(item: DREquipItem) -> bool:
 	for o in item.overlays:
 		var od: Dictionary = o
 		var pn := String(od.get("part", ""))
-		if not _parts.has(pn) or od.get("texture") == null:
+		if not _parts.has(pn) or (od.get("texture") == null and not (String(od.get("kind", "part")) in ["hide", "raise"])):
+			continue
+		if String(od.get("kind", "part")) == "raise":
+			var rart := _parts[pn]["art"] as Sprite2D
+			if rart != null:
+				var lst: Array = _raised.get(item.slot, [])
+				lst.append({"art": rart, "orig": rart.z_index, "rank": int(od.get("rank", 0))})
+				_raised[item.slot] = lst
+				rart.z_index = spr.z_index + 1 + int(od.get("rank", 0))
+				set_process(true)
 			continue
 		var pinfo: Dictionary = _parts[pn]
-		var phost: Node2D = pinfo["stretch"] if pinfo["stretch"] != null else pinfo["bone"]
-		var pra: float = pinfo["rest_angle"]
+		var kind := String(od.get("kind", "part"))
+		if kind == "hide":
+			_set_part_drawn(pn, false)
+			var hp: PackedStringArray = _hidden_parts.get(item.slot, PackedStringArray())
+			hp.append(pn)
+			_hidden_parts[item.slot] = hp
+			continue
 		var os := Sprite2D.new()
-		os.name = "equip_%s_front_%s" % [item.slot, pn]
 		os.texture = od["texture"]
 		os.centered = false
 		os.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		os.z_as_relative = false
-		os.z_index = spr.z_index + 1
 		os.modulate = item.modulate
 		os.material = _art_material
-		os.rotation = -pra
-		os.position = (Vector2(od.get("offset", Vector2.ZERO)) - Vector2(pinfo["rest_head"])).rotated(-pra)
-		phost.add_child(os)
+		os.set_meta("kind", kind)
+		if kind == "weapon":
+			# 총 조각 — 장비와 같이 움직이고(장비의 호스트에), 그 파트 바로 위에 그린다
+			os.name = "equip_%s_over_%s" % [item.slot, pn]
+			os.rotation = spr.rotation
+			os.position = (Vector2(od.get("offset", Vector2.ZERO)) - Vector2(info["rest_head"])).rotated(spr.rotation)
+			var pref := pinfo["art"] as Sprite2D
+			os.z_index = (pref.z_index + 1) if pref != null else spr.z_index + 1
+			host.add_child(os)
+			if pref != null:
+				_ov_follow.append({"spr": os, "art": pref})
+				set_process(true)
+		else:
+			# 앞 조각 — 파트의 그 부분을 파트에 붙여 장비 바로 위에
+			var phost: Node2D = pinfo["stretch"] if pinfo["stretch"] != null else pinfo["bone"]
+			var pra: float = pinfo["rest_angle"]
+			os.name = "equip_%s_front_%s" % [item.slot, pn]
+			os.z_index = spr.z_index + 1
+			os.rotation = -pra
+			os.position = (Vector2(od.get("offset", Vector2.ZERO)) - Vector2(pinfo["rest_head"])).rotated(-pra)
+			phost.add_child(os)
 		ovs.append(os)
 	_equipped_overlays[item.slot] = ovs
 
@@ -200,9 +250,23 @@ func unequip(slot: String) -> void:
 	for o in _equipped_overlays.get(slot, []):
 		if is_instance_valid(o):
 			(o as Node).queue_free()
+	for r in _raised.get(slot, []):
+		var ra := (r as Dictionary)["art"] as Sprite2D
+		if is_instance_valid(ra):
+			ra.z_index = int((r as Dictionary)["orig"])   # 수동 순서 씬은 이 값이 그대로 남는다(자동 순서 씬은 다음 프레임 애니가 덮어씀)
+	_raised.erase(slot)
+	for hp in _hidden_parts.get(slot, PackedStringArray()):
+		_set_part_drawn(String(hp), true)
+	_hidden_parts.erase(slot)
+	var keep: Array = []
+	for f in _ov_follow:
+		var fs := (f as Dictionary)["spr"] as Sprite2D
+		if is_instance_valid(fs) and not _equipped_overlays.get(slot, []).has(fs):
+			keep.append(f)
+	_ov_follow = keep
 	_equipped_overlays.erase(slot)
 	_z_follow.erase(slot)
-	if _z_follow.is_empty():
+	if _z_follow.is_empty() and _ov_follow.is_empty() and _raised.is_empty():
 		set_process(false)
 	if _equipped_outline.has(slot):
 		var o: Node = _equipped_outline[slot]
@@ -245,6 +309,16 @@ func get_equipped_overlays(slot: String) -> Array:
 ## 장비의 전체 실루엣 밑깔개(없으면 null — 파트별 아웃라인이거나 아웃라인 없이 구운 씬)
 func get_equipped_outline(slot: String) -> Sprite2D:
 	return _equipped_outline.get(slot, null)
+
+
+## 파트의 그림(본체 + 밑깔개) 보이기/숨기기 — 장비의 숨김 규칙용. 뼈는 그대로라 애니·조준에는 영향 없다
+func _set_part_drawn(part: String, on: bool) -> void:
+	var info: Dictionary = _parts[part]
+	var b := info["bone"] as Bone2D
+	for n in ["stretch/art", "stretch/outline"]:
+		var c := b.get_node_or_null(n) as CanvasItem
+		if c != null:
+			c.visible = on
 
 
 ## 파트 본체 스프라이트 색만 바꾸기(팔레트 스왑의 가장 싼 형태).

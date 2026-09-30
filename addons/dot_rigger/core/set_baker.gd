@@ -84,6 +84,7 @@ func run(sets: Array, base_dir: String, cfg: Dictionary) -> Dictionary:
 			"rest_time": frac,
 			"rest_time_sec": sec,
 			"animations": Array(r.get("animations", [])),
+			"aim_limits": _aim_limits_for(Array(r.get("animations", [])), cfg.get("aim_limits", {})),   # 동작별 조준 범위 [아래, 위](도, + = 위)
 			"z_order_manual": ex.z_override.size() > 0,
 			"layer_order": Array(ex.resolve_layer_order()) if ok else [],   # 뒤 -> 앞, 이 세트에 실제로 쓴 순서
 			"kept": Array(r.get("kept", PackedStringArray())),
@@ -128,6 +129,15 @@ static func _match_dir_case(base_dir: String, dn: String) -> void:
 		if d != dn and d.to_lower() == dn.to_lower():
 			DirAccess.rename_absolute(abs_base.path_join(d), abs_base.path_join(dn))
 			return
+
+
+static func _aim_limits_for(anims: Array, all: Dictionary) -> Dictionary:
+	var out := {}
+	for a in anims:
+		if all.has(String(a)):
+			var v: Array = all[String(a)]
+			out[String(a)] = [float(v[0]), float(v[1])]
+	return out
 
 
 ## sets.json 에 적힌 세트 폴더 이름들(없거나 못 읽으면 빈 목록)

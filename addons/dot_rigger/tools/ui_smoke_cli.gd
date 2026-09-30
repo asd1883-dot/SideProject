@@ -1809,5 +1809,34 @@ func _run() -> void:
 		int(win._z_list.size.y), int(need),
 		"스크롤 불필요" if win._z_list.size.y >= need else "스크롤 필요"])
 
+	print("35) 동작별 조준 범위")
+	win._picked_anims.clear()
+	win._picked_anims["Idle"] = true
+	win._fill_anim_list()
+	await process_frame
+	win._aim_min.value = -10.0
+	win._aim_max.value = 20.0
+	await process_frame
+	win._picked_anims.clear()
+	win._picked_anims["Jog_Fwd"] = true
+	win._fill_anim_list()
+	await process_frame
+	var aim_ok := Array(win._aim_limits.get("Idle", [])) == [-10.0, 20.0] and not win._aim_limits.has("Jog_Fwd") \
+		and is_equal_approx(win._aim_min.value, -16.0) and is_equal_approx(win._aim_max.value, 16.0)
+	var aim_cfg: Dictionary = win._bake_cfg()
+	var aim_p: DRPreset = win._collect_preset()
+	aim_ok = aim_ok and Array((aim_cfg["aim_limits"] as Dictionary).get("Idle", [])) == [-10.0, 20.0] and Array(aim_p.aim_limits.get("Idle", [])) == [-10.0, 20.0]
+	print("    Idle -10~+20 · Jog_Fwd 기본 ±16 · cfg · 프리셋: %s  %s" % [str(win._aim_limits), "OK" if aim_ok else "FAIL"])
+	if not aim_ok:
+		printerr("조준 범위 실패"); quit(1); return
+	win._picked_anims.clear()
+	win._picked_anims["Idle"] = true
+	win._fill_anim_list()
+	await process_frame
+	if not (is_equal_approx(win._aim_min.value, -10.0) and is_equal_approx(win._aim_max.value, 20.0)):
+		printerr("조준 범위: Idle 을 다시 고르면 칸에 -10/+20 이 나와야 함 (%s/%s)" % [win._aim_min.value, win._aim_max.value])
+		quit(1); return
+	print("    Idle 을 다시 고르면 칸에 -10 / +20  OK")
+
 	print("\n스모크 테스트 전부 통과")
 	quit(0)

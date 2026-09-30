@@ -56,6 +56,25 @@ var z_index: int = Z_FRONT
 var out_dir: String = "res://equip"
 ## 앞 조각을 자동으로 굽는다(끄면 무기가 한 자리에만 그려진다)
 var front_pieces: bool = true
+## 파트별 앞뒤 규칙 { 파트: RULE_* } — 자동(3D 깊이대로) 대신 손으로 정할 때. 없는 파트는 자동.
+##   RULE_WEAPON_FRONT: 겹치면 총이 그 파트를 가린다(파트가 무기 뒤 순서면 앞 조각을 안 만들고, 앞 순서면 총의 그 부분을 파트 위에 얹는다)
+##   RULE_PART_FRONT: 겹치면 그 파트가 총을 가린다(파트가 무기 뒤 순서면 겹치는 부분 전부를 앞 조각으로)
+var part_rules: Dictionary = {}
+const RULE_AUTO := "auto"
+const RULE_WEAPON_FRONT := "weapon_front"
+const RULE_PART_FRONT := "part_front"
+##   RULE_HIDE: 이 장비를 들면 그 파트를 아예 안 그린다(받치는 손이 총 위로 삐져나올 때 등). 자세별 규칙으로 쓰는 게 보통
+const RULE_HIDE := "hide"
+## 목록 방식(09-23~): 무기는 늘 맨 앞(Z_FRONT)에 두고, 파트마다 "총 뒤로"(RULE_WEAPON_FRONT = 총이 가림) / 그 외(= 파트가 총을 가림)
+## / 숨김 을 정한다. 총을 가리는 파트는 겹치는 부분을 조각으로 따로 찍어 총 위에 얹는다. 규칙이 없는 파트 = 총 앞.
+var list_mode: bool = true
+## 모든 자세에 같은 모습(09-29) — 총을 **한 각도**(보기 틀기 view_yaw · 굴리기 view_roll, 0/0 = 옆모습)에서 찍은 그림을
+## 자세마다 그 자세의 총열 방향으로 2D 로 돌려 붙인다. 끄면 자세마다 3D 그대로(손 방향에 따라 총이 비스듬히 · 짧아져 보임).
+var consistent_view: bool = true
+var view_yaw: float = 0.0     # 도 — 카메라 위쪽 축으로 돌림(총구가 카메라 쪽/반대쪽 = 3/4 모습). 180 = 반대 면(총구 왼쪽)
+var view_roll: float = 0.0    # 도 — 총열을 축으로 굴림(윗면·아랫면이 보이게)
+## 옛 equip.json(한 자리 방식)을 읽었을 때 그 자리(z_after_part) — 창이 이 파트까지를 "총 뒤로" 로 채운다
+var legacy_after: String = ""
 
 # 그립
 var grip_base: Transform3D = Transform3D.IDENTITY   # 자동 그립 결과(손 뼈 로컬)
@@ -69,6 +88,7 @@ var set_adjust: Dictionary = {}
 var warnings: PackedStringArray = PackedStringArray()
 var _weapon: Node3D = null
 var _cur_set: String = ""          # apply_set 으로 세운 세트
+var _orders: Dictionary = {}      # 세트 이름 -> 그리기 순서(뒤 → 앞), read_sets 가 채운다
 var _cur_ortho: float = 1.0        # 그 세트의 굽는 카메라 크기(확대 보기의 기준)
 
 
@@ -252,15 +272,90 @@ func adjust_of(set_name: String) -> Dictionary:
 		"z_after_part": String(d.get("z_after_part", "")),
 		"z_index": int(d.get("z_index", z_index)),
 		"z_override": bool(d.get("z_override", false)),
+		"rules": Dictionary(d.get("rules", {})),
 	}
 
 
 ## 세트별 조정 저장. 전부 기본값이면 항목을 지운다
 func set_adjust_of(set_name: String, pos: Vector3, rot: Vector3, z_override: bool, z_after: String, z_idx: int) -> void:
-	if pos.is_zero_approx() and rot.is_zero_approx() and not z_override:
+	var rules: Dictionary = adjust_of(set_name)["rules"]
+	if pos.is_zero_approx() and rot.is_zero_approx() and not z_override and rules.is_empty():
 		set_adjust.erase(set_name)
 		return
-	set_adjust[set_name] = {"pos": pos, "rot": rot, "z_override": z_override, "z_after_part": z_after if z_override else "", "z_index": z_idx if z_override else z_index}
+	set_adjust[set_name] = {"pos": pos, "rot": rot, "z_override": z_override, "z_after_part": z_after if z_override else "", "z_index": z_idx if z_override else z_index, "rules": rules}
+
+
+## 파트 앞뒤 규칙 쓰기. set_name 이 비면 공통(part_rules), 아니면 그 자세만. key 가 auto 면 지운다
+func set_rule(part: String, key: String, set_name: String = "") -> void:
+	if set_name == "":
+		if key == RULE_AUTO:
+			part_rules.erase(part)
+		else:
+			part_rules[part] = key
+		return
+	var a := adjust_of(set_name)
+	var rules: Dictionary = a["rules"]
+	if key == RULE_AUTO:
+		rules.erase(part)
+	else:
+		rules[part] = key
+	set_adjust[set_name] = {"pos": a["pos"], "rot": a["rot"], "z_override": a["z_override"], "z_after_part": a["z_after_part"], "z_index": a["z_index"], "rules": rules}
+	if Vector3(a["pos"]).is_zero_approx() and Vector3(a["rot"]).is_zero_approx() and not bool(a["z_override"]) and rules.is_empty():
+		set_adjust.erase(set_name)
+
+
+## 그 자세에서 그 파트의 규칙(자세별 > 공통 > 자동)
+func rule_for(set_name: String, part: String) -> String:
+	var a := adjust_of(set_name)
+	var rules: Dictionary = a["rules"]
+	if rules.has(part):
+		return String(rules[part])
+	return String(part_rules.get(part, RULE_PART_FRONT if list_mode else RULE_AUTO))
+
+
+## 공통 규칙(자세별 무시)
+func common_rule(part: String) -> String:
+	return String(part_rules.get(part, RULE_PART_FRONT if list_mode else RULE_AUTO))
+
+
+## 그 자세의 규칙을 모두 지워 공통을 따르게
+func clear_set_rules(set_name: String) -> void:
+	if not set_adjust.has(set_name):
+		return
+	(set_adjust[set_name] as Dictionary)["rules"] = {}
+	var a := adjust_of(set_name)
+	set_adjust_of(set_name, a["pos"], a["rot"], a["z_override"], a["z_after_part"], a["z_index"])   # 남은 게 없으면 항목째 지운다
+
+
+## 뒤 → 앞 순서에서 upto 파트까지(포함)를 "총 뒤로" 로(이미 규칙이 있는 파트는 그대로). 새 장비의 기본값
+func apply_default_behind(order: Array, upto: String) -> void:
+	if upto == "" or not order.has(upto):
+		return
+	for pn in order:
+		if not part_rules.has(String(pn)):
+			part_rules[String(pn)] = RULE_WEAPON_FRONT
+		if String(pn) == upto:
+			break
+
+
+func _order_of(set_name: String) -> Array:
+	var o: Array = _orders.get(set_name, [])
+	return o if not o.is_empty() else Array(baker.rig.order)
+
+
+## 그 자세에서 무기가 그려질 자리 { after, index }.
+## 목록 방식: **"총 뒤로" 체크한 파트 중 그리기 순서에서 가장 앞의 것 바로 앞**(없으면 맨 뒤).
+## 그보다 앞 순서의 파트는 그냥 순서대로 총을 가리므로 조각이 필요 없다 — 애니가 레스트에서 벗어나도 어긋나지 않는다.
+## 조각은 그 자리보다 뒤 순서인데 체크 안 한 파트(총 앞으로 끌어낸 것)만 생긴다.
+func weapon_z_for(set_name: String) -> Dictionary:
+	if list_mode:
+		var last := ""
+		for pn in _order_of(set_name):
+			if rule_for(set_name, String(pn)) == RULE_WEAPON_FRONT:
+				last = String(pn)
+		return {"after": last, "index": Z_BACK} if last == "" else {"after": last, "index": Z_FRONT}
+	var a := adjust_of(set_name)
+	return {"after": String(a["z_after_part"]) if bool(a["z_override"]) else z_after_part, "index": int(a["z_index"]) if bool(a["z_override"]) else z_index}
 
 
 ## 자동 그립 + 공통 조정 + (있으면) 그 세트의 조정 = 손 뼈 로컬의 최종 무기 변환
@@ -283,6 +378,46 @@ func _apply_adjust(base: Transform3D, pos: Vector3, rot_deg: Vector3) -> Transfo
 	out.basis = rl * base.basis
 	out.origin = grip_pivot + rl * (base.origin - grip_pivot) + grip_frame * pos
 	return out
+
+
+## 일관된 보기 자리 — 굽는 카메라 앞에 총을 옆모습(+ view_yaw · view_roll)으로, 손이 잡는 자리를 붙일 손 손바닥에
+func place_canonical() -> void:
+	var w := ensure_weapon()
+	if w == null or baker.camera == null:
+		return
+	var cb := baker.camera.global_transform.basis
+	var d := cb.x.normalized()
+	var up := cb.y.normalized()
+	var side := up.cross(d).normalized()
+	var b0 := Basis(side, up, d)
+	var f := forward.normalized()
+	var fix := Basis.IDENTITY
+	if f.distance_to(Vector3(0, 0, 1)) > 0.001:
+		if f.distance_to(Vector3(0, 0, -1)) < 0.001:
+			fix = Basis(Vector3.UP, PI)
+		else:
+			fix = Basis(Quaternion(f, Vector3(0, 0, 1)))
+	var b := Basis(up, deg_to_rad(view_yaw)) * Basis(d, deg_to_rad(view_roll)) * b0 * fix
+	var bs := b * Basis.from_scale(Vector3.ONE * weapon_scale)
+	var gpm := grip_point_guess(grip_node, f) + grip_offset
+	# 잡는 자리를 **화면 한가운데**에 — 손 위치에 놓으면 도트 격자에 걸치는 자리가 세트마다 달라 그림이 1px 씩 달라진다
+	var co := baker.camera.global_transform.origin
+	var dist := (baker._model_aabb.get_center() - co).dot(-cb.z.normalized())   # 깊이도 세트와 무관하게 고정(셰이더가 시선 벡터를 쓴다)
+	var target := co - cb.z.normalized() * dist
+	w.global_transform = Transform3D(bs, target - bs * gpm)
+
+
+## 캔버스에서 총열 각도 · 손이 잡는 자리(지금 놓인 총 기준)
+func _weapon_canvas_frame() -> Dictionary:
+	var ss := float(maxi(1, baker.opts.supersample))
+	var xf := _weapon.global_transform
+	var o3 := xf.origin
+	var f3 := (xf.basis * forward).normalized()
+	var gpm := grip_point_guess(grip_node, forward) + grip_offset
+	return {
+		"barrel": ((baker.camera.unproject_position(o3 + f3 * 0.3) - baker.camera.unproject_position(o3)) / ss).angle(),
+		"grip": baker.camera.unproject_position(xf * gpm) / ss,
+	}
 
 
 ## 지금 자세에서 무기를 손에 놓는다(그 세트의 그립으로)
@@ -358,6 +493,7 @@ func read_sets() -> Array:
 			warnings.append("%s — rig.json 을 읽을 수 없습니다" % String(sd.get("name", "")))
 			continue
 		out.append({"name": String(sd.get("name", "")), "dir": String(sd.get("dir", "")), "rig": rig})
+		_orders[String(sd.get("name", ""))] = Array(rig.get("layer_order", []))
 	return out
 
 
@@ -429,6 +565,24 @@ func view_hand(zoom: float, yaw_deg: float = NAN, pitch_deg: float = NAN) -> voi
 	cam.size = _cur_ortho / maxf(zoom, 0.1)
 
 
+## 장비만 보는 미리보기 카메라 — 굽는 카메라의 방향 그대로, 장비 경계 상자 한가운데를 화면 중심에.
+## 보이는 범위 = 장비 긴 변 × span 배(직교 카메라라 거리(z)를 옮겨도 크기는 안 변한다 — 담는 범위로 조절).
+## 미리보기 전용: 굽기 전에 apply_set 이 카메라를 되돌린다.
+func view_weapon(span: float) -> void:
+	var cam := baker.camera
+	var w := ensure_weapon()
+	if cam == null or w == null:
+		return
+	var box := weapon_aabb()
+	var c: Vector3 = w.global_transform * box.get_center()
+	var xf := cam.global_transform
+	var depth := (c - xf.origin).dot(-xf.basis.z.normalized())
+	xf.origin = c + xf.basis.z.normalized() * maxf(depth, 1.0)
+	cam.global_transform = xf
+	var long := maxf(box.size.x, maxf(box.size.y, box.size.z)) * weapon_scale
+	cam.size = maxf(long * span, 0.01)
+
+
 ## 캐릭터 파트 보이기/숨기기(3D 미리보기에서 무기만 볼 때)
 func show_character(on: bool) -> void:
 	for k in baker.part_nodes.keys():
@@ -455,9 +609,9 @@ func render_with_character(set_name: String = "") -> Image:
 
 ## 이 세트에서 무기 뒤에 그려지는 파트들(뒤 → 앞 순서에서 무기 자리보다 앞의 것) — 앞 조각 후보
 func parts_behind_weapon(set_info: Dictionary) -> PackedStringArray:
-	var a := adjust_of(String(set_info["name"]))
-	var after := String(a["z_after_part"]) if bool(a["z_override"]) else z_after_part
-	var zi := int(a["z_index"]) if bool(a["z_override"]) else z_index
+	var wz := weapon_z_for(String(set_info["name"]))
+	var after := String(wz["after"])
+	var zi := int(wz["index"])
 	var order: Array = Array((set_info["rig"] as Dictionary).get("layer_order", []))
 	if order.is_empty():
 		order = Array(baker.rig.order)
@@ -487,8 +641,8 @@ static func _decode_id(c: Color, n: int) -> int:
 	return int(roundf(c.h * float(n))) % maxi(n, 1)
 
 
-## 파트 ID 렌더: 파트마다 색상환의 고유 색(무광), 무기는 흰색 — 픽셀마다 누가 맨 앞인지
-func _render_id_pass(set_name: String) -> Dictionary:
+## 파트 ID 렌더: 파트마다 색상환의 고유 색(무광), 무기는 흰색 — 픽셀마다 누가 맨 앞인지. with_weapon = false 면 파트끼리만
+func _render_id_pass(set_name: String, with_weapon: bool = true) -> Dictionary:
 	var names := PackedStringArray(baker.part_nodes.keys())
 	for i in names.size():
 		var mi := baker.part_nodes[names[i]] as MeshInstance3D
@@ -503,7 +657,7 @@ func _render_id_pass(set_name: String) -> Dictionary:
 	key.albedo_color = KEY_COLOR
 	for mi in _meshes(w):
 		mi.material_override = key
-	_set_weapon_visible(true)
+	_set_weapon_visible(with_weapon)
 	place_weapon(set_name)
 	var keep_levels := baker.opts.color_levels
 	baker.opts.color_levels = 0   # ID 색이 양자화로 뭉개지지 않게
@@ -513,6 +667,7 @@ func _render_id_pass(set_name: String) -> Dictionary:
 		(baker.part_nodes[names[i]] as MeshInstance3D).material_override = null
 	for mi in _meshes(w):
 		mi.material_override = null
+	_set_weapon_visible(true)
 	return {"img": img, "names": names}
 
 
@@ -528,6 +683,13 @@ func bake_set(set_info: Dictionary) -> Dictionary:
 	var used := img.get_used_rect()
 	if used.size.x <= 0 or used.size.y <= 0:
 		return {"ok": false, "warning": "%s — 무기가 화면에 안 찍혔습니다(틀 밖)" % name}
+	# 총열이 캔버스에서 향한 각도(기즈모 축을 총에 맞추려고)
+	var barrel := 0.0
+	if is_instance_valid(_weapon):
+		var ss := float(maxi(1, baker.opts.supersample))
+		var o3 := _weapon.global_transform.origin
+		var f3 := (_weapon.global_transform.basis * forward).normalized()
+		barrel = ((baker.camera.unproject_position(o3 + f3 * 0.3) - baker.camera.unproject_position(o3)) / ss).angle()
 	var warn := ""
 	if used.position.x <= 0 or used.position.y <= 0 or used.end.x >= img.get_width() or used.end.y >= img.get_height():
 		warn = "%s — 무기가 캔버스 가장자리에 닿아 잘렸을 수 있습니다" % name
@@ -535,43 +697,125 @@ func bake_set(set_info: Dictionary) -> Dictionary:
 	var pad := int((set_info["rig"] as Dictionary).get("outline_px", 0)) + 1
 	var cut := Image.create(used.size.x + pad * 2, used.size.y + pad * 2, false, Image.FORMAT_RGBA8)
 	cut.blit_rect(img, used, Vector2i(pad, pad))
-	# 앞 조각 — 무기 뒤에 그려지는 파트 중 3D 에서 무기보다 앞에 있는 픽셀
+	# 앞 조각 — 파트별 규칙(자동 = 3D 깊이 · 총이 앞 · 파트가 앞). 무기 발자국 안에서만 본다(밖은 파트 자기 그림이 그린다)
 	var overlays: Array = []
-	if front_pieces:
-		var behind := parts_behind_weapon(set_info)
-		if behind.size() > 0:
-			_set_weapon_visible(false)
-			show_character(true)
-			var body: Image = await baker._grab()
-			_set_weapon_visible(true)
-			var idp: Dictionary = await _render_id_pass(name)
-			var idimg: Image = idp["img"]
-			var names: PackedStringArray = idp["names"]
-			for pn in behind:
-				var pi := names.find(pn)
-				if pi < 0:
+	var overlap: Dictionary = {}   # 파트 -> { overlap: 겹치는 px, front: 3D 에서 무기보다 앞인 px, behind_order: bool }
+	var behind := parts_behind_weapon(set_info)
+	_set_weapon_visible(false)
+	show_character(true)
+	var body: Image = await baker._grab()
+	var idp0: Dictionary = await _render_id_pass(name, false)   # 파트끼리만 — 누가 겹치나
+	var idp: Dictionary = await _render_id_pass(name, true)     # 무기까지 — 누가 무기보다 앞인가
+	var id0: Image = idp0["img"]
+	var idw: Image = idp["img"]
+	var names: PackedStringArray = idp["names"]
+	var n := names.size()
+	var stat_overlap := PackedInt32Array()
+	var stat_front := PackedInt32Array()
+	stat_overlap.resize(n)
+	stat_front.resize(n)
+	for y in range(used.position.y, used.end.y):
+		for x in range(used.position.x, used.end.x):
+			if img.get_pixel(x, y).a < 0.5:
+				continue
+			var a0 := _decode_id(id0.get_pixel(x, y), n)
+			if a0 >= 0:
+				stat_overlap[a0] += 1
+			var aw := _decode_id(idw.get_pixel(x, y), n)
+			if aw >= 0:
+				stat_front[aw] += 1
+	for pi in n:
+		var pn := String(names[pi])
+		if stat_overlap[pi] == 0 and stat_front[pi] == 0:
+			continue
+		var is_behind := behind.has(pn)
+		overlap[pn] = {"overlap": stat_overlap[pi], "front": stat_front[pi], "behind_order": is_behind}
+		var rule := rule_for(name, pn)
+		if rule == RULE_HIDE:
+			overlays.append({"part": pn, "kind": "hide", "pixels": 0})
+			continue
+		var kind := "part"
+		var use_all := false      # 겹치는 부분 전부(파트가 앞) / 아니면 3D 에서 앞인 픽셀만(자동)
+		if is_behind:
+			if rule == RULE_WEAPON_FRONT:
+				continue
+			if rule == RULE_PART_FRONT and list_mode:
+				# 목록 방식 — 겹치는 픽셀만 찍으면 레스트 기준이라 애니에서 손이 움직이면 어긋난다(09-23 사용자 캡처).
+				# 파트를 통째로 총 위로 올린다(런타임이 그 파트의 z 를 총 z + 1 + 순번 으로 매 프레임 덮어씀).
+				overlays.append({"part": pn, "kind": "raise", "rank": _order_of(name).find(pn), "pixels": stat_overlap[pi]})
+				continue
+			if rule == RULE_PART_FRONT:
+				use_all = true
+			elif not front_pieces:
+				continue
+		else:
+			if rule != RULE_WEAPON_FRONT:
+				continue
+			kind = "weapon"        # 파트가 무기보다 앞 순서인데 총이 가려야 함 → 총의 그 부분을 파트 위에
+		var ov := Image.create(img.get_width(), img.get_height(), false, Image.FORMAT_RGBA8)
+		var count := 0
+		for y in range(used.position.y, used.end.y):
+			for x in range(used.position.x, used.end.x):
+				var wp := img.get_pixel(x, y)
+				if wp.a < 0.5:
 					continue
-				var ov := Image.create(img.get_width(), img.get_height(), false, Image.FORMAT_RGBA8)
-				var count := 0
-				for y in range(used.position.y, used.end.y):
-					for x in range(used.position.x, used.end.x):
-						if img.get_pixel(x, y).a < 0.5:
-							continue   # 무기 발자국 안에서만(밖은 파트 자기 그림이 그린다)
-						if _decode_id(idimg.get_pixel(x, y), names.size()) != pi:
-							continue   # 이 파트가 맨 앞인 픽셀만
-						var c := body.get_pixel(x, y)
-						if c.a < 0.5:
-							continue
-						ov.set_pixel(x, y, c)
-						count += 1
-				if count < FRONT_MIN_PX:
-					continue
-				var r := ov.get_used_rect()
-				var ocut := Image.create(r.size.x + pad * 2, r.size.y + pad * 2, false, Image.FORMAT_RGBA8)
-				ocut.blit_rect(ov, r, Vector2i(pad, pad))
-				overlays.append({"part": String(pn), "image": ocut, "offset": Vector2i(r.position.x - pad, r.position.y - pad), "pixels": count})
-	return {"ok": true, "image": cut, "offset": Vector2i(used.position.x - pad, used.position.y - pad), "warning": warn,
-		"overlays": overlays, "palm_attach": palm_a, "palm_support": palm_s}
+				if kind == "weapon":
+					if _decode_id(id0.get_pixel(x, y), n) != pi:
+						continue   # 그 파트가 있는 자리의 총 픽셀만
+					ov.set_pixel(x, y, wp)
+					count += 1
+				else:
+					var src: Image = id0 if use_all else idw
+					if _decode_id(src.get_pixel(x, y), n) != pi:
+						continue
+					var c := body.get_pixel(x, y)
+					if c.a < 0.5:
+						continue
+					ov.set_pixel(x, y, c)
+					count += 1
+		if count < FRONT_MIN_PX:
+			continue
+		var r := ov.get_used_rect()
+		var ocut := Image.create(r.size.x + pad * 2, r.size.y + pad * 2, false, Image.FORMAT_RGBA8)
+		ocut.blit_rect(ov, r, Vector2i(pad, pad))
+		overlays.append({"part": pn, "kind": kind, "image": ocut, "offset": Vector2i(r.position.x - pad, r.position.y - pad), "pixels": count})
+	# 목록 방식 — 겹치지 않아도 "총 앞" 으로 끌어낸 파트는 올린다(애니 중에 겹칠 수 있다)
+	if list_mode:
+		for pn in behind:
+			var done := false
+			for o in overlays:
+				done = done or String((o as Dictionary)["part"]) == String(pn)
+			if not done and names.has(String(pn)) and rule_for(name, String(pn)) == RULE_PART_FRONT:
+				overlays.append({"part": String(pn), "kind": "raise", "rank": _order_of(name).find(String(pn)), "pixels": 0})
+	# 겹치지 않는 파트라도 숨김 규칙이면 넣는다
+	for pn in names:
+		if not overlap.has(String(pn)) and rule_for(name, String(pn)) == RULE_HIDE:
+			overlays.append({"part": String(pn), "kind": "hide", "pixels": 0})
+	var out_img := cut
+	var out_off := Vector2i(used.position.x - pad, used.position.y - pad)
+	var out_angle := 0.0
+	if consistent_view and is_instance_valid(_weapon):
+		# 이 자세의 총열 방향 · 손이 잡는 자리(3D 그대로)
+		place_weapon(name)
+		var pose := _weapon_canvas_frame()
+		# 같은 모습의 그림(옆모습 + 보기 각) — 그 그림의 총열을 이 자세의 총열 방향으로 돌려, 잡는 자리를 맞춘다
+		show_character(false)
+		place_canonical()
+		var canon := _weapon_canvas_frame()
+		var cimg: Image = await baker._grab()
+		show_character(true)
+		place_weapon(name)
+		var cu := cimg.get_used_rect()
+		if cu.size.x > 0 and cu.size.y > 0:
+			out_img = Image.create(cu.size.x + pad * 2, cu.size.y + pad * 2, false, Image.FORMAT_RGBA8)
+			out_img.blit_rect(cimg, cu, Vector2i(pad, pad))
+			out_angle = float(pose["barrel"]) - float(canon["barrel"])
+			var g_img: Vector2 = Vector2(canon["grip"]) - Vector2(cu.position - Vector2i(pad, pad))
+			var o := Vector2(pose["grip"]) - g_img.rotated(out_angle)
+			out_off = Vector2i(roundi(o.x), roundi(o.y))
+			barrel = float(canon["barrel"])   # 그림 안에서의 총열 각(기즈모 축용 — 스프라이트 회전이 나머지를 더한다)
+	return {"ok": true, "image": out_img, "offset": out_off, "angle": out_angle, "warning": warn,
+		"overlays": overlays, "overlap": overlap, "palm_attach": palm_a, "palm_support": palm_s, "barrel": barrel}
 
 
 ## 모든 세트를 메모리에서 굽는다 → { 세트 이름: bake_set 결과 }. 진행 신호를 낸다
@@ -604,13 +848,17 @@ func build_equip_set(baked: Dictionary) -> DREquipSet:
 		it.texture = ImageTexture.create_from_image(r["image"] as Image)
 		it.offset = Vector2(r["offset"] as Vector2i)
 		it.follow_stretch = false
-		var a := adjust_of(String(set_name))
-		it.z_after_part = String(a["z_after_part"]) if bool(a["z_override"]) else z_after_part
-		it.z_index = int(a["z_index"]) if bool(a["z_override"]) else z_index
+		it.angle = float(r.get("angle", 0.0))
+		var wz := weapon_z_for(String(set_name))
+		it.z_after_part = String(wz["after"])
+		it.z_index = int(wz["index"])
 		var ovs: Array = []
 		for o in r.get("overlays", []):
 			var od: Dictionary = o
-			ovs.append({"part": String(od["part"]), "texture": ImageTexture.create_from_image(od["image"] as Image), "offset": Vector2(od["offset"] as Vector2i)})
+			if String(od.get("kind", "part")) in ["hide", "raise"]:
+				ovs.append({"part": String(od["part"]), "kind": String(od["kind"]), "rank": int(od.get("rank", 0))})
+				continue
+			ovs.append({"part": String(od["part"]), "kind": String(od.get("kind", "part")), "texture": ImageTexture.create_from_image(od["image"] as Image), "offset": Vector2(od["offset"] as Vector2i)})
 		it.overlays = ovs
 		es.items[String(set_name)] = it
 	return es
@@ -644,19 +892,21 @@ func run() -> Dictionary:
 		var file := String((si as Dictionary)["dir"]).validate_filename() + ".png"
 		(r["image"] as Image).save_png(ProjectSettings.globalize_path(dir.path_join(file)))
 		var off: Vector2i = r["offset"]
-		var entry := {"image": file, "offset": [off.x, off.y], "grip": _t2a(compose_grip(name))}
+		var entry := {"image": file, "offset": [off.x, off.y], "angle": float(r.get("angle", 0.0)), "grip": _t2a(compose_grip(name))}
 		var ov_entries: Array = []
 		for o in r.get("overlays", []):
 			var od: Dictionary = o
-			var ofile := "%s_front_%s.png" % [String((si as Dictionary)["dir"]).validate_filename(), String(od["part"]).validate_filename()]
+			if String(od.get("kind", "part")) in ["hide", "raise"]:
+				ov_entries.append({"part": String(od["part"]), "kind": String(od["kind"]), "rank": int(od.get("rank", 0))})
+				continue
+			var ofile := "%s_%s_%s.png" % [String((si as Dictionary)["dir"]).validate_filename(), "over" if String(od.get("kind", "part")) == "weapon" else "front", String(od["part"]).validate_filename()]
 			(od["image"] as Image).save_png(ProjectSettings.globalize_path(dir.path_join(ofile)))
 			var ooff: Vector2i = od["offset"]
-			ov_entries.append({"part": String(od["part"]), "image": ofile, "offset": [ooff.x, ooff.y], "pixels": int(od.get("pixels", 0))})
+			ov_entries.append({"part": String(od["part"]), "kind": String(od.get("kind", "part")), "image": ofile, "offset": [ooff.x, ooff.y], "pixels": int(od.get("pixels", 0))})
 		entry["overlays"] = ov_entries
-		var a := adjust_of(name)
-		if bool(a["z_override"]):
-			entry["z_after_part"] = String(a["z_after_part"])
-			entry["z_index"] = int(a["z_index"])
+		var wz := weapon_z_for(name)
+		entry["z_after_part"] = String(wz["after"])
+		entry["z_index"] = int(wz["index"])
 		out_sets[name] = entry
 	var doc := to_dict()
 	doc["sets"] = out_sets
@@ -714,7 +964,7 @@ func to_dict() -> Dictionary:
 	for k in set_adjust.keys():
 		var a := adjust_of(String(k))
 		sa[String(k)] = {"pos": _v2a(a["pos"]), "rot": _v2a(a["rot"]), "z_override": bool(a["z_override"]),
-			"z_after_part": String(a["z_after_part"]), "z_index": int(a["z_index"])}
+			"z_after_part": String(a["z_after_part"]), "z_index": int(a["z_index"]), "rules": Dictionary(a["rules"]).duplicate()}
 	return {
 		"version": 2,
 		"id": id,
@@ -725,9 +975,14 @@ func to_dict() -> Dictionary:
 		"grip_node": grip_node,
 		"grip_offset": _v2a(grip_offset),
 		"weapon_scale": weapon_scale,
-		"z_after_part": z_after_part,
-		"z_index": z_index,
+		"list_mode": list_mode,
+		"consistent_view": consistent_view,
+		"view_yaw": view_yaw,
+		"view_roll": view_roll,
+		"z_after_part": "" if list_mode else z_after_part,
+		"z_index": Z_FRONT if list_mode else z_index,
 		"front_pieces": front_pieces,
+		"part_rules": part_rules.duplicate(),
 		"follow_stretch": false,   # 긴 무기가 손의 단축 보정을 따라 찌그러지면 안 된다
 		"source": weapon_path,
 		"sets_json": sets_json,
@@ -754,6 +1009,24 @@ func from_dict(d: Dictionary) -> void:
 	z_after_part = String(d.get("z_after_part", ""))
 	z_index = int(d.get("z_index", Z_FRONT))
 	front_pieces = bool(d.get("front_pieces", true))
+	part_rules = {}
+	for k in d.get("part_rules", {}).keys():
+		part_rules[String(k)] = String(d["part_rules"][k])
+	legacy_after = ""
+	consistent_view = bool(d.get("consistent_view", false))   # 이 칸이 없던 파일은 예전처럼(자세마다 3D 그대로)
+	view_yaw = float(d.get("view_yaw", 0.0))
+	view_roll = float(d.get("view_roll", 0.0))
+	if not bool(d.get("list_mode", false)):
+		# 한 자리 방식이던 옛 파일 — 자동/파트가 앞 규칙은 버리고(목록 방식에선 규칙 없음 = 총 앞), 그 자리까지를 창이 "총 뒤로" 로 채운다
+		legacy_after = z_after_part
+		var keep := {}
+		for k in part_rules.keys():
+			if String(part_rules[k]) == RULE_WEAPON_FRONT or String(part_rules[k]) == RULE_HIDE:
+				keep[k] = part_rules[k]
+		part_rules = keep
+	list_mode = true
+	z_after_part = ""
+	z_index = Z_FRONT
 	if d.has("sets_json"):
 		sets_json = String(d["sets_json"])
 	hidden_nodes = PackedStringArray(d.get("hidden", []))
@@ -772,16 +1045,82 @@ func from_dict(d: Dictionary) -> void:
 	var sa: Dictionary = d.get("set_adjust", {})
 	for k in sa.keys():
 		var e: Dictionary = sa[k]
+		var er := {}
+		for rk in Dictionary(e.get("rules", {})).keys():
+			er[String(rk)] = String(e["rules"][rk])
 		set_adjust[String(k)] = {"pos": _a2v(e.get("pos")), "rot": _a2v(e.get("rot")), "z_override": bool(e.get("z_override", false)),
-			"z_after_part": String(e.get("z_after_part", "")), "z_index": int(e.get("z_index", z_index))}
+			"z_after_part": String(e.get("z_after_part", "")), "z_index": int(e.get("z_index", z_index)), "rules": er}
 	var src := String(d.get("source", ""))
 	if src != "" and src == weapon_path and weapon_res != null:
 		pass   # 이미 같은 무기가 올라가 있다
-	elif src != "" and ResourceLoader.exists(src):
-		set_weapon(load(src), src)
+	elif src != "" and load_weapon(src) != null:
+		set_weapon(load_weapon(src), src)
 	elif src != "":
 		warnings.append("무기 모델을 찾을 수 없습니다: %s" % src)
 		weapon_path = src
+
+
+## 무기 파일 불러오기. 가져오기(import)된 것은 그대로, 아직 안 된 glb/gltf(공정이 방금 만든 것)는 런타임으로 읽어 씬으로 만든다
+## — 에디터가 열려 있어도 CLI 로 구울 수 있게(에디터가 가져오기 전이라도).
+static func load_weapon(path: String) -> Resource:
+	if path == "":
+		return null
+	if ResourceLoader.exists(path):
+		return load(path)
+	var ext := path.get_extension().to_lower()
+	if not (ext in ["glb", "gltf"]) or not FileAccess.file_exists(path):
+		return null
+	var doc := GLTFDocument.new()
+	var st := GLTFState.new()
+	if doc.append_from_file(ProjectSettings.globalize_path(path), st) != OK:
+		return null
+	var root := doc.generate_scene(st)
+	if root == null:
+		return null
+	_own_all(root, root)
+	var ps := PackedScene.new()
+	ps.pack(root)
+	root.free()
+	return ps
+
+
+static func _own_all(n: Node, owner: Node) -> void:
+	for c in n.get_children():
+		c.owner = owner
+		_own_all(c, owner)
+
+
+# ---------------------------------------------------------------- 자산 기록(asset.json)
+# 자산 공정의 기록 파일. 생성 → 정규화(Blender) → 굽기 가 각자 자기 칸을 읽고 결과를 적는다.
+#   source{file, generator} · normalize{length_m, forward, up, grip_node, output, result} · character{preset, sets}
+#   · equip{…to_dict() 과 같은 칸 + out_dir} · history[]
+# 장비 설정의 원본은 여기 "equip" 칸 — 창에서 조정하고 구우면 이 칸도 갱신된다.
+
+## 무기 파일 옆의 asset.json (없으면 "")
+static func asset_path_for(weapon_path: String) -> String:
+	if weapon_path == "":
+		return ""
+	var p := weapon_path.get_base_dir().path_join("asset.json")
+	return p if FileAccess.file_exists(p) else ""
+
+
+## asset.json 의 "equip" 칸을 지금 설정으로 갱신하고 기록을 남긴다
+func write_asset_equip(asset_path: String, note: String = "") -> bool:
+	var d := _read_json(asset_path)
+	if d.is_empty():
+		return false
+	var eq := to_dict()
+	eq["out_dir"] = out_dir
+	d["equip"] = eq
+	var hist: Array = d.get("history", [])
+	hist.append({"step": "bake", "at": Time.get_datetime_string_from_system(), "ok": true, "note": note})
+	d["history"] = hist
+	var f := FileAccess.open(asset_path, FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(JSON.stringify(d, "\t"))
+	f.close()
+	return true
 
 
 ## equip.json 을 읽어 설정을 되돌린다(못 읽으면 false)

@@ -33,8 +33,8 @@ signal animation_changed(anim: StringName, set_name: String)
 @export var aim_enabled: bool = false
 ## 조준할 곳(전역 좌표). 보통 매 프레임 get_global_mouse_position()
 @export var aim_target: Vector2 = Vector2.ZERO
-## 위아래로 돌릴 수 있는 한계(도)
-@export_range(0.0, 90.0, 1.0) var aim_limit_deg: float = 35.0
+## 위아래로 돌릴 수 있는 한계(도) — sets.json 에 그 동작의 범위(aim_limits)가 없을 때만 쓴다(±이 값)
+@export_range(0.0, 90.0, 1.0) var aim_limit_deg: float = 16.0
 ## 각도를 더할 파트. 몸통이면 머리·팔·총이 같이 돈다
 @export var aim_part: String = "Torso"
 ## 목표를 따라가는 빠르기(클수록 즉시)
@@ -47,6 +47,7 @@ signal animation_changed(anim: StringName, set_name: String)
 var run_in_editor: bool = false
 
 var _entries: Array = []            # [{name, dir, puppet: DRPuppet, player: AnimationPlayer, anims: PackedStringArray, origin: Vector2}]
+var _aim_range: Dictionary = {}     # 동작 이름 -> Vector2(아래, 위) 도(sets.json 의 aim_limits)
 var _anim_to_set: Dictionary = {}   # 동작 이름 -> _entries 번호
 var _active := -1
 var _current: StringName = &""
@@ -68,6 +69,7 @@ func reload() -> void:
 			old.queue_free()
 	_entries.clear()
 	_anim_to_set.clear()
+	_aim_range.clear()
 	_active = -1
 	_current = &""
 	_aim_applied = 0.0
@@ -112,6 +114,10 @@ func reload() -> void:
 			if not _anim_to_set.has(String(an)):
 				_anim_to_set[String(an)] = _entries.size()
 		_entries.append({"name": String(sd.get("name", "")), "holder": holder, "puppet": puppet, "player": player, "anims": names, "origin": origin})
+		var al: Dictionary = sd.get("aim_limits", {})
+		for an in al.keys():
+			var v: Array = al[an]
+			_aim_range[String(an)] = Vector2(float(v[0]), float(v[1]))
 	for slot in _equip_sets.keys():
 		_apply_equip(_equip_sets[slot])
 	if _entries.size() > 0:
@@ -254,6 +260,12 @@ func _remove_aim() -> void:
 	_aim_applied = 0.0
 
 
+## 지금 동작의 조준 범위(도) x = 아래(최소) · y = 위(최대), + = 위. 도트화 툴의 동작별 값, 없으면 ±aim_limit_deg
+func get_aim_range(anim: StringName = &"") -> Vector2:
+	var a := String(anim if anim != &"" else _current)
+	return _aim_range.get(a, Vector2(-aim_limit_deg, aim_limit_deg))
+
+
 func _process(delta: float) -> void:
 	if _active < 0:
 		return
@@ -282,7 +294,8 @@ func _process(delta: float) -> void:
 		var dir := t - pv
 		if dir.length() > 1.0:
 			var ang := atan2(dir.y, dir.x * base_dir)             # 정면 수평 = 0, 위 = −, 아래 = +
-			want = clampf(ang, -deg_to_rad(aim_limit_deg), deg_to_rad(aim_limit_deg)) * base_dir
+			var rg := get_aim_range()                              # x = 아래(최소) · y = 위(최대), 도, + = 위
+			want = clampf(ang, -deg_to_rad(rg.y), -deg_to_rad(rg.x)) * base_dir
 	_aim_cur = lerp_angle(_aim_cur, want, 1.0 - exp(-delta * aim_speed))
 	if bone != null and absf(_aim_cur) > 0.00001:
 		bone.rotation += _aim_cur

@@ -75,7 +75,8 @@ func _run() -> void:
 	var res: Dictionary = await sb.run([
 		{"name": "stand", "rest_anim": "Pistol_Aim_Neutral", "rest_time": 0.0, "animations": PackedStringArray(["Idle", "Pistol_Aim_Neutral"])},
 		{"name": "crouch", "rest_anim": "Crouch_Idle", "rest_time": 0.1, "animations": PackedStringArray(["Crouch_Idle"])},
-	], OUT, {"fps": 12, "auto_fit": true, "margin": 8, "keep_previous": false, "smooth": false, "outline_px": 1})
+	], OUT, {"fps": 12, "auto_fit": true, "margin": 8, "keep_previous": false, "smooth": false, "outline_px": 1,
+		"aim_limits": {"Crouch_Idle": [-5.0, 12.0]}})
 	baker.cleanup()
 	if not bool(res.get("ok", false)):
 		printerr("세트 굽기 실패: ", res.get("error", "")); quit(1); return
@@ -165,6 +166,23 @@ func _run() -> void:
 	s.aim_target = torso.global_position + Vector2(260, -70)
 	await _frames(400)
 	_check(s.get_facing() == 1 and s.scale.x > 0.0, "다시 오른쪽이면 되돌아봄")
+
+	print("[4-1] 동작별 조준 범위(sets.json aim_limits)")
+	s.play("Crouch_Idle")
+	s.aim_enabled = true
+	s.auto_face = false
+	var al_ct := s.get_puppet().get_bone("Torso")
+	s.aim_target = al_ct.global_position + Vector2(100, -400)       # 한참 위
+	await _frames(400)
+	var al_up := -s.get_aim_degrees()
+	s.aim_target = al_ct.global_position + Vector2(100, 400)        # 한참 아래
+	await _frames(400)
+	var al_dn := -s.get_aim_degrees()
+	_check(absf(al_up - 12.0) < 0.5 and absf(al_dn + 5.0) < 0.5, "Crouch_Idle 범위 -5~+12 → 위 %+.1f° · 아래 %+.1f°" % [al_up, al_dn])
+	_check(s.get_aim_range(&"Idle") == Vector2(-s.aim_limit_deg, s.aim_limit_deg), "범위를 안 정한 동작은 ±aim_limit_deg")
+	s.aim_enabled = false
+	s.auto_face = true
+	await _frames(5)
 
 	print("[5] 장비 — 모든 세트에 한 번에 · 파트 사이 순서 · 무기 교체")
 	s.aim_enabled = false

@@ -15,7 +15,10 @@ extends SceneTree
 ##   --grip_node    무기에서 손이 잡는 자리의 기준 노드(없으면 경계 상자에서 어림) · --grip_offset 그 점에서 더 옮길 양(모델 공간, m)
 ##   --grip_from    자동 그립을 잡을 세트 이름(기본: 레스트 동작 이름에 rifle·aim 이 든 첫 세트, 없으면 첫 세트)
 ##   --hide=a,b     숨길 무기 하위 노드   --z_after=Torso  그리기 순서("이 파트 바로 앞")
+##   --rules=L_Hand:weapon_front,…   파트별(weapon_front = 총 뒤로 · part_front = 총 앞 · hide = 숨김). 없는 파트는 --behind_upto(기본 Torso)까지 총 뒤, 나머지 총 앞
 ##   --out=res://equip   --shots  확인용 그림(3D 합성 · 2D 장착)을 res://puppet_test/ 에 저장
+##   --asset=res://…/asset.json   자산 기록 하나로: 무기 = normalize.output, 캐릭터 = character.preset/sets, 설정 = equip 칸.
+##                  equip 칸에 그립(grip_base)이 있으면 자동 그립 대신 그대로 쓰고, 굽고 나면 equip 칸 · history 를 갱신한다.
 ## 렌더가 필요하므로 --headless 로는 못 돌린다.
 
 var _args := {}
@@ -46,6 +49,24 @@ func _vec3(s: String, def: Vector3) -> Vector3:
 
 
 func _run() -> void:
+	# 자산 기록이 있으면 그걸로 인자를 채운다(명령줄에 따로 준 값이 우선)
+	var asset: Dictionary = {}
+	var asset_path := _arg("asset", "")
+	if asset_path != "":
+		var v: Variant = JSON.parse_string(FileAccess.get_file_as_string(asset_path)) if FileAccess.file_exists(asset_path) else null
+		if not (v is Dictionary):
+			printerr("asset.json 을 읽을 수 없습니다: ", asset_path); quit(1); return
+		asset = v
+		var nz: Dictionary = asset.get("normalize", {})
+		var ch: Dictionary = asset.get("character", {})
+		var eq: Dictionary = asset.get("equip", {})
+		for pair in [["weapon", String(nz.get("output", ""))], ["preset", String(ch.get("preset", ""))], ["sets", String(ch.get("sets", ""))],
+				["id", String(eq.get("id", asset.get("id", "")))], ["out", String(eq.get("out_dir", "res://equip"))],
+				["grip_node", String(eq.get("grip_node", nz.get("grip_node", "")))]]:
+			if not _args.has(pair[0]) and String(pair[1]) != "":
+				_args[pair[0]] = String(pair[1])
+		if not _args.has("hide") and (eq.get("hidden", []) as Array).size() > 0:
+			_args["hide"] = ",".join(PackedStringArray(eq["hidden"]))
 	var opts := DRBaker.Options.new()
 	var model_path := _arg("model", "res://models/UAL1.glb")
 	var preset_path := _arg("preset", "")
@@ -74,7 +95,7 @@ func _run() -> void:
 	await process_frame
 
 	var weapon_path := _arg("weapon", "")
-	var wres := load(weapon_path)
+	var wres := DREquipBaker.load_weapon(weapon_path)
 	if wres == null or not (wres is PackedScene or wres is Mesh):
 		printerr("무기 모델을 열 수 없습니다: ", weapon_path); quit(1); return
 	var eb := DREquipBaker.new()
@@ -93,6 +114,11 @@ func _run() -> void:
 	eb.out_dir = _arg("out", "res://equip")
 	if _args.has("hide"):
 		eb.hidden_nodes = PackedStringArray(_arg("hide").split(",", false))
+	if _args.has("rules"):   # --rules=L_Hand:weapon_front,R_Hand:part_front  (자동 / weapon_front = 총이 앞 / part_front = 파트가 앞)
+		for pair in _arg("rules").split(",", false):
+			var kv := String(pair).split(":")
+			if kv.size() == 2:
+				eb.part_rules[kv[0]] = kv[1]
 	if not (wres is PackedScene):
 		print("[장비] ⚠ 무기가 한 덩어리(Mesh)입니다 — 파트별로 숨기려면 가져오기 형식을 Scene 으로")
 
@@ -109,8 +135,19 @@ func _run() -> void:
 		printerr("그립을 잡을 세트를 세울 수 없습니다: ", ", ".join(eb.warnings)); quit(1); return
 	if not eb.auto_grip():
 		printerr("자동 그립 실패: ", ", ".join(eb.warnings)); quit(1); return
-	eb.adj_pos = _vec3(_arg("adj_pos", "0,0,0"), Vector3.ZERO)   # 무기 축 기준 m: 좌우, 위아래, 앞뒤
-	eb.adj_rot = _vec3(_arg("adj_rot", "0,0,0"), Vector3.ZERO)   # 도: 총구 위(+)/아래, 좌우 틀기, 굴리기
+	# 자산 기록에 조정해 둔 설정(그립 · 조정 · 파트 규칙 · 보는 각도)이 있으면 그대로
+	var eqd: Dictionary = asset.get("equip", {})
+	var restored := false
+	if eqd.has("grip_base"):
+		var keep_src := eb.weapon_path
+		eqd["source"] = keep_src
+		eb.from_dict(eqd)
+		restored = true
+	eb.apply_default_behind(Array((grip_set["rig"] as Dictionary).get("layer_order", [])), _arg("behind_upto", "Torso"))   # 창과 같은 기본: 몸통까지 총 뒤
+	if not restored:
+		eb.adj_pos = _vec3(_arg("adj_pos", "0,0,0"), Vector3.ZERO)   # 무기 축 기준 m: 좌우, 위아래, 앞뒤
+		eb.adj_rot = _vec3(_arg("adj_rot", "0,0,0"), Vector3.ZERO)   # 도: 총구 위(+)/아래, 좌우 틀기, 굴리기
+	print("[장비] 설정: %s" % ("자산 기록의 equip 칸 그대로" if restored else "자동 그립 + 기본값"))
 	print("[장비] 그립 기준 세트 = %s · 무기 노드 %s" % [grip_set["name"], str(eb.weapon_node_names())])
 
 	var shots := _args.has("shots")
@@ -129,6 +166,8 @@ func _run() -> void:
 	print("[장비] 결과: ", JSON.stringify(res))
 	if not bool(res.get("ok", false)):
 		quit(1); return
+	if asset_path != "":
+		print("[장비] 자산 기록 갱신: ", eb.write_asset_equip(asset_path, "equip_bake_cli"))
 
 	if shots:
 		var vp := SubViewport.new()

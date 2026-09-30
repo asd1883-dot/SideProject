@@ -37,6 +37,10 @@ class_name DREquipItem
 
 @export var modulate: Color = Color.WHITE
 
+## 그림을 캔버스에서 이만큼 돌려 붙인다(라디안). 장비 굽기의 "모든 자세에 같은 모습" 이 자세마다 넣는다 —
+## 그림은 하나의 모습(옆모습 등)이고, 이 각도가 그 자세의 총열 방향으로 돌린다. offset 은 돌리기 전 그림 원점의 캔버스 자리.
+@export var angle: float = 0.0
+
 ## 앞 조각 — 이 장비보다 **앞에 있는 파트의 그 부분**만 따로 찍은 그림들. [{ part: String, texture: Texture2D, offset: Vector2 }]
 ## 총을 쥔 손가락처럼 장비 앞에 와야 하는 부분이 장비 바로 위(z + 1)에 그 파트를 따라 그려진다(Spine 의 손 앞/뒤 나누기를 자동으로).
 ## 장비 굽기 창이 3D 깊이로 만들어 equip.json 에 같이 남긴다.

@@ -5,7 +5,7 @@ extends EditorPlugin
 ## (Unity 의 EditorWindow 와 같은 사용감: 독이 아니라 독립 창)
 
 const MENU_ITEM := "Dot Rigger (3D → 2D 컷아웃)"
-const MENU_RESET := "Dot Rigger — 창 새로 만들기 (초기화)"
+const MENU_RESET := "Dot Rigger — 개발 내용 갱신"
 const MENU_EQUIP := "Dot Rigger — 장비 굽기 (무기·헬멧)"
 
 var _window: DRMainWindow
@@ -45,9 +45,11 @@ func _open() -> void:
 	_window.popup_centered(Vector2i(1180, 780))
 
 
+## 개발 내용 갱신 — 열려 있던 Dot Rigger 창(메인 · 장비)을 버린다. 다음에 메뉴로 열면 고친 코드로 새로 만들어진다.
+## 창은 띄우지 않는다(09-29 사용자 요청: 갱신만 하고 창이 뜨지 않게).
 func _reopen() -> void:
 	_free_window()
-	_open()
+	print("[Dot Rigger] 개발 내용 갱신 — 창을 다시 열면 새 코드로 뜹니다.")
 
 
 ## 장비(무기·헬멧) 굽기 창 — 캐릭터 프리셋 + sets.json + 무기 모델을 읽어 그립을 맞추고 모든 세트에 맞춰 굽는다

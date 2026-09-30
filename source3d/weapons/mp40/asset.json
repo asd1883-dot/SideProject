@@ -1,0 +1,252 @@
+{
+	"character": {
+		"preset": "res://UAL1_preset.tres",
+		"sets": "res://puppet/sets.json"
+	},
+	"equip": {
+		"adj_pos": [
+			0.00496996520087123,
+			-0.0503434091806412,
+			0.00267569348216057
+		],
+		"adj_rot": [
+			-4.75141286849976,
+			0.207008510828018,
+			-2.76140332221985
+		],
+		"consistent_view": true,
+		"follow_stretch": false,
+		"forward": [
+			0.0,
+			0.0,
+			1.0
+		],
+		"front_pieces": true,
+		"grip_base": [
+			-0.0909211486577988,
+			-0.0488352365791798,
+			0.994660019874573,
+			0.995848953723907,
+			-0.000214450061321259,
+			0.0910190716385841,
+			-0.00423154979944229,
+			0.998806536197662,
+			0.048652071505785,
+			0.0572715997695923,
+			0.226450443267822,
+			0.0195069871842861
+		],
+		"grip_frame": [
+			-0.0909211486577988,
+			-0.0488352365791798,
+			0.994660019874573,
+			0.995848953723907,
+			-0.000214450061321259,
+			0.0910190716385841,
+			-0.00423154979944229,
+			0.998806536197662,
+			0.048652071505785
+		],
+		"grip_node": "",
+		"grip_offset": [
+			0.0,
+			0.0,
+			0.0
+		],
+		"grip_pivot": [
+			0.00512003898620605,
+			0.10154002904892,
+			0.00851976871490479
+		],
+		"hidden": [],
+		"id": "mp40",
+		"list_mode": true,
+		"out_dir": "res://equip",
+		"part": "R_Hand",
+		"part_rules": {
+			"L_Calf": "weapon_front",
+			"L_Foot": "weapon_front",
+			"L_Forearm": "weapon_front",
+			"L_Hand": "weapon_front",
+			"L_Thigh": "weapon_front",
+			"L_UpperArm": "weapon_front",
+			"Torso": "weapon_front"
+		},
+		"set_adjust": {
+			"Crouch_Idle+Firing_Rifle": {
+				"pos": [
+					0.0,
+					0.0,
+					0.0
+				],
+				"rot": [
+					0.0,
+					0.0,
+					0.0
+				],
+				"rules": {
+					"L_Hand": "part_front"
+				},
+				"z_after_part": "",
+				"z_index": 1000,
+				"z_override": false
+			},
+			"Firing_Rifle": {
+				"pos": [
+					0.0,
+					0.0,
+					0.0
+				],
+				"rot": [
+					0.0,
+					0.0,
+					0.0
+				],
+				"rules": {
+					"Head": "weapon_front",
+					"L_Hand": "part_front",
+					"L_UpperArm": "weapon_front",
+					"Torso": "weapon_front"
+				},
+				"z_after_part": "",
+				"z_index": 1000,
+				"z_override": false
+			},
+			"Idle": {
+				"pos": [
+					-0.00656247930601239,
+					0.00450528040528297,
+					-0.0188989024609327
+				],
+				"rot": [
+					-9.5367431640625e-07,
+					3.57627868652344e-07,
+					2.38418579101563e-07
+				],
+				"rules": {
+					"Hips": "weapon_front",
+					"R_Thigh": "weapon_front"
+				},
+				"z_after_part": "",
+				"z_index": 1000,
+				"z_override": false
+			}
+		},
+		"sets_json": "res://puppet/sets.json",
+		"slot": "weapon",
+		"source": "res://source3d/weapons/mp40/mp40.glb",
+		"support_part": "L_Hand",
+		"version": 2,
+		"view_roll": 0.0,
+		"view_yaw": 0.0,
+		"weapon_scale": 1.001,
+		"z_after_part": "",
+		"z_index": 1000
+	},
+	"history": [
+		{
+			"at": "2026-09-30T13:07:40",
+			"note": "",
+			"ok": true,
+			"step": "normalize"
+		},
+		{
+			"at": "2026-09-30T13:08:15",
+			"note": "",
+			"ok": true,
+			"step": "normalize"
+		},
+		{
+			"at": "2026-09-30T13:09:04",
+			"note": "equip_bake_cli",
+			"ok": true,
+			"step": "bake"
+		},
+		{
+			"at": "2026-09-30T13:14:34",
+			"note": "장비 굽기 창",
+			"ok": true,
+			"step": "bake"
+		},
+		{
+			"at": "2026-09-30T13:22:40",
+			"note": "장비 굽기 창",
+			"ok": true,
+			"step": "bake"
+		},
+		{
+			"at": "2026-09-30T13:23:29",
+			"note": "장비 굽기 창",
+			"ok": true,
+			"step": "bake"
+		},
+		{
+			"step": "normalize",
+			"at": "2026-09-30T14:20:31",
+			"ok": true,
+			"note": ""
+		}
+	],
+	"id": "mp40",
+	"kind": "weapon",
+	"normalize": {
+		"forward": "auto",
+		"grip_node": "",
+		"length_m": 0.833,
+		"max_triangles": 20000.0,
+		"split": {
+			"magazine": {
+				"min": [
+					-1,
+					-1,
+					0.115
+				],
+				"max": [
+					1,
+					0.03,
+					0.2
+				]
+			}
+		},
+		"output": "res://source3d/weapons/mp40/mp40.glb",
+		"result": {
+			"ok": true,
+			"source": "C:\\Users\\Dev\\git\\Godot\\SideProject\\pipeline\\comfy\\mp401d13787d-bc6c-4be9-9f75-7f61e1b3bbb5_model.glb",
+			"forward_found": "+X",
+			"end_sections": {
+				"lo": 0.013470567129466135,
+				"hi": 0.00425907236946621
+			},
+			"length_before_m": 1.0,
+			"scale": 0.833,
+			"length_m": 0.8331,
+			"size_m": [
+				0.0826,
+				0.3204,
+				0.8331
+			],
+			"grip_found": false,
+			"parts": [
+				"magazine",
+				"tripo_node_1d13787d-bc6c-4be9-9f75-7f61e1b3bbb5"
+			],
+			"triangles": 20000,
+			"triangles_before": 1200948,
+			"output": "C:\\Users\\Dev\\git\\Godot\\SideProject\\source3d\\weapons\\mp40\\mp40.glb"
+		},
+		"up": "+Z"
+	},
+	"note": "자산 공정 기록 — 생성 → 정규화(Blender) → 굽기(장비 굽기 CLI/창). 각 단계가 자기 칸을 읽고 결과를 적는다.",
+	"source": {
+		"file": "res://pipeline/comfy/mp401d13787d-bc6c-4be9-9f75-7f61e1b3bbb5_model.glb",
+		"generator": {
+			"prompt": "",
+			"reference": "Astra 생성 이미지 mp40_front/back/side_left/side_right.png",
+			"seed": 42.0,
+			"task_id": "1d13787d-bc6c-4be9-9f75-7f61e1b3bbb5",
+			"tool": "comfyui-tripo",
+			"workflow": "ComfyUI 인스턴스 HY 3D 2.0 MV Turbo · 워크플로 무기셋 · Tripo: Generate model"
+		}
+	},
+	"version": 1.0
+}

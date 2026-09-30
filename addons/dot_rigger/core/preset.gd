@@ -69,6 +69,9 @@ class_name DRPreset
 @export var pose_auto: bool = true
 @export var pose_yaw: float = 90.0
 
+## 동작별 조준 범위 { 동작 이름: [아래(최소, 도), 위(최대, 도)] } — + = 위. 없는 동작은 게임의 DRPuppetSet.aim_limit_deg(±35)
+@export var aim_limits: Dictionary = {}
+
 @export_group("리깅 애니메이션 세트")
 ## 자세 계열별 묶음. 각 항목 { "name", "rest_anim", "rest_time"(0~1), "animations": PackedStringArray }.
 ## 하나라도 있으면 베이크가 세트 전부를 순서대로 <out_dir>/<name>/ 에 굽고 sets.json 을 남긴다.

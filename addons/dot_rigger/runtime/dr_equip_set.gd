@@ -49,6 +49,7 @@ static func load_json(path: String) -> DREquipSet:
 		it.texture = tex
 		var off: Array = sd.get("offset", [0, 0])
 		it.offset = Vector2(float(off[0]), float(off[1]))
+		it.angle = float(sd.get("angle", 0.0))
 		# 그리기 순서: 세트 항목에 자기 것이 있으면 그것(그 자세만 다르게), 없으면 공통
 		it.z_index = int(sd.get("z_index", d.get("z_index", 1000)))
 		it.z_after_part = String(sd.get("z_after_part", d.get("z_after_part", "")))
@@ -57,11 +58,14 @@ static func load_json(path: String) -> DREquipSet:
 		var ovs: Array = []
 		for o in sd.get("overlays", []):
 			var od: Dictionary = o
+			if String(od.get("kind", "part")) in ["hide", "raise"]:
+				ovs.append({"part": String(od.get("part", "")), "kind": String(od["kind"]), "rank": int(od.get("rank", 0))})
+				continue
 			var otex := _load_texture(base.path_join(String(od.get("image", ""))))
 			if otex == null:
 				continue
 			var ooff: Array = od.get("offset", [0, 0])
-			ovs.append({"part": String(od.get("part", "")), "texture": otex, "offset": Vector2(float(ooff[0]), float(ooff[1]))})
+			ovs.append({"part": String(od.get("part", "")), "kind": String(od.get("kind", "part")), "texture": otex, "offset": Vector2(float(ooff[0]), float(ooff[1]))})
 		it.overlays = ovs
 		es.items[String(set_name)] = it
 	return es

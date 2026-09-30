@@ -20,6 +20,11 @@ var _composites: Array = []
 var _composite_upper: PackedStringArray = PackedStringArray()
 var _composite_dlg: DRCompositeDialog
 var _composite_btn: Button
+var _aim_min: SpinBox
+var _aim_max: SpinBox
+var _aim_info: Label
+var _aim_limits: Dictionary = {}   # 동작 -> [아래, 위] 도
+const AIM_DEFAULT := 16.0
 const COMPOSITE_COLOR := Color(0.55, 0.85, 1.0)
 var _preview: TextureRect
 var _pv_area: Control
@@ -385,6 +390,46 @@ func _build_ui() -> void:
 	acrow.add_child(aclear)
 	left.add_child(acrow)
 	_tip(aclear, "고른 동작을 전부 해제합니다(검색으로 목록에 안 보이는 것까지).")
+	# 조준 범위 — 동작마다(고른 동작에 적용)
+	var aimrow := HBoxContainer.new()
+	var al := Label.new()
+	al.text = "조준 범위"
+	al.custom_minimum_size = Vector2(70, 0)
+	aimrow.add_child(al)
+	var al1 := Label.new()
+	al1.text = "아래"
+	aimrow.add_child(al1)
+	_aim_min = SpinBox.new()
+	_aim_min.min_value = -90.0
+	_aim_min.max_value = 90.0
+	_aim_min.step = 1.0
+	_aim_min.value = -AIM_DEFAULT
+	_aim_min.suffix = "°"
+	_aim_min.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	aimrow.add_child(_aim_min)
+	var al2 := Label.new()
+	al2.text = "위"
+	aimrow.add_child(al2)
+	_aim_max = SpinBox.new()
+	_aim_max.min_value = -90.0
+	_aim_max.max_value = 90.0
+	_aim_max.step = 1.0
+	_aim_max.value = AIM_DEFAULT
+	_aim_max.suffix = "°"
+	_aim_max.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	aimrow.add_child(_aim_max)
+	left.add_child(aimrow)
+	_aim_min.value_changed.connect(func(_v): _on_aim_range_changed())
+	_aim_max.value_changed.connect(func(_v): _on_aim_range_changed())
+	var aim_tip := "게임에서 마우스 조준으로 몸통을 돌릴 수 있는 범위(도, + = 위). **동작마다 따로** — 위 목록에서 고른 동작들에 적용됩니다.\n" \
+		+ "조준하지 않는 동작은 0 / 0. 정하지 않은 동작은 ±16°. 세트로 구우면 sets.json 에 들어가 DRPuppetSet 이 동작이 바뀔 때마다 그 범위를 씁니다."
+	for c in [al, _aim_min, _aim_max]:
+		_tip(c, aim_tip)
+	_aim_info = Label.new()
+	_aim_info.add_theme_font_size_override("font_size", 11)
+	_aim_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_aim_info.custom_minimum_size = Vector2(200, 0)
+	left.add_child(_aim_info)
 	# 상하체 합성 — 설정은 팝업에서, 만든 동작은 위 목록에 다른 애니와 똑같이 나타난다(하늘색)
 	_composite_btn = Button.new()
 	_composite_btn.text = "상하체 합성…"
@@ -1063,6 +1108,7 @@ func _collect_preset() -> DRPreset:
 	for s in _sets:
 		sets_copy.append((s as Dictionary).duplicate(true))
 	p.sets = sets_copy
+	p.aim_limits = _aim_limits.duplicate(true)
 	return p
 
 
@@ -1077,6 +1123,10 @@ func _apply_preset(p: DRPreset) -> void:
 	for c in p.composites:
 		_composites.append((c as Dictionary).duplicate(true))
 	_composite_upper = p.composite_upper_parts
+	_aim_limits = {}
+	for k in p.aim_limits.keys():
+		var v: Array = p.aim_limits[k]
+		_aim_limits[String(k)] = [float(v[0]), float(v[1])]
 	if p.model_path != "" and (p.model_path != _model_edit.text.strip_edges() or extra_changed):
 		_model_edit.text = p.model_path
 		_on_load()
@@ -2039,9 +2089,49 @@ func _picked_anim_names() -> PackedStringArray:
 	return out
 
 
+## 고른 동작의 조준 범위를 칸에 보여 준다(첫 동작 기준, 서로 다르면 알림)
+func _show_aim_range() -> void:
+	if _aim_min == null:
+		return
+	var names := _picked_anim_names()
+	_aim_min.editable = names.size() > 0
+	_aim_max.editable = names.size() > 0
+	var first := Vector2(-AIM_DEFAULT, AIM_DEFAULT)
+	var mixed := false
+	for i in names.size():
+		var v: Array = _aim_limits.get(names[i], [-AIM_DEFAULT, AIM_DEFAULT])
+		var r := Vector2(float(v[0]), float(v[1]))
+		if i == 0:
+			first = r
+		elif not r.is_equal_approx(first):
+			mixed = true
+	_aim_min.set_value_no_signal(first.x)
+	_aim_max.set_value_no_signal(first.y)
+	var parts := PackedStringArray()
+	for a in _aim_limits.keys():
+		var v: Array = _aim_limits[a]
+		parts.append("%s %+d~%+d°" % [a, int(v[0]), int(v[1])])
+	_aim_info.text = ("⚠ 고른 동작들의 범위가 서로 다릅니다 — 고치면 전부 같은 값이 됩니다. " if mixed else "") \
+		+ ("정해 둔 조준 범위: " + ", ".join(parts) if parts.size() > 0 else "조준 범위: 전부 기본(±16°)")
+
+
+func _on_aim_range_changed() -> void:
+	if _loading:
+		return
+	var lo := minf(_aim_min.value, _aim_max.value)
+	var hi := maxf(_aim_min.value, _aim_max.value)
+	for a in _picked_anim_names():
+		if is_equal_approx(lo, -AIM_DEFAULT) and is_equal_approx(hi, AIM_DEFAULT):
+			_aim_limits.erase(a)
+		else:
+			_aim_limits[a] = [lo, hi]
+	_show_aim_range()
+
+
 func _update_anim_count() -> void:
 	if _anim_count == null:
 		return
+	_show_aim_range()
 	var names := _picked_anim_names()
 	_anim_count.text = "선택 %d개%s" % [names.size(), (": " + ", ".join(names)) if names.size() > 0 else ""]
 	_anim_count.tooltip_text = _anim_count.text
@@ -2312,6 +2402,7 @@ func _bake_cfg() -> Dictionary:
 		"outline_tone": _outline_tone.value / 100.0,
 		"pixel_grid": _pixel_grid.button_pressed,
 		"keep_previous": _keep_anims.button_pressed,
+		"aim_limits": _aim_limits.duplicate(true),
 		"z_override": _current_z_override(),
 	}
 

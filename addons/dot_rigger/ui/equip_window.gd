@@ -13,8 +13,8 @@ class_name DREquipWindow
 
 const WEAPON_FILTER := "*.glb, *.gltf, *.fbx, *.obj, *.tscn, *.scn ; 3D 무기 모델"
 const PRESET_FILTER := "*.tres ; 캐릭터 프리셋"
-const SETS_FILTER := "sets.json ; 세트 목록"
-const EQUIP_FILTER := "equip.json ; 구운 장비"
+const SETS_FILTER := "*.json ; 세트 목록(sets.json)"
+const EQUIP_FILTER := "*.json ; 구운 장비(equip.json)"
 const PV2_DEBOUNCE := 0.35     # 조정을 바꾸는 동안은 기다렸다가 2D 미리보기를 다시 굽는다(초)
 const ANGLE_NAMES := ["굽는 시점", "정측면", "정면", "위에서", "뒤에서"]
 const GZ_FINE := 0.1           # Shift 를 누르고 끌면 이동·회전이 이만큼 줄어든다
@@ -26,6 +26,8 @@ class GizmoNode:
 	const R_RING := 64.0
 	const L_ARROW := 52.0
 	var pivot := Vector2.ZERO
+	var ax := Vector2(1, 0)    # 빨강 = 총열 방향(총구 쪽) — 총이 돌면 같이 돈다
+	var ay := Vector2(0, -1)   # 초록 = 총의 위쪽
 	var hot := ""       # 마우스가 올라간 손잡이: x · y · xy · rot
 	var active := ""    # 끌고 있는 손잡이
 	var label := ""
@@ -39,25 +41,29 @@ class GizmoNode:
 		draw_arc(pivot, R_RING, 0.0, TAU, 72, hl if on_rot else cr, 3.0 if on_rot else 2.0, true)
 		var on_x := hot == "x" or active == "x" or hot == "xy" or active == "xy"
 		var on_y := hot == "y" or active == "y" or hot == "xy" or active == "xy"
-		var ex := pivot + Vector2(L_ARROW, 0)
-		var ey := pivot + Vector2(0, -L_ARROW)
-		draw_line(pivot, ex, hl if on_x else cx, 3.0, true)
-		draw_polygon(PackedVector2Array([ex + Vector2(10, 0), ex + Vector2(-2, -6), ex + Vector2(-2, 6)]), PackedColorArray([hl if on_x else cx]))
-		draw_line(pivot, ey, hl if on_y else cy, 3.0, true)
-		draw_polygon(PackedVector2Array([ey + Vector2(0, -10), ey + Vector2(-6, 2), ey + Vector2(6, 2)]), PackedColorArray([hl if on_y else cy]))
+		_arrow(ax, hl if on_x else cx)
+		_arrow(ay, hl if on_y else cy)
 		draw_circle(pivot, 7.0, hl if (hot == "xy" or active == "xy") else Color(0.9, 0.9, 0.9))
 		draw_circle(pivot, 4.0, Color(0.1, 0.1, 0.1))
 		if label != "":
 			draw_string(ThemeDB.fallback_font, pivot + Vector2(12, -R_RING - 8), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1))
 
-	## 손잡이 맞추기(뷰포트 좌표)
+	func _arrow(dir: Vector2, col: Color) -> void:
+		var e := pivot + dir * L_ARROW
+		var side := Vector2(-dir.y, dir.x)
+		draw_line(pivot, e, col, 3.0, true)
+		draw_polygon(PackedVector2Array([e + dir * 10.0, e - dir * 2.0 + side * 6.0, e - dir * 2.0 - side * 6.0]), PackedColorArray([col]))
+
+	## 손잡이 맞추기(뷰포트 좌표) — 축은 총을 따라 돌아 있다
 	func hit(p: Vector2) -> String:
 		var d := p - pivot
 		if d.length() < 11.0:
 			return "xy"
-		if absf(d.y) < 8.0 and d.x > 0.0 and d.x < L_ARROW + 12.0:
+		var u := d.dot(ax)
+		var v := d.dot(ay)
+		if absf(d.dot(Vector2(-ax.y, ax.x))) < 8.0 and u > 0.0 and u < L_ARROW + 12.0:
 			return "x"
-		if absf(d.x) < 8.0 and d.y < 0.0 and d.y > -(L_ARROW + 12.0):
+		if absf(d.dot(Vector2(-ay.y, ay.x))) < 8.0 and v > 0.0 and v < L_ARROW + 12.0:
 			return "y"
 		if absf(d.length() - R_RING) < 9.0:
 			return "rot"
@@ -111,10 +117,11 @@ var _set_pos: Array = []
 var _set_rot: Array = []
 var _set_clear: Button
 # 4
-var _z_common: OptionButton
-var _z_set: OptionButton
-var _front_on: CheckBox
 var _front_status: Label
+var _rule_grid: GridContainer
+var _rule_rows: Dictionary = {}   # 파트 -> { lbl: Label, behind: CheckBox, hide: CheckBox }
+var _rule_set_only: CheckBox
+var _rule_reset: Button
 # 바닥
 var _out_edit: LineEdit
 var _bake_btn: Button
@@ -148,6 +155,24 @@ var _gz_pivot_vp := Vector2.ZERO
 var _gz_spr_pos := Vector2.ZERO
 var _gz_spr_rot := 0.0
 var _gz_delta_px := Vector2.ZERO   # 캔버스 px
+var _gz_basis := Transform2D()      # 끌기 시작 때 총 스프라이트의 화면 변환(화면 → 캔버스 되돌리기용)
+var _gz_keep_speed := 1.0
+var _view_btn: Button
+var _view_dlg: AcceptDialog
+var _view_on: CheckBox
+var _view_yaw: HSlider
+var _view_roll: HSlider
+var _view_lbl: Label
+var _view_tex: TextureRect
+var _view_keep: Array = []
+var _view_span := 1.3            # 미리보기가 담는 범위 = 장비 긴 변 × 이 값(휠 · F)
+var _view_drag := false
+var _view_drag_from := Vector2.ZERO
+var _view_drag_base := Vector2.ZERO   # 끌기 시작 때 (틀기, 굴리기)
+const VIEW_DRAG_DEG := 0.5     # 끌기 1px = 0.5°
+const VIEW_SNAP_DEG := 15.0    # Ctrl + 끌기 단위
+const VIEW_SPAN_MIN := 0.3    # 보이는 범위 = 장비 긴 변 × 이 값(작을수록 크게)
+const VIEW_SPAN_MAX := 12.0
 var _gz_dtheta := 0.0
 
 
@@ -392,6 +417,11 @@ func _build_section_grip(col: Control) -> void:
 	_tip(_auto_btn, "위 값으로 자동 그립을 다시 잡는다(조정은 그대로 둔다). 값을 바꾸면 알아서 다시 잡히므로 보통 누를 일이 없다.")
 	_auto_btn.pressed.connect(_on_grip_inputs_changed)
 	s.add_child(_auto_btn)
+	_view_btn = Button.new()
+	_view_btn.text = "장비 보는 각도… (모든 자세 같은 모습)"
+	_tip(_view_btn, "장비를 어느 각도에서 본 그림으로 쓸지 정하는 팝업. 켜 두면 모든 자세에 **같은 그림**을 쓰고 자세마다 총열 방향으로만 돌린다 — 2D 스프라이트처럼 일관된 모습.\n끄면 자세마다 3D 그대로 찍어서 손 방향에 따라 총이 비스듬히 · 짧아져 보인다.")
+	_view_btn.pressed.connect(_open_view_popup)
+	s.add_child(_view_btn)
 
 	var t1 := Label.new()
 	t1.text = "기즈모 조정 (오른쪽 2D 미리보기에서 끌기)"
@@ -424,6 +454,12 @@ func _build_section_grip(col: Control) -> void:
 	_tip(_gz_reset, "`이 자세만` 이 켜져 있으면 이 자세의 조정만, 아니면 공통 조정을 0 으로.")
 	_gz_reset.pressed.connect(_on_gizmo_reset)
 	row2.add_child(_gz_reset)
+	var gz_init := Button.new()
+	gz_init.name = "GizmoInit"
+	gz_init.text = "초기값으로"
+	_tip(gz_init, "공통 조정과 모든 자세의 조정(이동·회전)을 지우고 자동 그립 그대로로 되돌린다. 총 뒤로 보낼 파트 체크는 그대로.")
+	gz_init.pressed.connect(_on_gizmo_init)
+	row2.add_child(gz_init)
 	_gz_show = CheckBox.new()
 	_gz_show.text = "기즈모 보이기"
 	_gz_show.button_pressed = true
@@ -463,29 +499,133 @@ func _build_section_grip(col: Control) -> void:
 	_set_clear.pressed.connect(func():
 		_set_vec(_set_pos, Vector3.ZERO)
 		_set_vec(_set_rot, Vector3.ZERO)
-		if _z_set.item_count > 0:
-			_z_set.select(0)
 		_on_set_adj_changed())
 	nv.add_child(_set_clear)
 
 
 func _build_section_order(col: Control) -> void:
-	var s := _section(col, "4. 총의 기본 자리 · 앞 조각")
-	_hint(s, "기본 자리 = 퍼펫의 그리기 순서(뒤 → 앞) 어디에 무기를 둘지. 그 뒤에 그려지는 파트 중 3D 에서 무기보다 앞에 있는 부분(총열을 감싼 손가락 등)은 `앞 조각` 으로 따로 찍혀 무기 위에 자동으로 얹힌다 — 손을 앞뒤로 나누는 Spine 방식을 자동으로.")
-	_z_common = _opt(s, "기본 자리", "모든 자세에 쓰는 자리. `X 바로 앞` = X 는 가리고 X 보다 앞 파트에는 가려진다(앞 조각 제외).")
-	_z_common.item_selected.connect(func(_i): _on_z_changed())
-	_z_set = _opt(s, "이 자세만", "오른쪽 `자세` 에서 고른 세트에만 다르게. `(공통과 같게)` 가 기본.")
-	_z_set.item_selected.connect(func(_i): _on_set_adj_changed())
-	_front_on = CheckBox.new()
-	_front_on.text = "앞 조각 자동 굽기"
-	_front_on.button_pressed = true
-	_tip(_front_on, "끄면 무기가 기본 자리에만 그려진다(손가락이 총 뒤로 들어간다).")
-	_front_on.toggled.connect(func(on):
-		if _loaded and not _filling:
-			eb.front_pieces = on
-			_mark_pv2())
-	s.add_child(_front_on)
+	var s := _section(col, "4. 총 뒤로 보낼 파트")
+	_hint(s, "체크한 파트는 총이 가린다(총 뒤). 체크 안 한 파트는 총을 가린다(총 앞 — 겹치는 부분이 총 위에 얹힌다). `숨김` = 이 장비를 드는 동안 그 파트를 아예 안 그린다: 총열 위로 삐져나온 받치는 손가락처럼 순서로는 못 가리는 것.")
+	var row := HBoxContainer.new()
+	_rule_set_only = CheckBox.new()
+	_rule_set_only.text = "이 자세만"
+	_tip(_rule_set_only, "켜면 체크가 오른쪽 `자세` 에서 고른 세트에만 적용된다(맨손 Idle 에서는 손을 앞으로, 조준에서는 뒤로 등). 끄면 모든 자세 공통.")
+	_rule_set_only.toggled.connect(func(_on): _fill_rule_grid())
+	row.add_child(_rule_set_only)
+	_rule_reset = Button.new()
+	_rule_reset.text = "이 자세를 공통으로"
+	_tip(_rule_reset, "지금 자세에만 따로 정한 체크를 지워 공통을 따르게 한다.")
+	_rule_reset.pressed.connect(func():
+		if not _loaded:
+			return
+		eb.clear_set_rules(_cur_set_name())
+		_fill_rule_grid()
+		_mark_pv2())
+	row.add_child(_rule_reset)
+	var all_back := Button.new()
+	all_back.text = "전부 뒤로"
+	all_back.pressed.connect(func(): _set_all_behind(true))
+	row.add_child(all_back)
+	var all_front := Button.new()
+	all_front.text = "전부 앞으로"
+	all_front.pressed.connect(func(): _set_all_behind(false))
+	row.add_child(all_front)
+	s.add_child(row)
+	_rule_grid = GridContainer.new()
+	_rule_grid.columns = 3
+	_rule_grid.add_theme_constant_override("h_separation", 12)
+	_rule_grid.add_theme_constant_override("v_separation", 0)
+	s.add_child(_rule_grid)
 	_front_status = _hint(s, "")
+
+
+## 파트 목록(지금 자세의 그리기 순서, 뒤 → 앞) — 파트마다 [총 뒤로] [숨김]
+func _fill_rule_grid() -> void:
+	if not _loaded or _rule_grid == null:
+		return
+	var cur := _cur_set_name()
+	var order := _layer_order(_cur_set())
+	if _rule_rows.size() != order.size() or not _rule_rows.has(String(order[0]) if order.size() > 0 else ""):
+		for c in _rule_grid.get_children():
+			c.queue_free()
+		_rule_rows.clear()
+		for h in ["파트 (뒤 → 앞)", "총 뒤로", "숨김"]:
+			var hl := Label.new()
+			hl.text = h
+			hl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+			_rule_grid.add_child(hl)
+		for pn in order:
+			var part := String(pn)
+			var l := Label.new()
+			l.custom_minimum_size = Vector2(210, 0)
+			_rule_grid.add_child(l)
+			var cb := CheckBox.new()
+			cb.tooltip_text = "체크 = 총이 이 파트를 가린다(총 뒤). 끄면 이 파트가 총을 가린다."
+			cb.toggled.connect(func(on): _on_rule_toggled(part, "behind", on))
+			_rule_grid.add_child(cb)
+			var hb := CheckBox.new()
+			hb.tooltip_text = "이 장비를 드는 동안 이 파트를 안 그린다."
+			hb.toggled.connect(func(on): _on_rule_toggled(part, "hide", on))
+			_rule_grid.add_child(hb)
+			_rule_rows[part] = {"lbl": l, "behind": cb, "hide": hb}
+	var stats: Dictionary = (_last_baked.get(cur, {}) as Dictionary).get("overlap", {})
+	var set_rules: Dictionary = eb.adjust_of(cur)["rules"]
+	_filling = true
+	for part in _rule_rows.keys():
+		var row: Dictionary = _rule_rows[part]
+		var st: Dictionary = stats.get(part, {})
+		var px := int(st.get("overlap", 0))
+		var lbl := row["lbl"] as Label
+		lbl.text = String(part) + ("   겹침 %dpx" % px if px > 0 else "") + ("  [이 자세]" if set_rules.has(part) else "")
+		lbl.add_theme_color_override("font_color", Color(1, 1, 1) if px > 0 else Color(0.6, 0.6, 0.6))
+		var rule := eb.rule_for(cur, String(part)) if _rule_set_only.button_pressed else eb.common_rule(String(part))
+		(row["hide"] as CheckBox).button_pressed = rule == DREquipBaker.RULE_HIDE
+		(row["behind"] as CheckBox).button_pressed = rule == DREquipBaker.RULE_WEAPON_FRONT
+		(row["behind"] as CheckBox).disabled = rule == DREquipBaker.RULE_HIDE
+	_rule_reset.disabled = set_rules.is_empty()
+	_filling = false
+
+
+func _on_rule_toggled(part: String, which: String, on: bool) -> void:
+	if _filling or not _loaded:
+		return
+	var row: Dictionary = _rule_rows[part]
+	var behind := (row["behind"] as CheckBox).button_pressed
+	var hide := (row["hide"] as CheckBox).button_pressed
+	var key := DREquipBaker.RULE_HIDE if hide else (DREquipBaker.RULE_WEAPON_FRONT if behind else DREquipBaker.RULE_PART_FRONT)
+	_write_rule(part, key)
+	_fill_rule_grid()
+	_mark_pv2()
+
+
+## 공통이면 "총 앞" 은 규칙 없음(지움), 이 자세만이면 명시해서 공통을 덮는다
+func _write_rule(part: String, key: String) -> void:
+	if _rule_set_only.button_pressed:
+		eb.set_rule(part, key, _cur_set_name())
+	else:
+		eb.set_rule(part, DREquipBaker.RULE_AUTO if key == DREquipBaker.RULE_PART_FRONT else key)
+
+
+func _set_all_behind(on: bool) -> void:
+	if not _loaded:
+		return
+	for part in _rule_rows.keys():
+		var cur := eb.rule_for(_cur_set_name(), String(part)) if _rule_set_only.button_pressed else eb.common_rule(String(part))
+		if cur == DREquipBaker.RULE_HIDE:
+			continue
+		_write_rule(String(part), DREquipBaker.RULE_WEAPON_FRONT if on else DREquipBaker.RULE_PART_FRONT)
+	_fill_rule_grid()
+	_mark_pv2()
+
+
+## 그 세트의 그리기 순서(뒤 → 앞)
+func _layer_order(set_info: Dictionary) -> Array:
+	var order: Array = []
+	if not set_info.is_empty():
+		order = Array((set_info["rig"] as Dictionary).get("layer_order", []))
+	if order.is_empty() and baker != null:
+		order = Array(baker.rig.order)
+	return order
 
 
 func _build_footer(left: Control) -> void:
@@ -539,8 +679,8 @@ func _build_right_bar(parent: Control) -> void:
 	l2.text = " 조준"
 	bar.add_child(l2)
 	_pv2_aim = HSlider.new()
-	_pv2_aim.min_value = -35.0
-	_pv2_aim.max_value = 35.0
+	_pv2_aim.min_value = -16.0
+	_pv2_aim.max_value = 16.0
 	_pv2_aim.step = 1.0
 	_pv2_aim.value = 0.0
 	_pv2_aim.custom_minimum_size = Vector2(110, 0)
@@ -705,8 +845,46 @@ func _on_browse_out() -> void:
 	_file_dialog("", "출력 폴더 — Dot Rigger", true, func(p): _out_edit.text = p)
 
 
+## 구운 장비 열기 — 출력 폴더 아래 <장비 이름>/equip.json 을 목록으로 바로 보여 주고, 맨 아래 `다른 파일…` 로 파일 대화상자.
+## (09-29: 파일 대화상자의 이름 필터 "equip.json" 이 파일을 안 보여 줘서 사용자가 못 열었다 → 목록 + 필터 *.json)
 func _on_open_equip() -> void:
+	var found := _find_equip_jsons()
+	if found.is_empty():
+		_open_equip_dialog()
+		return
+	var pm := PopupMenu.new()
+	pm.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	for i in found.size():
+		pm.add_item(found[i], i)
+	pm.add_separator()
+	pm.add_item("다른 파일…", found.size())
+	pm.id_pressed.connect(func(id):
+		pm.queue_free()
+		if id >= 0 and id < found.size():
+			_open_json(found[id])
+		else:
+			_open_equip_dialog())
+	pm.popup_hide.connect(func(): pm.queue_free.call_deferred())
+	add_child(pm)
+	var r := _open_btn.get_global_rect()
+	pm.popup(Rect2i(Vector2i(r.position + Vector2(0, r.size.y)) + position, Vector2i(int(r.size.x), 0)))
+
+
+func _open_equip_dialog() -> void:
 	_file_dialog(EQUIP_FILTER, "구운 장비(equip.json) 열기 — Dot Rigger", false, func(p): _open_json(p))
+
+
+## 출력 폴더(없으면 res://equip) 아래 */equip.json
+func _find_equip_jsons() -> PackedStringArray:
+	var out := PackedStringArray()
+	for base in [_out_edit.text.strip_edges(), "res://equip"]:
+		if base == "" or not DirAccess.dir_exists_absolute(base):
+			continue
+		for d in DirAccess.get_directories_at(base):
+			var p := String(base).path_join(d).path_join("equip.json")
+			if FileAccess.file_exists(p) and not out.has(p):
+				out.append(p)
+	return out
 
 
 ## equip.json 을 읽어 칸을 채우고 불러온다 — 불러온 뒤 그립·조정을 되돌린다
@@ -758,6 +936,10 @@ func _teardown() -> void:
 	_loaded = false
 	if _gizmo != null:
 		_gizmo.visible = false
+	if _rule_grid != null:
+		for c in _rule_grid.get_children():
+			c.queue_free()
+	_rule_rows.clear()
 
 
 func _on_load() -> void:
@@ -791,7 +973,7 @@ func _on_load() -> void:
 		_fail("캐릭터 모델을 열 수 없습니다: %s" % model_path)
 		return
 	var wpath := _weapon_edit.text.strip_edges()
-	var wres: Resource = load(wpath) if wpath != "" else null
+	var wres: Resource = DREquipBaker.load_weapon(wpath)
 	if wres == null or not (wres is PackedScene or wres is Mesh):
 		_fail("무기 모델을 열 수 없습니다: %s" % wpath)
 		return
@@ -810,7 +992,6 @@ func _on_load() -> void:
 	_id_edit.text = eb.id
 	eb.slot = _slot_edit.text.strip_edges()
 	eb.weapon_scale = _scale.value
-	eb.front_pieces = _front_on.button_pressed
 	_sets = eb.read_sets()
 	if _sets.is_empty():
 		_fail("sets.json 에서 세트를 읽지 못했습니다: %s" % eb.sets_json)
@@ -831,10 +1012,11 @@ func _on_load() -> void:
 		if not (eb.weapon_res is PackedScene) and not (eb.weapon_res is Mesh):
 			eb.set_weapon(wres, wpath)
 		_fill_weapon_nodes()
+		eb.apply_default_behind(_layer_order(gs), eb.legacy_after)
 	else:
 		eb.attach_part = "R_Hand" if baker.rig.parts.has("R_Hand") else String(baker.rig.order[0])
 		eb.support_part = "L_Hand" if baker.rig.parts.has("L_Hand") else eb.attach_part
-		eb.z_after_part = "Torso" if baker.rig.parts.has("Torso") else ""
+		eb.apply_default_behind(_layer_order(gs), "Torso")   # 기본: 몸통까지(뒤 → 앞)는 총 뒤
 		if not eb.apply_set(gs):
 			_fail("그립을 잡을 자세를 세울 수 없습니다: " + ", ".join(eb.warnings))
 			return
@@ -926,42 +1108,6 @@ func _fill_view_sets() -> void:
 	_filling = false
 
 
-## 그리기 순서 목록 — 그 세트의 layer_order(뒤 → 앞)
-func _fill_z_items(opt: OptionButton, with_same: bool, set_info: Dictionary) -> void:
-	opt.clear()
-	if with_same:
-		opt.add_item("(공통과 같게)")
-		opt.set_item_metadata(opt.item_count - 1, {"same": true})
-	opt.add_item("맨 뒤")
-	opt.set_item_metadata(opt.item_count - 1, {"after": "", "z": DREquipBaker.Z_BACK})
-	var order: Array = []
-	if not set_info.is_empty():
-		order = Array((set_info["rig"] as Dictionary).get("layer_order", []))
-	if order.is_empty():
-		order = Array(baker.rig.order)
-	for pn in order:
-		opt.add_item("%s 바로 앞" % String(pn))
-		opt.set_item_metadata(opt.item_count - 1, {"after": String(pn), "z": DREquipBaker.Z_FRONT})
-	opt.add_item("맨 앞")
-	opt.set_item_metadata(opt.item_count - 1, {"after": "", "z": DREquipBaker.Z_FRONT})
-
-
-func _z_select(opt: OptionButton, after: String, z: int) -> void:
-	for i in opt.item_count:
-		var m: Variant = opt.get_item_metadata(i)
-		if not (m is Dictionary) or (m as Dictionary).has("same"):
-			continue
-		var md: Dictionary = m
-		if after != "":
-			if String(md["after"]) == after:
-				opt.select(i)
-				return
-		elif String(md["after"]) == "" and ((z < 10) == (int(md["z"]) < 10)):
-			opt.select(i)
-			return
-	opt.select(0)
-
-
 func _select_text(opt: OptionButton, text: String) -> void:
 	for i in opt.item_count:
 		if opt.get_item_text(i) == text:
@@ -988,13 +1134,10 @@ func _fill_from_eb() -> void:
 			_forward.select(i)
 	_select_text(_grip_node, eb.grip_node if eb.grip_node != "" else "(경계 상자에서 어림)")
 	_scale.set_value_no_signal(eb.weapon_scale)
-	_front_on.set_pressed_no_signal(eb.front_pieces)
 	for k in _node_checks.keys():
 		(_node_checks[k] as CheckBox).set_pressed_no_signal(not eb.hidden_nodes.has(String(k)))
 	_set_vec(_adj_pos, eb.adj_pos * 100.0)
 	_set_vec(_adj_rot, eb.adj_rot)
-	_fill_z_items(_z_common, false, _sets[maxi(_set_index(_grip_set_name), 0)])
-	_z_select(_z_common, eb.z_after_part, eb.z_index)
 	_filling = false
 	_fill_set_adjust()
 
@@ -1008,11 +1151,6 @@ func _fill_set_adjust() -> void:
 	var a := eb.adjust_of(name)
 	_set_vec(_set_pos, Vector3(a["pos"]) * 100.0)
 	_set_vec(_set_rot, Vector3(a["rot"]))
-	_fill_z_items(_z_set, true, s)
-	if bool(a["z_override"]):
-		_z_select(_z_set, String(a["z_after_part"]), int(a["z_index"]))
-	else:
-		_z_set.select(0)
 	_filling = false
 
 
@@ -1053,25 +1191,9 @@ func _on_set_adj_changed() -> void:
 	var name := _cur_set_name()
 	if name == "":
 		return
-	var z_over := false
-	var z_after := ""
-	var z_idx := eb.z_index
-	if _z_set.selected > 0:
-		var md: Dictionary = _z_set.get_item_metadata(_z_set.selected)
-		z_over = true
-		z_after = String(md["after"])
-		z_idx = int(md["z"])
-	eb.set_adjust_of(name, _get_vec(_set_pos) / 100.0, _get_vec(_set_rot), z_over, z_after, z_idx)
+	var a := eb.adjust_of(name)
+	eb.set_adjust_of(name, _get_vec(_set_pos) / 100.0, _get_vec(_set_rot), bool(a["z_override"]), String(a["z_after_part"]), int(a["z_index"]))
 	_grip_changed()
-
-
-func _on_z_changed() -> void:
-	if not _loaded or _filling or _z_common.selected < 0:
-		return
-	var md: Dictionary = _z_common.get_item_metadata(_z_common.selected)
-	eb.z_after_part = String(md["after"])
-	eb.z_index = int(md["z"])
-	_mark_pv2()   # 자리가 바뀌면 앞 조각 후보도 바뀌므로 다시 굽는다
 
 
 ## 그립이 바뀜 → 3D 에 바로, 2D 는 잠시 뒤 다시 굽는다
@@ -1088,6 +1210,22 @@ func _mark_pv2() -> void:
 	_pv2_timer = PV2_DEBOUNCE
 
 
+func _on_gizmo_init() -> void:
+	if not _loaded:
+		return
+	eb.adj_pos = Vector3.ZERO
+	eb.adj_rot = Vector3.ZERO
+	for k in eb.set_adjust.keys().duplicate():
+		var a := eb.adjust_of(String(k))
+		eb.set_adjust_of(String(k), Vector3.ZERO, Vector3.ZERO, bool(a["z_override"]), String(a["z_after_part"]), int(a["z_index"]))
+	_filling = true
+	_set_vec(_adj_pos, Vector3.ZERO)
+	_set_vec(_adj_rot, Vector3.ZERO)
+	_filling = false
+	_fill_set_adjust()
+	_on_grip_inputs_changed()   # 자동 그립도 다시
+
+
 func _on_gizmo_reset() -> void:
 	if not _loaded:
 		return
@@ -1102,6 +1240,7 @@ func _on_view_set_changed() -> void:
 		return
 	_fill_set_adjust()
 	_apply_3d_view()
+	_fill_rule_grid()
 	# 2D 도 같은 자세의 동작으로(이미 그 자세의 동작이면 그대로)
 	if _soldier != null:
 		var s := _cur_set()
@@ -1216,7 +1355,7 @@ func _refresh_pv2() -> void:
 		msg = "⚠ " + "\n⚠ ".join(eb.warnings)
 	_status.text = msg
 	_pv2_msg.text = keep_msg
-	# 앞 조각 요약
+	# 총 위에 얹힌 조각 요약
 	var lines := PackedStringArray()
 	for k in baked.keys():
 		var r: Dictionary = baked[k]
@@ -1226,9 +1365,16 @@ func _refresh_pv2() -> void:
 		else:
 			var parts := PackedStringArray()
 			for o in ovs:
-				parts.append("%s %dpx" % [String((o as Dictionary)["part"]), int((o as Dictionary).get("pixels", 0))])
+				var okind := String((o as Dictionary).get("kind", "part"))
+				if okind == "hide":
+					parts.append("%s 숨김" % String((o as Dictionary)["part"]))
+				elif okind == "raise":
+					parts.append("%s 통째로 총 위" % String((o as Dictionary)["part"]))
+				else:
+					parts.append("%s%s %dpx" % [String((o as Dictionary)["part"]), "(총 조각)" if okind == "weapon" else "", int((o as Dictionary).get("pixels", 0))])
 			lines.append("%s: %s" % [k, ", ".join(parts)])
-	_front_status.text = ("앞 조각 — " + " · ".join(lines)) if eb.front_pieces else "앞 조각 꺼짐"
+	_front_status.text = "총 위로 올린 파트 — " + " · ".join(lines)
+	_fill_rule_grid()
 	_gizmo_refresh()
 
 
@@ -1251,7 +1397,155 @@ func _process(delta: float) -> void:
 				_soldier.aim_target = b.global_position + Vector2(cos(r), -sin(r)) * 400.0
 		if _gizmo.visible and _gz_active == "":
 			_gizmo.pivot = _pivot_vp()
+			_gizmo_axes()
 			_gizmo.queue_redraw()
+
+
+# ---------------------------------------------------------------- 장비 보는 각도(일관된 보기)
+
+func _open_view_popup() -> void:
+	if not _loaded or _busy:
+		return
+	if _view_dlg == null:
+		_view_dlg = AcceptDialog.new()
+		_view_dlg.title = "장비 보는 각도 — 모든 자세에 같은 모습"
+		_view_dlg.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+		_view_dlg.ok_button_text = "적용"
+		_view_dlg.add_cancel_button("취소")
+		_view_dlg.min_size = Vector2i(560, 520)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 6)
+		_view_dlg.add_child(v)
+		_view_on = CheckBox.new()
+		_view_on.text = "모든 자세에 같은 모습 (2D 스프라이트처럼)"
+		_view_on.toggled.connect(func(_on): _view_changed())
+		v.add_child(_view_on)
+		var h1 := _hint(v, "총을 아래 각도에서 본 그림 한 장을 모든 자세에 쓰고, 자세마다 총열 방향으로만 돌려 붙인다. 0 / 0 = 정확한 옆모습.", 520.0)
+		h1.add_theme_font_size_override("font_size", 12)
+		_view_yaw = _view_slider(v, "틀기 (총구를 카메라 쪽 / 반대쪽, 도)", -180.0, 180.0)
+		_view_roll = _view_slider(v, "굴리기 (총열을 축으로 — 윗면 · 아랫면, 도)", -180.0, 180.0)
+		var row := HBoxContainer.new()
+		var flip := Button.new()
+		flip.text = "반대쪽 면"
+		flip.tooltip_text = "총의 다른 쪽 옆면을 보이게(틀기 + 180 · 굴리기 + 180)."
+		flip.pressed.connect(func():
+			_view_yaw.value = wrapf(_view_yaw.value + 180.0, -180.0, 180.0)
+			_view_roll.value = wrapf(_view_roll.value + 180.0, -180.0, 180.0))
+		row.add_child(flip)
+		var zero := Button.new()
+		zero.text = "옆모습으로 (0 / 0)"
+		zero.pressed.connect(func():
+			_view_yaw.value = 0.0
+			_view_roll.value = 0.0)
+		row.add_child(zero)
+		_view_lbl = Label.new()
+		row.add_child(_view_lbl)
+		v.add_child(row)
+		_hint(v, "미리보기에서: 휠 = 확대/축소 · 끌기 = 돌리기(좌우 = 틀기, 위아래 = 굴리기) · Ctrl + 끌기 = 15° 단위로 딱딱 · F = 전체 보기", 520.0)
+		var panel := PanelContainer.new()
+		panel.custom_minimum_size = Vector2(520, 330)
+		panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		v.add_child(panel)
+		_view_tex = TextureRect.new()
+		_view_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_view_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		_view_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_view_tex.mouse_filter = Control.MOUSE_FILTER_STOP
+		_view_tex.focus_mode = Control.FOCUS_CLICK
+		_view_tex.gui_input.connect(_on_view_input)
+		panel.add_child(_view_tex)
+		_view_dlg.confirmed.connect(_on_view_popup_closed.bind(true))
+		_view_dlg.canceled.connect(_on_view_popup_closed.bind(false))
+		add_child(_view_dlg)
+	_view_keep = [eb.consistent_view, eb.view_yaw, eb.view_roll]
+	_filling = true
+	_view_on.button_pressed = eb.consistent_view
+	_view_yaw.value = eb.view_yaw
+	_view_roll.value = eb.view_roll
+	_filling = false
+	_view_tex.texture = baker.viewport.get_texture()
+	_view_dlg.popup_centered(Vector2i(600, 600))
+	_view_changed()
+
+
+func _view_slider(parent: Control, label: String, lo: float, hi: float) -> HSlider:
+	var l := Label.new()
+	l.text = label
+	parent.add_child(l)
+	var sl := HSlider.new()
+	sl.min_value = lo
+	sl.max_value = hi
+	sl.step = 1.0
+	sl.value = 0.0
+	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sl.value_changed.connect(func(_v): _view_changed())
+	parent.add_child(sl)
+	return sl
+
+
+## 팝업 미리보기 — 굽는 카메라 앞에 총만, 그 각도로(끄면 지금 자세의 3D 그대로)
+func _view_changed() -> void:
+	if _filling or not _loaded:
+		return
+	eb.consistent_view = _view_on.button_pressed
+	eb.view_yaw = _view_yaw.value
+	eb.view_roll = _view_roll.value
+	_view_yaw.editable = eb.consistent_view
+	_view_roll.editable = eb.consistent_view
+	_view_lbl.text = "  틀기 %+d° · 굴리기 %+d°" % [int(eb.view_yaw), int(eb.view_roll)]
+	var s := _cur_set()
+	if s.is_empty() or not eb.apply_set(s):
+		return
+	eb.show_character(false)
+	if eb.consistent_view:
+		eb.place_canonical()
+	else:
+		eb.place_weapon(String(s["name"]))
+	eb.view_weapon(_view_span)
+
+
+## 미리보기 입력 — 휠 = 확대/축소(담는 범위), 끌기 = 돌리기(좌우 = 틀기 · 위아래 = 굴리기, 결과는 위 슬라이더에 그대로), Ctrl = 15° 단위, F = 전체 보기
+func _on_view_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton:
+		var mb := ev as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_view_span = maxf(_view_span / 1.15, VIEW_SPAN_MIN)
+			_view_changed()
+		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_view_span = minf(_view_span * 1.15, VIEW_SPAN_MAX)
+			_view_changed()
+		elif mb.button_index == MOUSE_BUTTON_LEFT:
+			_view_drag = mb.pressed and eb.consistent_view
+			_view_drag_from = mb.position
+			_view_drag_base = Vector2(_view_yaw.value, _view_roll.value)
+			_view_tex.grab_focus()
+	elif ev is InputEventMouseMotion and _view_drag:
+		var mm := ev as InputEventMouseMotion
+		var d := (mm.position - _view_drag_from) * VIEW_DRAG_DEG
+		var yaw := _view_drag_base.x + d.x
+		var roll := _view_drag_base.y + d.y
+		if mm.ctrl_pressed:
+			yaw = snappedf(yaw, VIEW_SNAP_DEG)
+			roll = snappedf(roll, VIEW_SNAP_DEG)
+		_filling = true
+		_view_yaw.value = wrapf(yaw, -180.0, 180.0)
+		_view_roll.value = wrapf(roll, -180.0, 180.0)
+		_filling = false
+		_view_changed()
+	elif ev is InputEventKey and (ev as InputEventKey).pressed and (ev as InputEventKey).keycode == KEY_F:
+		_view_span = 1.3
+		_view_changed()
+
+
+func _on_view_popup_closed(apply: bool) -> void:
+	if not apply and _view_keep.size() == 3:
+		eb.consistent_view = bool(_view_keep[0])
+		eb.view_yaw = float(_view_keep[1])
+		eb.view_roll = float(_view_keep[2])
+	eb.show_character(true)
+	_apply_3d_view()
+	if apply:
+		_mark_pv2()
 
 
 # ---------------------------------------------------------------- 기즈모
@@ -1263,7 +1557,23 @@ func _gizmo_refresh() -> void:
 	if _gizmo.visible:
 		_gizmo.label = ("받치는 손" if _gz_support.button_pressed else "붙일 손") + (" · 이 자세만" if _gz_set_only.button_pressed else "")
 		_gizmo.pivot = _pivot_vp()
+		_gizmo_axes()
 		_gizmo.queue_redraw()
+
+
+## 기즈모 축 = 지금 화면에 그려진 총의 방향(총열 · 총의 위)
+func _gizmo_axes() -> void:
+	var spr := _cur_weapon_sprite()
+	if spr == null:
+		return
+	var baked: Dictionary = _last_baked.get(String(_soldier.current_set()), {})
+	var bar := float(baked.get("barrel", 0.0))
+	var xf := spr.get_global_transform()
+	var ax := xf.basis_xform(Vector2.from_angle(bar)).normalized()
+	var ay := xf.basis_xform(Vector2.from_angle(bar - PI * 0.5)).normalized()
+	if ax.length() > 0.5 and ay.length() > 0.5:
+		_gizmo.ax = ax
+		_gizmo.ay = ay
 
 
 func _gz_part() -> String:
@@ -1286,7 +1596,7 @@ func _pivot_vp() -> Vector2:
 	var head := pup.get_rest_head(part)
 	if pc == Vector2.ZERO:
 		pc = head
-	return b.to_global((pc - head).rotated(-b.get_bone_angle()))
+	return b.to_global(pc - head)   # 뼈는 레스트에서 회전 0 = 캔버스 방향
 
 
 ## TextureRect 좌표 → 뷰포트 좌표(KEEP_ASPECT_CENTERED)
@@ -1335,8 +1645,12 @@ func _gz_begin(handle: String, vp: Vector2) -> void:
 	_gz_pivot_vp = _gizmo.pivot
 	_gz_spr_pos = spr.position
 	_gz_spr_rot = spr.rotation
+	_gz_basis = spr.get_global_transform() * Transform2D(-float(spr.get_meta("equip_angle", 0.0)), Vector2.ZERO)   # 그림이 돌아 붙어 있으면 그만큼 되돌려 캔버스 축으로
 	_gz_delta_px = Vector2.ZERO
 	_gz_dtheta = 0.0
+	# 끄는 동안은 애니를 세운다 — 손이 움직이면 기준이 흔들린다
+	_gz_keep_speed = _soldier.speed_scale
+	_soldier.speed_scale = 0.0
 	_gizmo.queue_redraw()
 
 
@@ -1357,9 +1671,9 @@ func _gz_update(vp: Vector2, fine: bool) -> void:
 	var d := (vp - _gz_start_vp) * k
 	match _gz_active:
 		"x":
-			d.y = 0.0
+			d = _gizmo.ax * d.dot(_gizmo.ax)    # 총열 축으로만
 		"y":
-			d.x = 0.0
+			d = _gizmo.ay * d.dot(_gizmo.ay)    # 총의 위아래 축으로만
 		"rot":
 			d = Vector2.ZERO
 	var dtheta := 0.0
@@ -1367,11 +1681,12 @@ func _gz_update(vp: Vector2, fine: bool) -> void:
 		var a0 := (_gz_start_vp - _gz_pivot_vp).angle()
 		var a1 := (vp - _gz_pivot_vp).angle()
 		dtheta = wrapf(a1 - a0, -PI, PI) * k
-	var sc := absf(_soldier.scale.x)
-	_gz_delta_px = d / maxf(sc, 0.0001)
-	_gz_dtheta = dtheta
+	# 화면 → 캔버스(레스트 자세의 그림 좌표): 끌기 시작 때 총 스프라이트 변환의 역. 애니로 손이 돌아가 있거나
+	# 좌우 반전·확대돼 있어도 정확하다(09-23: 화면 축을 그대로 캔버스 축으로 써서 뒤틀렸다).
+	_gz_delta_px = _gz_basis.affine_inverse().basis_xform(d)   # basis_xform_inv 는 전치라 확대(1.5배)가 곱해진다
+	_gz_dtheta = dtheta * (1.0 if _gz_basis.determinant() > 0.0 else -1.0)
 	# 그림 미리 옮기기(호스트 로컬)
-	var d_local := host.global_transform.basis_xform_inv(d)
+	var d_local := host.global_transform.affine_inverse().basis_xform(d)
 	var pivot_local := host.to_local(_gz_pivot_vp)
 	spr.position = pivot_local + (_gz_spr_pos - pivot_local).rotated(dtheta) + d_local
 	spr.rotation = _gz_spr_rot + dtheta
@@ -1383,6 +1698,8 @@ func _gz_end() -> void:
 	var handle := _gz_active
 	_gz_active = ""
 	_gizmo.active = ""
+	if is_instance_valid(_soldier):
+		_soldier.speed_scale = _gz_keep_speed
 	_gizmo.queue_redraw()
 	if handle == "":
 		return
@@ -1445,6 +1762,9 @@ func _on_bake() -> void:
 		var ws: PackedStringArray = res.get("warnings", PackedStringArray())
 		if ws.size() > 0:
 			_status.text += "\n⚠ " + "\n⚠ ".join(ws)
+		var ap := DREquipBaker.asset_path_for(eb.weapon_path)
+		if ap != "" and eb.write_asset_equip(ap, "장비 굽기 창"):
+			_status.text += "\n자산 기록 갱신: %s" % ap
 		if Engine.is_editor_hint():
 			EditorInterface.get_resource_filesystem().scan()
 	else:
