@@ -2,6 +2,7 @@
 	"base": "res://puppet",
 	"sets": [
 		{
+			"aim_limits": {},
 			"animations": [
 				"Firing_Rifle"
 			],
@@ -30,13 +31,14 @@
 			"ok": true,
 			"pixel_scene": "",
 			"rest_anim": "Firing_Rifle",
-			"rest_time": 0.571428571428571,
-			"rest_time_sec": 0.666666666666667,
+			"rest_time": 0.0,
+			"rest_time_sec": 0.0,
 			"rig": "Firing_Rifle/rig.json",
 			"scene": "Firing_Rifle/puppet.tscn",
 			"z_order_manual": true
 		},
 		{
+			"aim_limits": {},
 			"animations": [
 				"Idle"
 			],
@@ -72,6 +74,7 @@
 			"z_order_manual": true
 		},
 		{
+			"aim_limits": {},
 			"animations": [
 				"Crouch_Idle+Firing_Rifle",
 				"Idle"
@@ -101,8 +104,8 @@
 			"ok": true,
 			"pixel_scene": "",
 			"rest_anim": "Crouch_Idle+Firing_Rifle",
-			"rest_time": 0.357142857142857,
-			"rest_time_sec": 0.416666666666667,
+			"rest_time": 0.428571428571429,
+			"rest_time_sec": 0.5,
 			"rig": "Crouch_Idle+Firing_Rifle/rig.json",
 			"scene": "Crouch_Idle+Firing_Rifle/puppet.tscn",
 			"z_order_manual": true

@@ -147,23 +147,97 @@ def main():
     flo, fhi = world_bbox([body])
 
     # 3) 웨이트 복사
-    for vg in base.vertex_groups:
-        if body.vertex_groups.get(vg.name) is None:
+    # 손 맞춤 — AI 손은 기준 손보다 좁고 손가락 간격 · 엄지 자리가 달라서, 가까운 면만 보고 옮기면
+    # 손가락 웨이트가 한 칸씩 밀린다(검지 뼈가 검지 · 중지를 같이 잡음 · 엄지 뼈가 손바닥까지).
+    # 복사하는 동안만 AI 손(손목 너머)을 기준 손의 상자 크기로 늘려 손가락끼리 짝을 맞추고, 끝나면 모양을 되돌린다.
+    hand_fit = {}
+    use_hand_fit = a.get("hand_fit", "1") == "1"
+
+    def warp_hands():
+        for side in ("l", "r"):
+            hb, lb = arm.data.bones.get("hand_" + side), arm.data.bones.get("lowerarm_" + side)
+            if hb is None or lb is None:
+                continue
+            wrist = arm.matrix_world @ hb.head_local
+            ax = (wrist - arm.matrix_world @ lb.head_local).normalized()
+            bp = [base.matrix_world @ v.co for v in base.data.vertices if (base.matrix_world @ v.co - wrist).dot(ax) > 0]
+            ai = [i for i, v in enumerate(body.data.vertices) if (v.co - wrist).dot(ax) > 0]
+            if len(bp) < 10 or len(ai) < 10:
+                continue
+            blo_h = Vector([min(p[k] for p in bp) for k in range(3)]); bhi_h = Vector([max(p[k] for p in bp) for k in range(3)])
+            alo_h = Vector([min(body.data.vertices[i].co[k] for i in ai) for k in range(3)])
+            ahi_h = Vector([max(body.data.vertices[i].co[k] for i in ai) for k in range(3)])
+            for i in ai:
+                p = body.data.vertices[i].co
+                q = Vector([blo_h[k] + (p[k] - alo_h[k]) / (ahi_h[k] - alo_h[k]) * (bhi_h[k] - blo_h[k])
+                            if ahi_h[k] - alo_h[k] > 1e-5 else p[k] for k in range(3)])
+                t = min(1.0, (p - wrist).dot(ax) / 0.03)       # 손목에서 3cm 동안 서서히 — 손목에 이음매가 안 생기게
+                body.data.vertices[i].co = p.lerp(q, t)
+            hand_fit[side] = {"ai_size": [round(x, 3) for x in (ahi_h - alo_h)], "base_size": [round(x, 3) for x in (bhi_h - blo_h)]}
+        body.data.update()
+
+    def transfer():
+        for vg in list(body.vertex_groups):
+            body.vertex_groups.remove(vg)
+        for vg in base.vertex_groups:
             body.vertex_groups.new(name=vg.name)
-    bpy.ops.object.select_all(action="DESELECT")
-    body.select_set(True)
-    bpy.context.view_layer.objects.active = body
-    dt = body.modifiers.new("weights", "DATA_TRANSFER")
-    dt.object = base
-    dt.use_object_transform = True
-    dt.use_vert_data = True
-    dt.data_types_verts = {"VGROUP_WEIGHTS"}
-    dt.vert_mapping = "POLYINTERP_NEAREST"
-    dt.layers_vgroup_select_src = "ALL"
-    dt.layers_vgroup_select_dst = "NAME"
-    bpy.ops.object.modifier_apply(modifier=dt.name)
-    bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
-    bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+        orig_co = [v.co.copy() for v in body.data.vertices]
+        if use_hand_fit:
+            warp_hands()
+        bpy.ops.object.select_all(action="DESELECT")
+        body.select_set(True)
+        bpy.context.view_layer.objects.active = body
+        dt = body.modifiers.new("weights", "DATA_TRANSFER")
+        dt.object = base
+        dt.use_object_transform = True
+        dt.use_vert_data = True
+        dt.data_types_verts = {"VGROUP_WEIGHTS"}
+        dt.vert_mapping = "POLYINTERP_NEAREST"
+        dt.layers_vgroup_select_src = "ALL"
+        dt.layers_vgroup_select_dst = "NAME"
+        bpy.ops.object.modifier_apply(modifier=dt.name)
+        bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
+        bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+        for v, co in zip(body.data.vertices, orig_co):     # 손 모양 되돌리기
+            v.co = co
+        body.data.update()
+
+    transfer()
+
+    # 엄지 맞춤 — AI 엄지는 손바닥과 같은 평면으로 뻗어 있고, 기준 뼈대의 엄지뼈는 손바닥 아래 비스듬히 놓여 있다.
+    # 웨이트가 맞아도 엄지뼈가 돌 때 다른 방향을 돌리게 되어 주먹을 쥐면 엄지가 아래로 삐져나온다.
+    # → AI 엄지를 엄지 뿌리(thumb_01) 기준으로 엄지뼈 방향에 맞게 돌려 놓고(엄지 웨이트만큼 — 뿌리는 조금만) 웨이트를 다시 옮긴다.
+    thumb_fit = {}
+    if a.get("thumb_fit", "1") == "1":
+        gname = {g.index: g.name for g in body.vertex_groups}
+        for side in ("l", "r"):
+            b1 = arm.data.bones.get("thumb_01_" + side)
+            tip = arm.data.bones.get("thumb_04_leaf_" + side) or arm.data.bones.get("thumb_03_" + side)
+            if b1 is None or tip is None:
+                continue
+            pivot = arm.matrix_world @ b1.head_local
+            bone_dir = (arm.matrix_world @ tip.head_local) - pivot
+            tw = {}
+            for v in body.data.vertices:
+                w = sum(g.weight for g in v.groups if gname.get(g.group, "").startswith("thumb_") and gname[g.group].endswith("_" + side))
+                if w > 0.0:
+                    tw[v.index] = w
+            core = [body.data.vertices[i].co for i, w in tw.items() if w > 0.5]
+            if len(core) < 10 or bone_dir.length < 1e-4:
+                continue
+            core.sort(key=lambda p: (p - pivot).length)
+            far = core[int(len(core) * 0.7):]
+            ai_dir = sum((p - pivot for p in far), Vector()) / len(far)
+            q = ai_dir.normalized().rotation_difference(bone_dir.normalized())
+            from mathutils import Quaternion
+            for i, w in tw.items():
+                v = body.data.vertices[i]
+                r = Quaternion().slerp(q, min(1.0, w))
+                v.co = pivot + r @ (v.co - pivot)
+            thumb_fit[side] = round(math.degrees(q.angle), 1)
+        body.data.update()
+        if thumb_fit:
+            transfer()
     # 웨이트가 하나도 없는 정점(떨어진 조각 등)
     unweighted = sum(1 for v in body.data.vertices if not any(g.weight > 1e-4 for g in v.groups))
     # 빈 그룹 정리
@@ -209,6 +283,7 @@ def main():
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
+        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),
         "actions": len(bpy.data.actions), "kept_base": keep_base, "out": out_path,
