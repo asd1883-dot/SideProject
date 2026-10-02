@@ -238,6 +238,144 @@ def main():
         body.data.update()
         if thumb_fit:
             transfer()
+    # 웨이트 부드럽게 — 기준 몸(UAL1 마네킹)은 관절마다 잘린 인형이라 웨이트가 칼같이 끊겨 있다(0 아니면 1).
+    # 그대로 옮기면 매끈한 사람 피부가 관절에서 찢어지거나 튀어나온다(무릎 뒤 · 반바지 뒤 · 어깨 위).
+    # 이웃 정점 평균으로 여러 번 번지게 해 관절 주변에 섞이는 띠를 만든다. 손(손목 너머)은 손가락을 맞춰 둔 그대로 둔다.
+    smooth_n = int(a.get("smooth", "12"))
+    smoothed = 0
+    if smooth_n > 0:
+        import numpy as np
+        me = body.data
+        nv = len(me.vertices)
+        groups = [vg.name for vg in body.vertex_groups]
+        W = np.zeros((nv, len(groups)), dtype=np.float64)
+        for v in me.vertices:
+            for g in v.groups:
+                W[v.index, g.group] = g.weight
+        # 텍스처 이음매에서 같은 자리에 정점이 둘(이상)로 나뉘어 있다 — 따로 번지면 그 자리가 갈라진다.
+        # 같은 자리 정점을 하나(rep)로 묶어 번지게 하고 결과를 똑같이 나눠 준다.
+        rep = np.zeros(nv, dtype=np.int64)
+        seen = {}
+        for v in me.vertices:
+            k = (round(v.co.x, 5), round(v.co.y, 5), round(v.co.z, 5))
+            rep[v.index] = seen.setdefault(k, v.index)
+        ev = np.zeros(len(me.edges) * 2, dtype=np.int64)
+        me.edges.foreach_get("vertices", ev)
+        ev = rep[ev.reshape(-1, 2)]
+        ev = ev[ev[:, 0] != ev[:, 1]]
+        ev = np.unique(np.sort(ev, axis=1), axis=0)
+        deg = np.bincount(ev.ravel(), minlength=nv).astype(np.float64)
+        deg[deg == 0] = 1.0
+        W = W[rep]
+        free = np.ones(nv, dtype=bool)
+        for side in ("l", "r"):
+            hb, lb = arm.data.bones.get("hand_" + side), arm.data.bones.get("lowerarm_" + side)
+            if hb is None or lb is None:
+                continue
+            wrist = arm.matrix_world @ hb.head_local
+            ax = (wrist - arm.matrix_world @ lb.head_local).normalized()
+            for v in me.vertices:
+                if (v.co - wrist).dot(ax) > 0.01:
+                    free[v.index] = False
+        for _ in range(smooth_n):
+            acc = np.zeros_like(W)
+            np.add.at(acc, ev[:, 0], W[ev[:, 1]])
+            np.add.at(acc, ev[:, 1], W[ev[:, 0]])
+            avg = acc / deg[:, None]
+            W[free] = W[free] + 0.5 * (avg[free] - W[free])
+            W = W[rep]          # 묶인 정점은 대표와 같은 값
+        # 정점당 4개 · 합 1
+        for i in range(nv):
+            row = W[i]
+            if np.count_nonzero(row > 1e-4) > 4:
+                cut = np.sort(row)[-4]
+                row[row < cut] = 0.0
+            s_ = row.sum()
+            if s_ > 0:
+                W[i] = row / s_
+        for gi, name in enumerate(groups):
+            vg = body.vertex_groups[name]
+            col = W[:, gi]
+            nz = np.nonzero(col > 1e-4)[0]
+            vg.remove(list(range(nv)))
+            for i in nz:
+                vg.add([int(i)], float(col[i]), "REPLACE")
+        smoothed = int(free.sum())
+    # 관절 경계 정리 — 굽기 도구는 "웨이트가 가장 큰 뼈"로 조각(파트)을 자른다. 가까운 면으로 옮긴 웨이트는
+    # 이어진 피부에서 경계가 관절과 어긋나, 윗팔 조각에 겨드랑이 · 가슴 옆살이, 허벅지 조각에 무릎 아래 살이 붙는다(10-02).
+    # 팔 · 다리 사슬마다 관절에 평면(뼈 방향에 수직)을 세워, 평면 기준으로 어느 뼈 조각인지 다시 정한다.
+    # 바뀐 정점만 그 뼈 하나로(웨이트 1) — 나머지는 부드럽게 번진 웨이트 그대로.
+    part_fix = {}
+    if a.get("part_fix", "1") == "1":
+        me = body.data
+        gidx = {vg.name: vg.index for vg in body.vertex_groups}
+        gname = {i: n for n, i in gidx.items()}
+        M = arm.matrix_world
+
+        # 어깨 경계를 관절보다 팔 쪽으로 shoulder_cut m 옮기는 선택(기본 0). 10-02 시험: 0.04 로 옮겨도
+        # Sprint 의 어깨 원판은 그대로였다 — 원판은 웨이트가 아니라 팔이 뒤로 젖혀질 때 윗팔 단면이 보이는 컷아웃 한계.
+        shoulder_cut = float(a.get("shoulder_cut", "0.0"))
+
+        def bone_plane(name):
+            b = arm.data.bones.get(name)
+            if b is None:
+                return None
+            h, tl = M @ b.head_local, M @ b.tail_local
+            d = (tl - h).normalized()
+            if name.startswith("upperarm_"):
+                h = h + d * shoulder_cut
+            return h, d
+
+        FINGERS = ("thumb_", "index_", "middle_", "ring_", "pinky_")
+        chains = []
+        for sd in ("l", "r"):
+            chains.append({"bones": ["upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd], "parent": "clavicle_" + sd,
+                           "family": lambda n, sd=sd: n in ("upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd) or (n.startswith(FINGERS) and n.endswith("_" + sd)),
+                           "steal": ("clavicle_" + sd, "spine_03", "spine_02"), "steal_r": float(a.get("steal_r", "0.075"))})
+            chains.append({"bones": ["thigh_" + sd, "calf_" + sd, "foot_" + sd], "parent": "pelvis",
+                           "family": lambda n, sd=sd: n in ("thigh_" + sd, "calf_" + sd, "foot_" + sd, "ball_" + sd),
+                           "steal": (), "steal_r": 0.0})
+        changed = {}
+        for ch in chains:
+            planes = [bone_plane(n) for n in ch["bones"]]
+            if any(pl is None for pl in planes) or any(n not in gidx for n in ch["bones"]):
+                continue
+            h0, d0 = planes[0]
+            cnt = 0
+            for v in me.vertices:
+                if not v.groups:
+                    continue
+                best = max(v.groups, key=lambda g: g.weight)
+                cur = gname.get(best.group, "")
+                in_family = ch["family"](cur)
+                p = v.co
+                seg = -1
+                for i, (h, d) in enumerate(planes):
+                    if (p - h).dot(d) >= 0.0:
+                        seg = i
+                if in_family:
+                    if seg < 0:
+                        target = ch["parent"]                     # 첫 관절보다 안쪽 = 몸통/골반
+                    else:
+                        target = ch["bones"][seg]
+                        if seg == len(planes) - 1 and cur != ch["bones"][-1] and (cur.startswith(FINGERS) or cur.startswith("ball_")):
+                            target = cur                           # 손가락 · 발가락은 맞춰 둔 그대로
+                elif cur in ch["steal"] and seg >= 0:
+                    # 어깨 바깥쪽(관절 평면 너머) 살이 몸통에 붙어 있으면 윗팔로 — 팔 굵기 안쪽만
+                    off = (p - h0) - d0 * (p - h0).dot(d0)
+                    if off.length > ch["steal_r"]:
+                        continue
+                    target = ch["bones"][seg]
+                else:
+                    continue
+                if target != cur and target in gidx:
+                    changed[v.index] = target
+                    cnt += 1
+            part_fix["/".join(ch["bones"][:1])] = cnt
+        for vi, target in changed.items():
+            for vg in body.vertex_groups:
+                vg.remove([vi])
+            body.vertex_groups[target].add([vi], 1.0, "REPLACE")
     # 웨이트가 하나도 없는 정점(떨어진 조각 등)
     unweighted = sum(1 for v in body.data.vertices if not any(g.weight > 1e-4 for g in v.groups))
     # 빈 그룹 정리
@@ -277,13 +415,55 @@ def main():
     bpy.ops.export_scene.gltf(filepath=out_path, export_format="GLB", export_yup=True,
                               export_animations=True, export_animation_mode="ACTIONS",
                               export_skins=True, export_all_influences=False)
+    # Godot 가져오기 설정 — 기준 몸의 .import 에 뼈 이름표(BoneMap, 리타깃)가 있으면 결과에도 똑같이.
+    # 없으면 source3d/mixamo 같은 "추가 동작"이 뼈를 하나도 못 찾아 T-포즈로 멈춘다(10-02 라이플 · 조준).
+    import_note = "기준 몸에 가져오기 설정 없음"
+    bi = base_path + ".import"
+    if os.path.exists(bi):
+        btxt = open(bi, encoding="utf-8").read()
+        i0 = btxt.find("_subresources=")
+        if i0 >= 0:
+            # 중괄호 짝을 세어 블록 끝을 찾는다
+            depth, i1 = 0, i0 + len("_subresources=")
+            for j in range(i1, len(btxt)):
+                if btxt[j] == "{":
+                    depth += 1
+                elif btxt[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        i1 = j + 1
+                        break
+            block = btxt[i0:i1]
+            oi = out_path + ".import"
+            if os.path.exists(oi):
+                otxt = open(oi, encoding="utf-8").read()
+                k0 = otxt.find("_subresources=")
+                if k0 >= 0:
+                    depth, k1 = 0, k0 + len("_subresources=")
+                    for j in range(k1, len(otxt)):
+                        if otxt[j] == "{":
+                            depth += 1
+                        elif otxt[j] == "}":
+                            depth -= 1
+                            if depth == 0:
+                                k1 = j + 1
+                                break
+                    otxt = otxt[:k0] + block + otxt[k1:]
+                else:
+                    otxt = otxt.replace("[params]\n", "[params]\n\n" + block + "\n", 1)
+            else:
+                otxt = "[remap]\n\nimporter=\"scene\"\nimporter_version=1\n\n[params]\n\n" + block + "\n"
+            with open(oi, "w", encoding="utf-8", newline="\n") as f:
+                f.write(otxt)
+            import_note = "기준 몸의 _subresources(뼈 이름표) 복사"
     res = {
+        "godot_import": import_note,
         "ok": os.path.exists(out_path),
         "base_size_m": [round(x, 3) for x in bsize],
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
-        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit,
+        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),
         "actions": len(bpy.data.actions), "kept_base": keep_base, "out": out_path,

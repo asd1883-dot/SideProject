@@ -296,6 +296,25 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
 
 CLI: `tools/equip_bake_cli.gd`(같은 코어, 조정은 `--adj_pos --adj_rot`, 앞 조각도 굽는다). 검사: `tools/equip_window_smoke_cli.gd`.
 
+## 복장 굽기 창 (옷 갈아입히기)
+
+`프로젝트 > 도구 > Dot Rigger — 복장 굽기 (옷 갈아입히기)`. 옷 입은 모델(기본 몸과 **같은 뼈대**)을 기본 몸 세트마다 **같은 카메라 · 같은 레스트 자세**로
+부위별 2D 그림으로 굽고, 게임에서 퍼펫의 그 부위 그림만 바꿔 끼운다(`soldier.wear(DROutfit.load_json("res://outfits/<이름>/outfit.json"))`).
+**3D 메시를 떼는 것이 아니다** — 어디까지가 몸통 조각이고 어디부터 골반 조각인지는 정점마다 웨이트가 가장 센 뼈로 정해지고, 3번 칠하기로 바꾼다.
+
+1. **기본 몸 · 세트 · 옷 모델** — 기본 몸(민소매)을 구울 때 쓴 프리셋 · 그 `sets.json` · 옷 모델(.glb) → `불러오기`. `구운 복장 열기…` 로 전에 구운 것을 다시 연다.
+2. **옷 모델 새로 만들기** — AI 원본(Tripo 등, 통짜 .glb)을 기본 뼈대에 붙인다(`pipeline/blender/bind_to_skeleton.py` 를 Blender 로 뒤에서 돌림).
+   설정: 웨이트 부드럽게(반복 수) · 손가락 맞춤 · 엄지 맞춤 · 관절 경계 정리. 결과 `res://source3d/characters/<이름>/<이름>.glb`(+ `.import` 에 뼈 이름표) → 1번으로 들어가 불러온다.
+3. **부위 칠하기** — 오른쪽 3D(T-포즈)에서 왼쪽 버튼으로 칠한다. 부위 단추(색 = 3D 색) · 지우개(웨이트대로) · 붓 크기 · `보이는 면만` · 되돌리기(Ctrl+Z).
+   오른쪽 끌기 = 돌리기 · 가운데 끌기 = 옮기기 · 휠 = 확대 · F = 맞춤. 칠한 정점은 웨이트 대신 칠한 부위의 조각으로 잘린다(3D 움직임은 그대로).
+   저장: 모델 옆 `<이름>.parts.json`(`DRPartOverrides`) — **메인 창 세트 굽기도 같은 파일을 따른다**. 예: 상의 자락(벨트 아래, 기본 Hips)을 Torso 로 칠하면 상의와 같이 입고 벗는다.
+4. **슬롯** — 파트마다 상의 · 하의 · 신발 · 안 씀(머리 · 손 기본 = 안 씀 → 기본 몸 그대로). `outfit.json` 의 `slots` 로 남아 `DROutfit.slot_parts("top")` · 시험장 O/P 키가 쓴다.
+5. **오른쪽 2D** — 기본 몸 퍼펫에 지금 칠하기 · 슬롯으로 임시로 구운 옷을 입혀 재생. `상의` · `하의` · `신발` 체크로 입히고 벗겨 본다. 칠하거나 슬롯을 바꾸면 잠시 뒤 다시 굽는다.
+6. **복장 굽기 (모든 자세)** — `<출력 폴더>/<복장 이름>/outfit.json` + `<세트>/parts/<파트>.png`. 기본 몸 세트를 다시 구우면 복장도 다시 굽는다.
+
+게임: `DRPuppetSet.wear(outfit, only_parts, replace)` / `take_off()` · 인스펙터 `복장` 칸(outfit_json · 전부/상의만/하의+신발만). 시험장(`test/puppet_test.tscn`, F6): **O = 상의, P = 하의+신발** 차례로.
+CLI: `tools/outfit_bake_cli.gd`(같은 코어 `DROutfitBaker`). 검사: `tools/outfit_window_smoke_cli.gd` · `tools/outfit_bind_check_cli.gd`(붙이기 버튼) · `tools/outfit_check_cli.gd`(몸/복장/상의만 비교 그림) · `tools/outfit_keys_check_cli.gd`(시험장 O/P).
+
 ## 장비 붙이기
 
 ```gdscript

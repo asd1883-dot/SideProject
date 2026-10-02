@@ -7,18 +7,22 @@ extends EditorPlugin
 const MENU_ITEM := "Dot Rigger (3D → 2D 컷아웃)"
 const MENU_RESET := "Dot Rigger — 개발 내용 갱신"
 const MENU_EQUIP := "Dot Rigger — 장비 굽기 (무기·헬멧)"
+const MENU_OUTFIT := "Dot Rigger — 복장 굽기 (옷 갈아입히기)"
 
 var _window: DRMainWindow
 var _equip_window: DREquipWindow
+var _outfit_window: DROutfitWindow
 
 
 func _enter_tree() -> void:
 	add_tool_menu_item(MENU_ITEM, _open)
 	add_tool_menu_item(MENU_RESET, _reopen)
 	add_tool_menu_item(MENU_EQUIP, _open_equip)
+	add_tool_menu_item(MENU_OUTFIT, _open_outfit)
 
 
 func _exit_tree() -> void:
+	remove_tool_menu_item(MENU_OUTFIT)
 	remove_tool_menu_item(MENU_EQUIP)
 	remove_tool_menu_item(MENU_ITEM)
 	remove_tool_menu_item(MENU_RESET)
@@ -32,6 +36,9 @@ func _free_window() -> void:
 	if is_instance_valid(_equip_window):
 		_equip_window.queue_free()
 	_equip_window = null
+	if is_instance_valid(_outfit_window):
+		_outfit_window.queue_free()
+	_outfit_window = null
 
 
 ## 창을 닫아도 hide() 만 되므로 인스턴스는 살아 있다.
@@ -58,3 +65,11 @@ func _open_equip() -> void:
 		_equip_window = DREquipWindow.new()
 		EditorInterface.get_base_control().add_child(_equip_window)
 	_equip_window.popup_centered(Vector2i(1240, 800))
+
+
+## 복장 굽기 창 — 옷 입은 모델을 기본 몸 세트에 맞춰 부위별로 굽는다(부위 칠하기 · 슬롯 · 뼈대에 붙이기)
+func _open_outfit() -> void:
+	if not is_instance_valid(_outfit_window):
+		_outfit_window = DROutfitWindow.new()
+		EditorInterface.get_base_control().add_child(_outfit_window)
+	_outfit_window.popup_centered(Vector2i(1360, 820))

@@ -9,3 +9,5 @@
 
 # AI 생성 원본(면 제한 전, 수십 MB) - 정규화된 source3d/.../<id>.glb 만 올린다
 /pipeline/comfy/*.glb
+# 캐릭터 검수 비교 그림(check_character.py 가 매번 새로 만듦)
+/pipeline/check/

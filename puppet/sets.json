@@ -4,9 +4,9 @@
 		{
 			"aim_limits": {},
 			"animations": [
-				"Firing_Rifle"
+				"Sprint"
 			],
-			"dir": "Firing_Rifle",
+			"dir": "Sprint",
 			"dropped_reason": "",
 			"index": 0,
 			"kept": [],
@@ -27,87 +27,14 @@
 				"R_Forearm",
 				"R_Hand"
 			],
-			"name": "Firing_Rifle",
+			"name": "Sprint",
 			"ok": true,
 			"pixel_scene": "",
-			"rest_anim": "Firing_Rifle",
-			"rest_time": 0.0,
-			"rest_time_sec": 0.0,
-			"rig": "Firing_Rifle/rig.json",
-			"scene": "Firing_Rifle/puppet.tscn",
-			"z_order_manual": true
-		},
-		{
-			"aim_limits": {},
-			"animations": [
-				"Idle"
-			],
-			"dir": "Idle",
-			"dropped_reason": "",
-			"index": 1,
-			"kept": [],
-			"layer_order": [
-				"L_UpperArm",
-				"L_Hand",
-				"L_Forearm",
-				"L_Foot",
-				"L_Thigh",
-				"L_Calf",
-				"Torso",
-				"Head",
-				"Hips",
-				"R_Foot",
-				"R_Thigh",
-				"R_Calf",
-				"R_UpperArm",
-				"R_Forearm",
-				"R_Hand"
-			],
-			"name": "Idle",
-			"ok": true,
-			"pixel_scene": "",
-			"rest_anim": "Idle",
-			"rest_time": 0.0666666666666667,
-			"rest_time_sec": 0.166666666666667,
-			"rig": "Idle/rig.json",
-			"scene": "Idle/puppet.tscn",
-			"z_order_manual": true
-		},
-		{
-			"aim_limits": {},
-			"animations": [
-				"Crouch_Idle+Firing_Rifle",
-				"Idle"
-			],
-			"dir": "Crouch_Idle+Firing_Rifle",
-			"dropped_reason": "",
-			"index": 2,
-			"kept": [],
-			"layer_order": [
-				"L_UpperArm",
-				"L_Hand",
-				"L_Forearm",
-				"L_Foot",
-				"L_Thigh",
-				"L_Calf",
-				"Torso",
-				"Head",
-				"Hips",
-				"R_Foot",
-				"R_Thigh",
-				"R_Calf",
-				"R_UpperArm",
-				"R_Forearm",
-				"R_Hand"
-			],
-			"name": "Crouch_Idle+Firing_Rifle",
-			"ok": true,
-			"pixel_scene": "",
-			"rest_anim": "Crouch_Idle+Firing_Rifle",
-			"rest_time": 0.428571428571429,
-			"rest_time_sec": 0.5,
-			"rig": "Crouch_Idle+Firing_Rifle/rig.json",
-			"scene": "Crouch_Idle+Firing_Rifle/puppet.tscn",
+			"rest_anim": "Sprint",
+			"rest_time": 0.625,
+			"rest_time_sec": 0.416666679084301,
+			"rig": "Sprint/rig.json",
+			"scene": "Sprint/puppet.tscn",
 			"z_order_manual": true
 		}
 	],

@@ -26,6 +26,21 @@ signal animation_changed(anim: StringName, set_name: String)
 			reload()
 ## 모든 동작을 반복으로(가져온 애니에 반복 표시가 없어도 계속 돌려 볼 때 — Mixamo 동작은 기본이 반복 아님)
 @export var force_loop: bool = false
+
+@export_group("복장")
+## 입힐 복장(outfit.json). 비우면 구운 몸 그대로. 에디터에서도 바로 바뀐다
+@export_file("*.json") var outfit_json: String = "":
+	set(v):
+		outfit_json = v
+		if is_inside_tree():
+			_wear_from_inspector()
+## 복장에서 입힐 부분
+@export_enum("전부", "상의만", "하의+신발만") var outfit_part: int = 0:
+	set(v):
+		outfit_part = v
+		if is_inside_tree():
+			_wear_from_inspector()
+@export_group("")
 ## 구운 캐릭터가 화면 오른쪽을 보고 있는가(왼쪽을 보게 구웠으면 끈다)
 @export var baked_facing_right: bool = true
 
@@ -120,6 +135,10 @@ func reload() -> void:
 			_aim_range[String(an)] = Vector2(float(v[0]), float(v[1]))
 	for slot in _equip_sets.keys():
 		_apply_equip(_equip_sets[slot])
+	if _outfit != null:
+		_apply_outfit()
+	elif outfit_json != "":
+		_wear_from_inspector()
 	if _entries.size() > 0:
 		var first: PackedStringArray = _entries[0]["anims"]
 		if first.size() > 0:
@@ -142,6 +161,70 @@ func unequip(slot: String) -> void:
 		var pup := (e as Dictionary)["puppet"] as DRPuppet
 		if pup != null:
 			pup.unequip(slot)
+
+
+## 복장 입기 — 모든 세트의 퍼펫에서 그 세트용으로 구운 파트 그림을 바꿔 끼운다.
+## only_parts 를 주면 그 파트만(예: DROutfit.TOP = 상의만). 이미 입은 다른 복장 위에 겹쳐 입힐 수도 있다
+## (상의 = A, 하의 = B: wear(a, DROutfit.TOP) 다음 wear(b, DROutfit.BOTTOM + DROutfit.SHOES, false)).
+## 바뀐 퍼펫 수를 돌려준다.
+var _outfit: DROutfit = null
+var _outfit_layers: Array = []      # [[DROutfit, only_parts]] — 다시 읽어도 같은 순서로 다시 입힌다
+
+func wear(outfit: DROutfit, only_parts: Array = [], replace: bool = true) -> int:
+	if outfit == null:
+		return 0
+	if replace:
+		take_off()
+	_outfit = outfit
+	_outfit_layers.append([outfit, only_parts])
+	return _apply_outfit()
+
+
+## 인스펙터의 복장 칸(outfit_json · outfit_part)대로 입힌다
+func _wear_from_inspector() -> void:
+	if outfit_json == "":
+		take_off()
+		return
+	var o := DROutfit.load_json(outfit_json)
+	if o == null:
+		take_off()
+		return
+	var only: Array = []
+	if outfit_part == 1:
+		only = o.slot_parts("top")
+	elif outfit_part == 2:
+		only = o.slot_parts("bottom") + o.slot_parts("shoes")
+	wear(o, only)
+
+
+## 복장 벗기 — 구운 몸 그대로
+func take_off() -> void:
+	_outfit = null
+	_outfit_layers.clear()
+	for e in _entries:
+		var pup := (e as Dictionary)["puppet"] as DRPuppet
+		if pup != null:
+			pup.take_off_outfit()
+
+
+func get_outfit() -> DROutfit:
+	return _outfit
+
+
+func _apply_outfit() -> int:
+	var n := 0
+	for e in _entries:
+		var ed: Dictionary = e
+		var pup := ed["puppet"] as DRPuppet
+		if pup == null:
+			continue
+		var changed := 0
+		for layer in _outfit_layers:
+			var o := (layer as Array)[0] as DROutfit
+			changed += pup.wear_parts(o.parts_for(String(ed["name"]), (layer as Array)[1]))
+		if changed > 0:
+			n += 1
+	return n
 
 
 ## 지금 그 슬롯에 든 장비(없으면 null)

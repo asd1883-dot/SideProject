@@ -67,6 +67,10 @@ var model_root: Node3D
 var skeleton: Skeleton3D
 var anim_player: AnimationPlayer
 var part_nodes: Dictionary = {}    # part -> MeshInstance3D
+## 파트로 자르기 전의 원본 스킨드 메시(숨겨 둠) — 복장 창의 부위 칠하기가 정점을 읽는다
+var source_mesh_instance: MeshInstance3D
+## 이 모델의 부위 칠하기(<모델>.parts.json, 없으면 빈 것)
+var part_overrides: DRPartOverrides
 ## 추가 동작 폴더에서 얹은 동작 이름 / 그 과정의 경고(창 상태줄·CLI 가 보여 준다)
 var extra_anims: PackedStringArray = PackedStringArray()
 var extra_anim_warnings: PackedStringArray = PackedStringArray()
@@ -109,7 +113,10 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 		push_error("[DotRigger] 스킨드 MeshInstance3D 를 찾지 못했습니다.")
 		return false
 
-	split = DRMeshSplitter.split(source_mi, skeleton, profile, opts.bleed_rings)
+	# 부위 칠하기(모델 옆 <이름>.parts.json) — 있으면 칠한 정점은 칠한 파트로 자른다
+	source_mesh_instance = source_mi
+	part_overrides = DRPartOverrides.load_for(scene.resource_path)
+	split = DRMeshSplitter.split(source_mi, skeleton, profile, opts.bleed_rings, part_overrides)
 	if split.meshes.is_empty():
 		push_error("[DotRigger] 파트 분리 결과가 비어 있습니다. 프로필 규칙을 확인하세요.")
 		return false
@@ -517,6 +524,26 @@ static func _rel_path(from_root: Node, node: Node) -> String:
 	if n == null:
 		return "%" + String(node.name)   # 조상이 아님 — 고유 이름에 기댄다
 	return "/".join(names)
+
+
+## 부위 칠하기가 바뀌었을 때 모델을 다시 불러오지 않고 파트 메시만 다시 자른다(뼈 → 파트 · 리그는 그대로).
+## ov 가 null 이면 지금 칠하기(part_overrides) 그대로 다시 자른다.
+func resplit(ov: DRPartOverrides = null) -> void:
+	if source_mesh_instance == null or skeleton == null:
+		return
+	if ov != null:
+		part_overrides = ov
+	var ns := DRMeshSplitter.split(source_mesh_instance, skeleton, profile, opts.bleed_rings, part_overrides)
+	var shader := load(SHADER_PATH) as Shader
+	for part in part_nodes.keys():
+		var mi := part_nodes[part] as MeshInstance3D
+		if ns.meshes.has(part):
+			mi.mesh = ns.meshes[part]
+			_apply_dot_material(mi, shader)
+		else:
+			mi.mesh = null      # 칠해서 정점이 하나도 안 남은 파트 — 그림이 비어 굽기에서 빠진다
+	split.meshes = ns.meshes
+	split.tri_counts = ns.tri_counts
 
 
 func _apply_dot_material(mi: MeshInstance3D, shader: Shader) -> void:

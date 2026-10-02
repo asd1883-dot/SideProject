@@ -1,6 +1,6 @@
 # Dot Rigger 인수인계 — 여기서 시작
 
-> 최종 갱신 **2026-09-21** · 저장소 GitHub `asd1883-dot/SideProject` — 이 PC `C:\Users\Dev\git\Godot\SideProject` (Godot 4.7.2 프로젝트 이름은 "1941")
+> 최종 갱신 **2026-10-02** · 저장소 GitHub `asd1883-dot/SideProject` — 이 PC `C:\Users\Dev\git\Godot\SideProject` (Godot 4.7.2 프로젝트 이름은 "1941")
 > ⚠ 이 PC 에는 옛 사본 `Documents\1941` 도 있고 프로젝트 이름이 똑같이 "1941" 이라 에디터 창 제목으로는 구분이 안 된다. 작업·검증은 이 저장소에서.
 
 3D 휴머노이드 모델(.glb)을 **고정 시점 2D 컷아웃 퍼펫**(파트 스프라이트 + Skeleton2D + 애니메이션)으로 바꿔 주는 Godot 에디터 애드온. 옷·무기·장구류를 갈아입는 캐릭터용이다 — 장비 1종 = 이미지 1장.
@@ -45,6 +45,11 @@
 | `source3d/` | ✓(09-18, 커밋 전) | **Mixamo 접목 재료** — `UAL1_humanoid.glb`(= `models/UAL1.glb` 와 같은 파일, 임포트 설정에 BoneMap 지정) · `mixamo/*.fbx`(Mixamo 소총 동작. ⚠ 저장소가 공개라면 원본 동작 파일을 올리는 것이 Adobe 약관의 재배포 제한에 걸리는지 **커밋 전에 확인할 것** — 미확인) · `bonemap_*.tres`. `.import` 파일을 **꼭 같이 커밋**(리타깃 설정이 거기 들어 있다). [01 §4-22](01_설계와_구조.md) |
 | `UAL1_preset.tres` | ✓ | 사용자 작업 설정 |
 | `puppet/` | ✓ | 사용자가 09-11 에디터에서 구운 결과 |
+| `pipeline/` | ✓ | 자산 공정 스크립트(Python · Blender) · 기준 그림(`reference/`). `.gdignore` 로 Godot 가 무시. AI 원본 `comfy/*.glb` · 검사 그림 `check/` 은 저장소 밖([01 §4-29~4-31](01_설계와_구조.md)) |
+| `source3d/characters/` | ✓ | AI 사람 몸 · 군복을 기준 뼈대에 붙인 결과(`human_base` · `uniform_m36`). `.import` 에 뼈 이름표가 있어 **같이 커밋**. 칠하기 파일 `<이름>.parts.json` 도 같이 |
+| `source3d/weapons/mp40/` | ✓ | AI 생성 MP40 자산(asset.json · 정규화 결과). Kar98k 는 라이선스 확인 전이라 `.gitignore` |
+| `equip/` · `outfits/` | ✓ | 구운 장비 · 구운 복장(`outfits/<이름>/outfit.json`) |
+| `human.tres` | ✓ | 기본 몸(human_base) 프리셋 — 사용자가 지금 세트를 구운 설정 |
 | `puppet_test/` | △ | 검증 도구 산출물(도구가 다시 만든다). ⚠ 이 저장소에는 첫 커밋 때 77개가 같이 올라갔고 `.gitignore` 에도 없어서, 검증 도구를 돌리면 추적 파일이 바뀐다. `.gitignore` 에 넣고 추적에서 뺄지는 결정 필요 |
 | `.godot/` | ✗ | 임포트 캐시 |
 
@@ -73,6 +78,10 @@ P="C:/<경로>/SideProject"
 "$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/pixel_check_cli.gd      # ⑫ 도트 격자 고정 (창이 900x700 이상이어야 함)
 "$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/puppet_set_check_cli.gd # ⑬ 런타임 DRPuppetSet (세트 묶기 · 조준 · 장비)
 "$G" --path "$P" --resolution 1240x800 --script res://addons/dot_rigger/tools/equip_window_smoke_cli.gd # ⑭ 장비 굽기 창 (res://puppet 세트 3개 + kar98k 무기 필요)
+"$G" --path "$P" --resolution 1400x860 --script res://addons/dot_rigger/tools/outfit_window_smoke_cli.gd   # ⑮ 복장 굽기 창 (기본 몸 sets.json · human.tres · uniform_m36 필요)
+"$G" --path "$P" --resolution 1400x860 --script res://addons/dot_rigger/tools/outfit_bind_check_cli.gd -- --raw=<AI 원본 .glb 절대경로> --id=bind_smoke   # ⑯ 붙이기 버튼(Blender)
+"$G" --path "$P" --resolution 1152x648 --script res://addons/dot_rigger/tools/outfit_keys_check_cli.gd     # ⑰ 시험장 O/P 키 (res://outfits 에 복장 1벌 이상)
+python pipeline/check_character.py source3d/characters/uniform_m36/uniform_m36.glb [--rest_time 0.42]      # ⑱ 캐릭터 실제 굽기 비교(샌드박스 Documents/1941 에서 돌림)
 ```
 
 **PowerShell**
@@ -98,6 +107,10 @@ $P = "C:\<경로>\SideProject"
 | ⑫ `pixel_check_cli` | `도트 격자 고정 검사 전부 통과` — `puppet_pixel.tscn` 구조 · 3배에서 3×3 칸 섞임 0/16,811(대조 1,106/1,703) · 전 프레임이 뷰포트 안 · extra_margin · 끄면 삭제 | ✓ (09-21) |
 | ⑬ `puppet_set_check_cli` | `퍼펫 세트 검사 전부 통과` — 세트 2개를 이름만으로 재생 · 발 자리(서기·앉기 모두 원점 y + 1px) · 조준 −16.7° 정확 · 한계 30° · 멈춘 애니 위 300프레임 각도 변화 0 · 끄면 복귀 · 좌우 반전 · [5] 장비(모든 세트 · z = 파트 + 5 · 교체 · reload) | ✓ (09-21) |
 | ⑭ `equip_window_smoke_cli` | `장비 창 스모크 전부 통과` — 불러오기(세트 3 · 무기 파트 6 · 자동 그립 = Rifle_Aiming_Idle · 방아쇠 그립) · 2D(세트 3 임시 굽기 · **앞 조각 L_Hand 126px·Torso 8px, 무기 z + 1, 파트 뼈에**) · 기즈모(오른쪽 10px → 그림 10px · 링 15° → 화면 총열 15°, 붙일 손 0.0000m 제자리 · 받치는 손 기준 −10° 제자리 · 리셋 · 드래그 흉내 위 20px) · 이 자세만(Idle 만 12px · Hips 앞) · 조준 −24.9° · 3D 보기(무기만 1699px · ×3) · 굽기(equip.json v2 · 앞 조각 파일 2) · 다시 열기 | ✓ (09-22, 옛 사본. ⚠ 사용자 세트(z 간격 1) 경고가 뜨는 게 정상) |
+| ⑮ `outfit_window_smoke_cli` | `복장 굽기 창 검사 전부 통과` — 불러오기(정점 11,383 · 부위 15종) · 2D 입힘(12파트, 머리 · 손은 몸 그대로) · 3D 고르기 · 칠하기 71곳 → 다시 자른 몸통 삼각형 4372 → 4631 · 되돌리기 · 슬롯 Hips → 상의 · 상의만 입힘 · 굽기 · outfit.json 다시 읽기(슬롯 남음) | ✓ (10-02, 샌드박스) |
+| ⑯ `outfit_bind_check_cli` | 결과 줄 `붙임 → …` · `뼈 이름표 있음` — 웨이트 없는 정점 0 · 엄지 맞춤 각 · 관절 경계 정리 수 | ✓ (10-02, 샌드박스) |
+| ⑰ `outfit_keys_check_cli` | 시작 → O → P → O → P = 기본 몸 → 상의만 → 상하의 → 하의만 → 기본 몸, 화면 위 `복장 상의 [..] 하의·신발 [..]` | ✓ (10-02, 샌드박스) |
+| ⑱ `check_character.py` | `CHECK OK` + `pipeline/check/<이름>_sheet.png` 를 **눈으로** 본다(마네킹과 나란히, 동작마다) | ✓ (10-02 human_base · uniform_m36) |
 | `bake_cli` → `preview_cli` | `결과: { "ok": true ... }` → 구운 씬이 트랙 60개로 재생 | ✓ |
 | `compare_cli` | 3D 렌더 대비 2D 순서 합성 불일치 %. 합격선 없음, **각도 비교용** | 192px·Idle·자동 순서, **09-15 셰이더 수정(02 C9) 후**: 정측면 9.4% · −45° **3.9%** · −55° 7.8% · −65° 11.4% (09-14 의 4.3~5.9% 는 3D 기준이 틀린 값) |
 
@@ -108,6 +121,14 @@ $P = "C:\<경로>\SideProject"
 - 에디터의 **`베이크` 버튼 경로**는 자동 테스트에 없다. 대신 사용자 `puppet/puppet.tscn` 이 임포트된 `Texture2D` 15개를 참조하고 있어(=`rebuild_scene()` 까지 정상 완료) 동작은 확인됐다.
 
 ---
+
+## 현재 상태 (2026-10-02 추가분 — 그 아래는 09-15 기준)
+
+- **자산 공정 2단계**: ComfyUI(+ comfyui-tripo 노드, 사용자 Tripo 키)로 3D 생성 → MP40(정규화 · 탄알집 분리 · 굽기). [01 §4-30](01_설계와_구조.md)
+- **AI 사람 몸 → 기준 뼈대**: `bind_to_skeleton.py`(방향 · 키 · 웨이트 · 손가락/엄지 · 부드럽게 · 관절 경계 · 뼈 이름표) → `source3d/characters/human_base` · `uniform_m36`. [01 §4-31](01_설계와_구조.md)
+- **복장(옷만 갈아입히기)**: 옷 입은 모델을 기본 몸 세트와 같은 카메라로 부위 그림으로 굽고 퍼펫의 부위 그림만 교체. 상의 · 하의 · 신발 슬롯 따로. 시험장 F6 O/P. [01 §4-32](01_설계와_구조.md)
+- **복장 굽기 창**: 붙이기 · 3D 부위 칠하기 · 슬롯 · 2D 미리보기 · 굽기를 한 창에서. 칠하기는 메인 창 굽기에도 적용. [01 §4-33](01_설계와_구조.md)
+- **사용자 세트 상태(10-02)**: 사용자가 기본 몸(`human.tres`)으로 **Sprint 세트 하나만** 다시 구움 → 예전 세트 3개(Idle · Firing_Rifle · Crouch_Idle+Firing_Rifle)는 `puppet/` 에서 지워짐(커밋 `6472111` 에 있음). MP40 · Kar98k 장비는 예전 세트에 맞춰 구운 것이라 **세트를 다시 구성하면 장비 · 복장도 다시 굽는다**.
 
 ## 현재 상태 (2026-09-15)
 
@@ -162,6 +183,9 @@ yaw **−55°**, pitch 0 · 자동 맞춤 **끔** · 여백 0 · 해상도 **184
     - 미검증: AnimationTree 전환 섞기(회전 트랙이 펴진 각도라 서로 다른 애니 사이에서 한 바퀴 돌 수 있음) · 앉은 하체 + 선 조준 상체 조합.
 11. **Mixamo 동작 더 받기** — 받은 7개 중 `Firing_Rifle_2`·`Shoot_Rifle` 은 `In Place` 없이 받아 캐릭터가 걸어 나간다(다시 받을 것). 아직 없는 것: 장전 · 소총 들고 걷기/앉아 걷기 · 앉아쏴. 절차는 애드온 README "다른 출처의 동작 얹기".
 12. **퍼펫에 파트 숨기기/떼어내기 API**(팔 떨어짐용) · **장비 오프셋이 세트마다 다름**(레스트가 달라서 — 1번 장비 3D 베이크의 우선순위가 올라감).
+13. **(10-02) 복장 다음 단계** — ① M36 상의 자락(벨트 아래, 지금 Hips)을 복장 굽기 창 칠하기로 Torso 에 넣을지 사용자 결정 ② 군복 2벌째(예: 1944 오리 사냥 위장복)로 상의 A + 하의 B 섞기 실제 확인 ③ 인종별 기본 몸(머리 · 손 슬롯) ④ 세트를 여러 개(서기 · 조준 · 앉기)로 다시 구성한 뒤 장비(MP40 · Kar98k) · 복장 다시 굽기.
+14. **(10-02) 어깨 이음매 근본 해결 = 2D 메시 변형**(Skeleton2D + Polygon2D 웨이트, Spine 식) — 지금 컷아웃(딱딱한 그림)은 팔을 크게 젖히면 이음매가 보인다. 긴소매 군복에서는 안 보여 미룸. 옷 만드는 과정과는 무관(굽는 방식만 바뀜).
+15. **(10-02) 미확인**: 고개를 숙이면 군복 깃이 턱을 덮는지(그리기 순서 Head ↔ Torso) — 사용자 세트에서는 Head 가 Torso 앞이라 안 보였음.
 
 ---
 

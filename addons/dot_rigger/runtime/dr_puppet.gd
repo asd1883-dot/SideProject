@@ -321,6 +321,61 @@ func _set_part_drawn(part: String, on: bool) -> void:
 			c.visible = on
 
 
+## 복장 입기 — 파트 그림을 다른 옷으로 구운 그림으로 바꿔 끼운다(머리 · 손처럼 안 준 파트는 그대로).
+## parts = { 파트 이름: {"texture": Texture2D, "crop": Vector2(캔버스에서 그림 왼쪽 위)} }
+## 같은 뼈대 · 같은 카메라 · 같은 레스트 자세로 구운 그림이어야 맞는다(DROutfit / outfit_bake_cli 가 그렇게 굽는다).
+## 배치 공식은 익스포터와 같다: (crop − 레스트 피벗)을 레스트 각만큼 되돌림. 처음 바꿀 때 원래 그림을 기억해 둔다.
+var _worn: Dictionary = {}   # part -> {art_tex, art_pos, ol_tex, ol_pos} — 원래 그림(벗을 때 되돌림)
+
+func wear_parts(parts: Dictionary) -> int:
+	if _parts.is_empty():
+		rebuild_index()
+	var n := 0
+	for pn in parts.keys():
+		if not _parts.has(pn):
+			continue
+		var d: Dictionary = parts[pn]
+		var tex := d.get("texture", null) as Texture2D
+		if tex == null:
+			continue
+		var info: Dictionary = _parts[pn]
+		var b := info["bone"] as Bone2D
+		var art := b.get_node_or_null("stretch/art") as Sprite2D
+		if art == null:
+			continue
+		var ol := b.get_node_or_null("stretch/outline") as Sprite2D
+		if not _worn.has(pn):
+			_worn[pn] = {"art_tex": art.texture, "art_pos": art.position,
+				"ol_tex": ol.texture if ol != null else null, "ol_pos": ol.position if ol != null else Vector2.ZERO}
+		var ra: float = info["rest_angle"]
+		var pos := (Vector2(d.get("crop", Vector2.ZERO)) - Vector2(info["rest_head"])).rotated(-ra)
+		art.texture = tex
+		art.position = pos
+		if ol != null:
+			ol.texture = tex
+			ol.position = pos
+		n += 1
+	return n
+
+
+## 복장 벗기 — 바꿔 끼운 파트를 원래(구운 몸) 그림으로 되돌린다
+func take_off_outfit() -> void:
+	for pn in _worn.keys():
+		if not _parts.has(pn):
+			continue
+		var w: Dictionary = _worn[pn]
+		var b := (_parts[pn] as Dictionary)["bone"] as Bone2D
+		var art := b.get_node_or_null("stretch/art") as Sprite2D
+		if art != null:
+			art.texture = w["art_tex"]
+			art.position = w["art_pos"]
+		var ol := b.get_node_or_null("stretch/outline") as Sprite2D
+		if ol != null:
+			ol.texture = w["ol_tex"]
+			ol.position = w["ol_pos"]
+	_worn.clear()
+
+
 ## 파트 본체 스프라이트 색만 바꾸기(팔레트 스왑의 가장 싼 형태).
 func tint_part(part: String, color: Color) -> void:
 	if not _parts.has(part):

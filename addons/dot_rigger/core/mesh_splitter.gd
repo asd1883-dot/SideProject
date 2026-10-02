@@ -39,8 +39,9 @@ static func _bind_map(mi: MeshInstance3D, skel: Skeleton3D) -> PackedInt32Array:
 	return out
 
 
+## overrides = 부위 칠하기(DRPartOverrides). 칠한 정점은 웨이트 대신 칠한 파트로 간다(없는 파트 이름은 무시).
 static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile,
-		bleed_rings: int = 1) -> SplitResult:
+		bleed_rings: int = 1, overrides: DRPartOverrides = null) -> SplitResult:
 	var res := SplitResult.new()
 	var src := mi.mesh as ArrayMesh
 	if src == null:
@@ -101,6 +102,10 @@ static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile,
 			if skel_b >= 0:
 				res.weighted_bones[skel_b] = true
 			vpart[v] = String(res.bone_part.get(skel_b, ""))
+			if overrides != null and not overrides.map.is_empty():
+				var op := overrides.part_at(verts[v])
+				if op != "" and seen.has(op):
+					vpart[v] = op
 
 		var tcount := int(idx.size() / 3)
 

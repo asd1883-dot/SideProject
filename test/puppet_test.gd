@@ -8,6 +8,8 @@ extends Node2D
 ##   F          좌우 자동 반전 켬/끔 (마우스가 등 뒤로 가면 돌아본다)
 ##   + / −      확대/축소        L  모든 동작 반복 켬/끔        R  sets.json 다시 읽기(다시 구운 뒤)
 ##   E          장비 바꿔 들기 — res://equip/<이름>/equip.json 으로 구워 둔 무기를 차례로(맨손 → 무기1 → 무기2 … → 맨손)
+##   O          상의 바꿔 입기 — res://outfits/<이름>/outfit.json 으로 구워 둔 복장의 몸통 · 팔을 차례로(기본 몸 → 복장1 → … → 기본 몸)
+##   P          하의 · 신발 바꿔 입기 — 같은 복장들의 골반 · 다리 · 발을 차례로. 상의와 따로 골라 섞어 입는다(머리 · 손은 늘 기본 몸)
 ##
 ## Unity 와의 대응: DRPuppetSet 노드 = Animator 가 붙은 프리팹. play("이름") = animator.Play("이름").
 ## 구운 세트(폴더)가 여러 개여도 이 노드 하나가 묶어서 다룬다 — 세트는 자세 계열(서기/앉기/포복)마다 파트 그림이 달라서 나뉘는 것.
@@ -18,6 +20,7 @@ extends Node2D
 const SETS_JSON := "res://puppet/sets.json"
 const AIM_WORDS := ["aim", "rifle", "fir", "shoot", "pistol"]
 const EQUIP_DIR := "res://equip"
+const OUTFIT_DIR := "res://outfits"
 
 var soldier: DRPuppetSet
 var _label: Label
@@ -27,6 +30,10 @@ var _zoom := 1.5
 var _weapons: PackedStringArray = PackedStringArray()   # 구워 둔 장비의 equip.json 경로들
 var _weapon_i := -1         # −1 = 맨손
 var _placed := false        # 씬에 직접 놓아 둔 DRPuppetSet 을 쓰는 중(자리는 놓은 그대로 둔다)
+var _outfits: PackedStringArray = PackedStringArray()   # 구워 둔 복장의 outfit.json 경로들
+var _outfit_cache: Dictionary = {}                      # 경로 -> DROutfit (키를 누를 때마다 그림을 다시 읽지 않게)
+var _top_i := -1            # 상의(몸통 · 팔)로 입은 복장 번호, −1 = 기본 몸
+var _bottom_i := -1         # 하의 · 신발(골반 · 다리 · 발)로 입은 복장 번호, −1 = 기본 몸
 
 
 func _ready() -> void:
@@ -51,6 +58,8 @@ func _ready() -> void:
 	ui.add_child(_label)
 	_names = soldier.get_animations()
 	_find_weapons()
+	_find_outfits()
+	_adopt_inspector_outfit()
 	_layout()
 	get_viewport().size_changed.connect(_layout)
 
@@ -75,6 +84,65 @@ func _next_weapon() -> void:
 	var es := DREquipSet.load_json(_weapons[_weapon_i])
 	if es != null:
 		soldier.equip(es)
+
+
+## 구워 둔 복장 찾기(res://outfits/*/outfit.json)
+func _find_outfits() -> void:
+	_outfits = PackedStringArray()
+	if not DirAccess.dir_exists_absolute(OUTFIT_DIR):
+		return
+	for d in DirAccess.get_directories_at(OUTFIT_DIR):
+		var p := OUTFIT_DIR.path_join(d).path_join("outfit.json")
+		if FileAccess.file_exists(p):
+			_outfits.append(p)
+
+
+## 인스펙터 복장 칸(outfit_json · outfit_part)에 넣어 둔 복장이 있으면 그 상태에서 시작한다.
+## 그 뒤로는 O · P 키가 상의 · 하의를 따로 고르므로, 인스펙터 칸은 비워 둔다(R 로 다시 읽어도 키로 고른 상태가 남게).
+func _adopt_inspector_outfit() -> void:
+	if soldier.outfit_json == "":
+		return
+	var i := _outfits.find(soldier.outfit_json)
+	if i < 0:
+		_outfits.append(soldier.outfit_json)
+		i = _outfits.size() - 1
+	_top_i = i if soldier.outfit_part != 2 else -1       # 0 전부 · 1 상의만 · 2 하의+신발만
+	_bottom_i = i if soldier.outfit_part != 1 else -1
+	soldier.outfit_json = ""
+	_apply_outfits()
+
+
+func _outfit_at(i: int) -> DROutfit:
+	if i < 0 or i >= _outfits.size():
+		return null
+	var p := _outfits[i]
+	if not _outfit_cache.has(p):
+		_outfit_cache[p] = DROutfit.load_json(p)
+	return _outfit_cache[p] as DROutfit
+
+
+## 고른 상의 · 하의대로 다시 입힌다(머리 · 손은 늘 기본 몸)
+func _apply_outfits() -> void:
+	soldier.take_off()
+	var top := _outfit_at(_top_i)
+	if top != null:
+		soldier.wear(top, top.slot_parts("top"), false)
+	var bottom := _outfit_at(_bottom_i)
+	if bottom != null:
+		soldier.wear(bottom, bottom.slot_parts("bottom") + bottom.slot_parts("shoes"), false)
+
+
+## 다음 복장(−1 = 기본 몸 → 0 → 1 … → 기본 몸)
+func _cycle(i: int) -> int:
+	_find_outfits()
+	i += 1
+	return -1 if i >= _outfits.size() else i
+
+
+func _outfit_name(i: int) -> String:
+	if i < 0 or i >= _outfits.size():
+		return "기본 몸"
+	return _outfits[i].get_base_dir().get_file()
 
 
 ## 이 씬 안에 직접 놓아 둔 DRPuppetSet(없으면 null)
@@ -125,7 +193,8 @@ func _process(_delta: float) -> void:
 		lines.append("  %d  %s%s" % [i + 1, _names[i], "   ◀" if String(soldier.current_animation()) == _names[i] else ""])
 	var held := soldier.get_equipped("weapon")
 	lines.append("장비 [%s]  (구워 둔 것 %d개)" % [held.id if held != null else "맨손", _weapons.size()])
-	lines.append("A 조준 자동/켬/끔 · F 좌우 반전 · +/− 확대 · L 반복 · R 다시 읽기 · E 장비 바꿔 들기")
+	lines.append("복장  상의 [%s]  하의·신발 [%s]  (구워 둔 것 %d개)" % [_outfit_name(_top_i), _outfit_name(_bottom_i), _outfits.size()])
+	lines.append("A 조준 자동/켬/끔 · F 좌우 반전 · +/− 확대 · L 반복 · R 다시 읽기 · E 장비 바꿔 들기 · O 상의 · P 하의")
 	_label.text = "\n".join(lines)
 
 
@@ -153,6 +222,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 		_names = soldier.get_animations()
 	elif k == KEY_E:
 		_next_weapon()
+	elif k == KEY_O:
+		_top_i = _cycle(_top_i)
+		_apply_outfits()
+	elif k == KEY_P:
+		_bottom_i = _cycle(_bottom_i)
+		_apply_outfits()
 	elif k == KEY_R:
 		soldier.reload()
 		_names = soldier.get_animations()

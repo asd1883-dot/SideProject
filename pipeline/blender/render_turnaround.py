@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """기준 몸 네 방향 그림 (Blender 헤드리스) — AI 이미지 생성(Astra 등)에 넣을 체형 · 포즈 기준.
 
-    blender -b --factory-startup -P pipeline/blender/render_turnaround.py -- <모델.glb> <출력 폴더> [한 변 픽셀=1024]
+    blender -b --factory-startup -P pipeline/blender/render_turnaround.py -- <모델.glb> <출력 폴더> [한 변 픽셀=1024] [texture]
+    (texture = 회색 대신 모델 텍스처 그대로 — AI 에게 "이 사람에게 옷만 입혀라" 로 줄 때)
 
 - 뼈대의 기본 자세(바인드 포즈, UAL1 은 T-포즈) 그대로, 직교 카메라로 앞 · 뒤 · 왼쪽 · 오른쪽을 같은 배율로 찍는다.
   (네 장의 키 · 발 위치가 픽셀까지 같아야 image-to-3D 가 한 사람으로 읽는다)
@@ -14,6 +15,7 @@ from mathutils import Vector
 a = sys.argv[sys.argv.index("--") + 1:]
 src, out_dir = a[0], a[1]
 size = int(a[2]) if len(a) > 2 else 1024
+textured = len(a) > 3 and a[3] == "texture"
 os.makedirs(out_dir, exist_ok=True)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -49,9 +51,9 @@ print("BODY size x %.3f y %.3f z %.3f" % tuple(dims))
 
 sc.render.engine = "BLENDER_WORKBENCH"
 sc.display.shading.light = "STUDIO"
-sc.display.shading.color_type = "SINGLE"
+sc.display.shading.color_type = "TEXTURE" if textured else "SINGLE"
 sc.display.shading.single_color = (0.78, 0.78, 0.78)
-sc.display.shading.show_cavity = True
+sc.display.shading.show_cavity = not textured
 sc.render.resolution_x = sc.render.resolution_y = size
 sc.render.film_transparent = False
 sc.world = bpy.data.worlds.new("w")

@@ -1,0 +1,121 @@
+{
+	"id": "m36",
+	"model": "res://source3d/characters/uniform_m36/uniform_m36.glb",
+	"sets": {
+		"Sprint": {
+			"dir": "Sprint",
+			"parts": {
+				"Hips": {
+					"crop": [
+						155,
+						176,
+						66,
+						61
+					],
+					"image": "Sprint/parts/Hips.png"
+				},
+				"L_Calf": {
+					"crop": [
+						155,
+						240,
+						92,
+						45
+					],
+					"image": "Sprint/parts/L_Calf.png"
+				},
+				"L_Foot": {
+					"crop": [
+						155,
+						266,
+						42,
+						53
+					],
+					"image": "Sprint/parts/L_Foot.png"
+				},
+				"L_Forearm": {
+					"crop": [
+						223,
+						152,
+						45,
+						42
+					],
+					"image": "Sprint/parts/L_Forearm.png"
+				},
+				"L_Thigh": {
+					"crop": [
+						174,
+						196,
+						73,
+						78
+					],
+					"image": "Sprint/parts/L_Thigh.png"
+				},
+				"L_UpperArm": {
+					"crop": [
+						221,
+						115,
+						35,
+						60
+					],
+					"image": "Sprint/parts/L_UpperArm.png"
+				},
+				"R_Calf": {
+					"crop": [
+						185,
+						247,
+						45,
+						99
+					],
+					"image": "Sprint/parts/R_Calf.png"
+				},
+				"R_Foot": {
+					"crop": [
+						185,
+						308,
+						45,
+						49
+					],
+					"image": "Sprint/parts/R_Foot.png"
+				},
+				"R_Forearm": {
+					"crop": [
+						147,
+						141,
+						34,
+						54
+					],
+					"image": "Sprint/parts/R_Forearm.png"
+				},
+				"R_Thigh": {
+					"crop": [
+						155,
+						195,
+						75,
+						75
+					],
+					"image": "Sprint/parts/R_Thigh.png"
+				},
+				"R_UpperArm": {
+					"crop": [
+						147,
+						114,
+						68,
+						49
+					],
+					"image": "Sprint/parts/R_UpperArm.png"
+				},
+				"Torso": {
+					"crop": [
+						166,
+						113,
+						90,
+						99
+					],
+					"image": "Sprint/parts/Torso.png"
+				}
+			}
+		}
+	},
+	"sets_json": "res://puppet/sets.json",
+	"version": 1
+}

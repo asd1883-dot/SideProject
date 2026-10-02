@@ -40,7 +40,25 @@ python pipeline/asset_pipeline.py <asset.json> --project <다른 프로젝트 �
 ## 검수(자동)
 정규화: 길이 ±2 cm · 삼각형 60,000 이하 · 잡는 자리 노드 있음. 굽기: equip.json · 자세마다 그림 파일.
 
+### 정규화 추가 칸 (AI 생성 무기, 10-01)
+- `normalize.max_triangles` — 넘으면 Decimate 로 줄인다(Tripo 에 face_limit 을 안 주면 100만 면 이상. MP40 = 20000).
+- `normalize.split` — `{"<파트 이름>": {"min": [x, y, z], "max": [x, y, z]}}`(Godot 축 · 정규화 결과 기준 m: x 옆 · y 위 · z 총구 쪽). 면 가운데가 상자 안이면 그 파트로 떼어 낸다(통짜 AI 모델의 탄알집 등).
+
+## 캐릭터(사람 몸 · 옷) — 10-02
+Dot Rigger 의 **복장 굽기 창**(프로젝트 > 도구 > Dot Rigger — 복장 굽기)에서 아래를 버튼으로 할 수 있다. 명령줄은 같은 스크립트.
+
+| 파일 | 하는 일 |
+|---|---|
+| `blender/render_turnaround.py <모델.glb> <폴더> [1024] [texture]` | 기준 몸 앞 · 왼 · 뒤 · 오 4장 + sheet(T-포즈, 같은 배율). AI 이미지에 넣는 체형 · 포즈 기준. `texture` = 회색 대신 모델 색(옷 입힐 "이 사람") |
+| `reference/body_ual1/` · `reference/soldier_base/` | 위 결과. `body_ual1/SPEC.md` = 뼈대 치수와 AI 에 넘길 문장 |
+| `blender/bind_to_skeleton.py --base <기준 몸.glb> --src <AI 원본.glb> --out <결과.glb>` | AI 사람 몸 · 옷을 기준 뼈대(UAL1)에 붙인다. `--smooth 12` `--hand_fit 1` `--thumb_fit 1` `--part_fix 1` `--keep_base 0` `--shoulder_cut 0`. 결과 `.import` 에 기준 몸의 뼈 이름표를 복사. 마지막 줄 `BIND_RESULT {json}` |
+| `check_character.py <glb> [--anims …] [--rest_time 0.42]` | 샌드박스(`Documents/1941`)에 복사해 동작마다 **실제 굽기** → 마네킹과 나란히 `check/<이름>_sheet.png`. 캐릭터를 바꾸면 이걸 보고 넘긴다 |
+
+AI 생성: 이미지 4장(정면 · 왼 · 뒤 · 오, T-포즈) → ComfyUI `Tripo: Generate model` `multiview_to_model` · `face_limit` 20000 · `file_prefix` = 자산 이름 → `comfy/`(저장소 밖).
+
 ## 파일
 - `asset_pipeline.py` — 실행기(Python 3). Blender · Godot 경로는 맨 위 상수.
 - `blender/normalize_weapon.py` — Blender 헤드리스 정규화.
-- 이 폴더는 `.gdignore` 로 Godot 가져오기에서 뺐다.
+- `blender/render_turnaround.py` · `blender/bind_to_skeleton.py` · `check_character.py` — 캐릭터(위 표).
+- `generate_tripo.py` — Tripo API 직접 호출(무기 1장 생성용).
+- 이 폴더는 `.gdignore` 로 Godot 가져오기에서 뺐다. `comfy/*.glb`(AI 원본) · `check/`(검사 그림)는 `.gitignore`.
