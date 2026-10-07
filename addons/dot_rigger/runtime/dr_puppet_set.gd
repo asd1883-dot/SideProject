@@ -35,7 +35,7 @@ signal animation_changed(anim: StringName, set_name: String)
 		if is_inside_tree():
 			_wear_from_inspector()
 ## 복장에서 입힐 부분
-@export_enum("전부", "상의만", "하의+신발만") var outfit_part: int = 0:
+@export_enum("전부", "상의만", "하의만") var outfit_part: int = 0:
 	set(v):
 		outfit_part = v
 		if is_inside_tree():
@@ -165,7 +165,7 @@ func unequip(slot: String) -> void:
 
 ## 복장 입기 — 모든 세트의 퍼펫에서 그 세트용으로 구운 파트 그림을 바꿔 끼운다.
 ## only_parts 를 주면 그 파트만(예: DROutfit.TOP = 상의만). 이미 입은 다른 복장 위에 겹쳐 입힐 수도 있다
-## (상의 = A, 하의 = B: wear(a, DROutfit.TOP) 다음 wear(b, DROutfit.BOTTOM + DROutfit.SHOES, false)).
+## (상의 = A, 하의 = B: wear(a, DROutfit.TOP) 다음 wear(b, b.slot_parts("bottom"), false)).
 ## 바뀐 퍼펫 수를 돌려준다.
 var _outfit: DROutfit = null
 var _outfit_layers: Array = []      # [[DROutfit, only_parts]] — 다시 읽어도 같은 순서로 다시 입힌다
@@ -193,7 +193,7 @@ func _wear_from_inspector() -> void:
 	if outfit_part == 1:
 		only = o.slot_parts("top")
 	elif outfit_part == 2:
-		only = o.slot_parts("bottom") + o.slot_parts("shoes")
+		only = o.slot_parts("bottom")
 	wear(o, only)
 
 

@@ -9,7 +9,7 @@ extends Node2D
 ##   + / −      확대/축소        L  모든 동작 반복 켬/끔        R  sets.json 다시 읽기(다시 구운 뒤)
 ##   E          장비 바꿔 들기 — res://equip/<이름>/equip.json 으로 구워 둔 무기를 차례로(맨손 → 무기1 → 무기2 … → 맨손)
 ##   O          상의 바꿔 입기 — res://outfits/<이름>/outfit.json 으로 구워 둔 복장의 몸통 · 팔을 차례로(기본 몸 → 복장1 → … → 기본 몸)
-##   P          하의 · 신발 바꿔 입기 — 같은 복장들의 골반 · 다리 · 발을 차례로. 상의와 따로 골라 섞어 입는다(머리 · 손은 늘 기본 몸)
+##   P          하의 바꿔 입기 — 같은 복장들의 골반 · 다리 · 발을 차례로. 상의와 따로 골라 섞어 입는다(머리 · 손은 늘 기본 몸)
 ##
 ## Unity 와의 대응: DRPuppetSet 노드 = Animator 가 붙은 프리팹. play("이름") = animator.Play("이름").
 ## 구운 세트(폴더)가 여러 개여도 이 노드 하나가 묶어서 다룬다 — 세트는 자세 계열(서기/앉기/포복)마다 파트 그림이 달라서 나뉘는 것.
@@ -33,7 +33,7 @@ var _placed := false        # 씬에 직접 놓아 둔 DRPuppetSet 을 쓰는 �
 var _outfits: PackedStringArray = PackedStringArray()   # 구워 둔 복장의 outfit.json 경로들
 var _outfit_cache: Dictionary = {}                      # 경로 -> DROutfit (키를 누를 때마다 그림을 다시 읽지 않게)
 var _top_i := -1            # 상의(몸통 · 팔)로 입은 복장 번호, −1 = 기본 몸
-var _bottom_i := -1         # 하의 · 신발(골반 · 다리 · 발)로 입은 복장 번호, −1 = 기본 몸
+var _bottom_i := -1         # 하의(골반 · 다리 · 발)로 입은 복장 번호, −1 = 기본 몸
 
 
 func _ready() -> void:
@@ -106,7 +106,7 @@ func _adopt_inspector_outfit() -> void:
 	if i < 0:
 		_outfits.append(soldier.outfit_json)
 		i = _outfits.size() - 1
-	_top_i = i if soldier.outfit_part != 2 else -1       # 0 전부 · 1 상의만 · 2 하의+신발만
+	_top_i = i if soldier.outfit_part != 2 else -1       # 0 전부 · 1 상의만 · 2 하의만
 	_bottom_i = i if soldier.outfit_part != 1 else -1
 	soldier.outfit_json = ""
 	_apply_outfits()
@@ -129,7 +129,7 @@ func _apply_outfits() -> void:
 		soldier.wear(top, top.slot_parts("top"), false)
 	var bottom := _outfit_at(_bottom_i)
 	if bottom != null:
-		soldier.wear(bottom, bottom.slot_parts("bottom") + bottom.slot_parts("shoes"), false)
+		soldier.wear(bottom, bottom.slot_parts("bottom"), false)
 
 
 ## 다음 복장(−1 = 기본 몸 → 0 → 1 … → 기본 몸)
@@ -193,7 +193,7 @@ func _process(_delta: float) -> void:
 		lines.append("  %d  %s%s" % [i + 1, _names[i], "   ◀" if String(soldier.current_animation()) == _names[i] else ""])
 	var held := soldier.get_equipped("weapon")
 	lines.append("장비 [%s]  (구워 둔 것 %d개)" % [held.id if held != null else "맨손", _weapons.size()])
-	lines.append("복장  상의 [%s]  하의·신발 [%s]  (구워 둔 것 %d개)" % [_outfit_name(_top_i), _outfit_name(_bottom_i), _outfits.size()])
+	lines.append("복장  상의 [%s]  하의 [%s]  (구워 둔 것 %d개)" % [_outfit_name(_top_i), _outfit_name(_bottom_i), _outfits.size()])
 	lines.append("A 조준 자동/켬/끔 · F 좌우 반전 · +/− 확대 · L 반복 · R 다시 읽기 · E 장비 바꿔 들기 · O 상의 · P 하의")
 	_label.text = "\n".join(lines)
 

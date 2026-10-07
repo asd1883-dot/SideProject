@@ -32,7 +32,7 @@
 
 1. clone → Godot 프로젝트 매니저에서 `project.godot` 가져오기
 2. 첫 실행 때 `models/UAL1.glb`(21MB) 임포트에 시간이 걸린다
-3. 플러그인은 `project.godot` 에 이미 켜져 있다 → 메뉴 **`프로젝트 > 도구 > Dot Rigger (3D → 2D 컷아웃)`**
+3. 플러그인은 `project.godot` 에 이미 켜져 있다 → 메뉴 **`프로젝트 > 도구 > Dot Rigger`** (창 하나에 탭 ① 캐릭터 · ② 장비 · ③ 복장, 10-06)
 4. `0. 프리셋 > 불러오기...` → `res://UAL1_preset.tres` 를 고르면 사용자 작업 설정이 그대로 돌아온다
 
 ### 3. 저장소에 있는 것 / 없는 것
@@ -81,6 +81,8 @@ P="C:/<경로>/SideProject"
 "$G" --path "$P" --resolution 1400x860 --script res://addons/dot_rigger/tools/outfit_window_smoke_cli.gd   # ⑮ 복장 굽기 창 (기본 몸 sets.json · human.tres · uniform_m36 필요)
 "$G" --path "$P" --resolution 1400x860 --script res://addons/dot_rigger/tools/outfit_bind_check_cli.gd -- --raw=<AI 원본 .glb 절대경로> --id=bind_smoke   # ⑯ 붙이기 버튼(Blender)
 "$G" --path "$P" --resolution 1152x648 --script res://addons/dot_rigger/tools/outfit_keys_check_cli.gd     # ⑰ 시험장 O/P 키 (res://outfits 에 복장 1벌 이상)
+"$G" --path "$P" --resolution 1500x920 --script res://addons/dot_rigger/tools/hub_smoke_cli.gd            # ⑲ Dot Rigger 창(탭 · 공통 설정)
+python pipeline/check_editor.py                                                                             # ⑳ 실제 에디터에서 Dot Rigger 창 띄워 보기(샌드박스, 에디터 창이 잠깐 뜸)
 python pipeline/check_character.py source3d/characters/uniform_m36/uniform_m36.glb [--rest_time 0.42]      # ⑱ 캐릭터 실제 굽기 비교(샌드박스 Documents/1941 에서 돌림)
 ```
 
@@ -110,6 +112,8 @@ $P = "C:\<경로>\SideProject"
 | ⑮ `outfit_window_smoke_cli` | `복장 굽기 창 검사 전부 통과` — 불러오기(정점 11,383 · 부위 15종) · 2D 입힘(12파트, 머리 · 손은 몸 그대로) · 3D 고르기 · 칠하기 71곳 → 다시 자른 몸통 삼각형 4372 → 4631 · 되돌리기 · 슬롯 Hips → 상의 · 상의만 입힘 · 굽기 · outfit.json 다시 읽기(슬롯 남음) | ✓ (10-02, 샌드박스) |
 | ⑯ `outfit_bind_check_cli` | 결과 줄 `붙임 → …` · `뼈 이름표 있음` — 웨이트 없는 정점 0 · 엄지 맞춤 각 · 관절 경계 정리 수 | ✓ (10-02, 샌드박스) |
 | ⑰ `outfit_keys_check_cli` | 시작 → O → P → O → P = 기본 몸 → 상의만 → 상하의 → 하의만 → 기본 몸, 화면 위 `복장 상의 [..] 하의·신발 [..]` | ✓ (10-02, 샌드박스) |
+| ⑲ `hub_smoke_cli` | `Dot Rigger 창(탭) 검사 전부 통과` — 탭 3 · 공통 설정 자동(프리셋 · sets.json) · ① 탭이 프리셋을 바로 적용 · ③ 탭 칸 숨김/공통 값 · 숨은 탭 뷰포트 멈춤 · Ctrl+1/2/3 · 세트 다시 구움 알림 → 다른 탭이 보일 때 다시 불러옴 | ✓ (10-06, 샌드박스) |
+| ⑳ `check_editor.py` | `EDITOR CHECK OK` — 넣기만 해서는 안 뜸 · 제목줄을 잡을 수 있는 자리 · 모델 올리는 중 탭 전환 · 닫고 다시 열면 같은 자리/탭 · 화면 밖 창 구해 옴 · 에디터 오류 0. **명령줄 검사가 못 보는 에디터 전용 길**(02 U18) | ✓ (10-06) |
 | ⑱ `check_character.py` | `CHECK OK` + `pipeline/check/<이름>_sheet.png` 를 **눈으로** 본다(마네킹과 나란히, 동작마다) | ✓ (10-02 human_base · uniform_m36) |
 | `bake_cli` → `preview_cli` | `결과: { "ok": true ... }` → 구운 씬이 트랙 60개로 재생 | ✓ |
 | `compare_cli` | 3D 렌더 대비 2D 순서 합성 불일치 %. 합격선 없음, **각도 비교용** | 192px·Idle·자동 순서, **09-15 셰이더 수정(02 C9) 후**: 정측면 9.4% · −45° **3.9%** · −55° 7.8% · −65° 11.4% (09-14 의 4.3~5.9% 는 3D 기준이 틀린 값) |

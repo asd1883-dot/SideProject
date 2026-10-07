@@ -51,7 +51,7 @@ func _run() -> void:
 	root.add_child(win)
 	# 숨긴 채로 두면 SubViewport 가 렌더되지 않아 프리뷰가 검게 나온다.
 	# 실사용(창을 열어 놓은 상태)과 같은 조건으로 테스트한다.
-	win.popup_centered(Vector2i(1000, 700))
+	win.test_layout(Vector2i(1000, 700))   # 페이지를 root 왼쪽 위에 이 크기로(예전: 창 popup)
 	await process_frame
 	print("1) UI 구성 OK")
 	# 이름 글자(Label)에 올려도 툴팁이 떠야 한다 (Label 기본값은 마우스 무시라 그냥 두면 안 뜸)
@@ -582,7 +582,7 @@ func _run() -> void:
 	win._step_zoom(1, anchor)
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
-	win.get_texture().get_image().save_png("res://puppet_test/_ui_zoomed.png")
+	win.get_viewport().get_texture().get_image().get_region(Rect2i(Vector2i.ZERO, Vector2i(win.size))).save_png("res://puppet_test/_ui_zoomed.png")
 	print("    확대 상태 캡처 (%s) -> _ui_zoomed.png" % win._zoom_label.text)
 
 	win._fit_preview()
@@ -1766,7 +1766,7 @@ func _run() -> void:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
-	var shot := win.get_texture().get_image()
+	var shot := win.get_viewport().get_texture().get_image().get_region(Rect2i(Vector2i.ZERO, Vector2i(win.size)))
 	shot.save_png("res://puppet_test/_ui_layout.png")
 	print("16) 창 캡처 %dx%d (창 크기 %s) -> _ui_layout.png"
 		% [shot.get_width(), shot.get_height(), win.size])

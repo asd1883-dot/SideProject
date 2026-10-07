@@ -22,7 +22,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var win := DROutfitWindow.new()
 	root.add_child(win)
-	win.popup_centered(Vector2i(1340, 800))
+	win.test_layout(Vector2i(1340, 800))
 	await process_frame
 	win._raw_edit.text = String(_args.get("raw", ""))
 	win._id_edit.text = String(_args.get("id", "bind_smoke"))

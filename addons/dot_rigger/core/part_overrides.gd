@@ -11,11 +11,14 @@ class_name DRPartOverrides
 ##
 ## 키 = 정점의 바인드 자세 위치(메시 공간)를 0.1 mm 로 반올림한 값 — 텍스처 이음매로 나뉜 같은 자리 정점은 같이 바뀐다.
 ## 같은 원본 · 같은 붙이기 설정으로 다시 붙이면 위치가 같아 칠한 것이 그대로 맞는다.
+##
+## cuts = 자르기(DRMeshCutter) — 직선 · 사각형으로 그은 곧은 경계. 정점 칠하기 다음에 적힌 순서대로 적용된다.
 
 const SCALE := 10000.0
 
 var model_path := ""
 var map: Dictionary = {}   # Vector3i -> 파트 이름
+var cuts: Array = []       # [{to, from, planes: [[nx, ny, nz, d], …]}] — DRMeshCutter
 
 
 static func key_of(p: Vector3) -> Vector3i:
@@ -40,6 +43,9 @@ static func load_for(p_model_path: String) -> DRPartOverrides:
 	if not (v is Dictionary):
 		push_warning("[DotRigger] 부위 칠하기 파일을 읽을 수 없습니다: %s" % jp)
 		return o
+	for c in (v as Dictionary).get("cuts", []):
+		if c is Dictionary and (c as Dictionary).has("planes"):
+			o.cuts.append(c)
 	for e in (v as Dictionary).get("points", []):
 		var a: Array = e
 		if a.size() >= 4:
@@ -54,7 +60,8 @@ func save() -> bool:
 	for k in map.keys():
 		var kk: Vector3i = k
 		pts.append([kk.x, kk.y, kk.z, String(map[k])])
-	var d := {"version": 1, "model": model_path, "note": "Dot Rigger 부위 칠하기 — 정점(바인드 자세 위치 × %d, 정수) → 파트" % int(SCALE), "points": pts}
+	var d := {"version": 2, "model": model_path, "note": "Dot Rigger 부위 칠하기 — points = 정점(바인드 자세 위치 × %d, 정수) → 파트 · cuts = 자르기(영역 = 모든 평면에서 n·p ≥ d, from 부위 → to 부위)" % int(SCALE),
+		"points": pts, "cuts": cuts}
 	var f := FileAccess.open(path_for(model_path), FileAccess.WRITE)
 	if f == null:
 		return false
@@ -65,6 +72,11 @@ func save() -> bool:
 
 func part_at(p: Vector3) -> String:
 	return String(map.get(key_of(p), ""))
+
+
+## 자르기까지 따진 정점 p 의 부위(part = 칠하기 · 웨이트로 정한 부위)
+func cut_part(p: Vector3, part: String) -> String:
+	return DRMeshCutter.cut_vertex_part(cuts, p, part)
 
 
 ## part 가 "" 면 칠한 것을 지운다(웨이트대로)
@@ -81,4 +93,4 @@ func size() -> int:
 
 
 func is_empty() -> bool:
-	return map.is_empty()
+	return map.is_empty() and cuts.is_empty()

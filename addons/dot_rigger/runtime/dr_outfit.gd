@@ -12,29 +12,31 @@ class_name DROutfit
 @export var id: String = ""
 ## 세트 이름 -> { 파트 이름: {"texture": Texture2D, "crop": Vector2} }
 @export var sets: Dictionary = {}
-## 파트 -> 슬롯("top" 상의 · "bottom" 하의 · "shoes" 신발). 복장 굽기 창에서 정한 것 — 비면 아래 기본 묶음
+## 파트 -> 슬롯("top" 상의 · "bottom" 하의 — 옛 파일의 "shoes" 는 하의). 복장 굽기 창에서 정한 것 — 비면 아래 기본 묶음
 @export var slots: Dictionary = {}
 
-## 상의 · 하의 · 신발 기본 묶음(파트 이름) — slots 가 없는 옛 outfit.json 용
+## 상의 · 하의(+ 발) 기본 묶음(파트 이름) — slots 가 없는 옛 outfit.json 용
 const TOP := ["Torso", "L_UpperArm", "L_Forearm", "R_UpperArm", "R_Forearm"]
 const BOTTOM := ["Hips", "L_Thigh", "L_Calf", "R_Thigh", "R_Calf"]
 const SHOES := ["L_Foot", "R_Foot"]
 
 
-## 그 슬롯에 든 파트들(slot = "top" · "bottom" · "shoes")
+## 그 슬롯에 든 파트들(slot = "top" 상의 · "bottom" 하의). 옷은 상의 · 하의 두 가지 —
+## 옛 파일의 "shoes"(신발)는 하의로 친다.
 func slot_parts(slot: String) -> Array:
 	if slots.is_empty():
 		match slot:
 			"top":
 				return TOP
 			"bottom":
-				return BOTTOM
-			"shoes":
-				return SHOES
+				return BOTTOM + SHOES
 		return []
 	var out: Array = []
 	for pn in slots.keys():
-		if String(slots[pn]) == slot:
+		var s := String(slots[pn])
+		if s == "shoes":
+			s = "bottom"
+		if s == slot:
 			out.append(pn)
 	return out
 

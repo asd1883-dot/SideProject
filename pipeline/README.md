@@ -51,7 +51,9 @@ Dot Rigger 의 **복장 굽기 창**(프로젝트 > 도구 > Dot Rigger — 복�
 |---|---|
 | `blender/render_turnaround.py <모델.glb> <폴더> [1024] [texture]` | 기준 몸 앞 · 왼 · 뒤 · 오 4장 + sheet(T-포즈, 같은 배율). AI 이미지에 넣는 체형 · 포즈 기준. `texture` = 회색 대신 모델 색(옷 입힐 "이 사람") |
 | `reference/body_ual1/` · `reference/soldier_base/` | 위 결과. `body_ual1/SPEC.md` = 뼈대 치수와 AI 에 넘길 문장 |
-| `blender/bind_to_skeleton.py --base <기준 몸.glb> --src <AI 원본.glb> --out <결과.glb>` | AI 사람 몸 · 옷을 기준 뼈대(UAL1)에 붙인다. `--smooth 12` `--hand_fit 1` `--thumb_fit 1` `--part_fix 1` `--keep_base 0` `--shoulder_cut 0`. 결과 `.import` 에 기준 몸의 뼈 이름표를 복사. 마지막 줄 `BIND_RESULT {json}` |
+| `blender/bind_to_skeleton.py --base <기준 몸.glb> --src <AI 원본.glb> --out <결과.glb>` | AI 사람 몸 · 옷을 기준 뼈대(UAL1)에 붙인다. `--smooth 12` `--hand_fit 1` `--thumb_fit 1` `--thumb_slim 0.55`(엄지를 엄지뼈 축 쪽으로 가늘게 — AI 엄지가 굵어 2D 주먹에서 판처럼 보임, 1 = 끔, 10-06) `--hand_keep 1`(손 맞춤 모양 유지 — 손가락이 뼈 사슬에 맞아 주먹이 감김, 10-07) `--hand_heat 0` `--part_fix 1` `--part_fix_legs 0`(다리 경계를 웨이트 1 로 덮지 않음 — 덮으면 사타구니 면이 26 배 늘어남. 맨몸은 1) `--hip_heat 0`(2D 유령 띠 · 옷자락 갈라짐으로 끔) `--part_fix_soft 0` `--keep_base 0` `--shoulder_cut 0`. 결과 `.import` 에 기준 몸의 뼈 이름표를 복사. 마지막 줄 `BIND_RESULT {json}`. 지금 파일: human_base = `--part_fix_legs 1`, uniform_m36 = 기본값(02 U20 · C21) |
+| `blender/check_crotch.py --glb X --out 앞머리` · `blender/check_hand.py --glb X --out 앞머리 --side l` | 리깅 검사: 가장 센 뼈로 색칠 + Sprint 레스트에서 늘어난 면(빨강) · 숫자(`CROTCH {…}`), 손가락별 색 + 주먹(`HANDSTATS {…}`). 마네킹(`source3d/UAL1_humanoid.glb`)과 나란히 본다 |
+| `check_editor.py` (+ `editor_probe/`) | Dot Rigger 창을 **실제 에디터**에서 메뉴를 누른 것처럼 띄워 본다(샌드박스에 탐침 플러그인을 잠깐 넣었다 뺌). 창 · 에디터 연동을 고치면 돌릴 것 |
 | `check_character.py <glb> [--anims …] [--rest_time 0.42]` | 샌드박스(`Documents/1941`)에 복사해 동작마다 **실제 굽기** → 마네킹과 나란히 `check/<이름>_sheet.png`. 캐릭터를 바꾸면 이걸 보고 넘긴다 |
 
 AI 생성: 이미지 4장(정면 · 왼 · 뒤 · 오, T-포즈) → ComfyUI `Tripo: Generate model` `multiview_to_model` · `face_limit` 20000 · `file_prefix` = 자산 이름 → `comfy/`(저장소 밖).

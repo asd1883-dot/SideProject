@@ -1,19 +1,20 @@
 @tool
-extends Window
+extends DRPage
 class_name DROutfitWindow
 
-## Dot Rigger — 복장 굽기 창(옷만 갈아입히기).  프로젝트 > 도구 > Dot Rigger — 복장 굽기.
+## Dot Rigger — 복장 굽기 페이지(옷만 갈아입히기, Dot Rigger 창의 ③ 탭).  프로젝트 > 도구 > Dot Rigger.
+## (이름은 창 시절 그대로 DROutfitWindow. 창 안에서는 프리셋 · 세트 목록을 위의 `공통 설정` 줄에서 받는다)
 ##
-## 왼쪽: 1 기본 몸 프리셋 · sets.json · 옷 모델 → 불러오기
+## 왼쪽: 1 기본 몸 프리셋 · sets.json · 옷 모델 → 불러오기(창이 지난 값을 기억하고 열 때 자동으로 불러온다)
 ##       2 옷 모델 새로 만들기 — AI 원본(Tripo 등)을 기본 뼈대에 붙인다(Blender 를 대신 돌림)
-##       3 부위 칠하기 — 어느 정점을 어느 조각(파트)으로 자를지 붓으로 고친다(상의 자락 → 몸통 등)
-##       4 슬롯 — 파트마다 상의 · 하의 · 신발 · 안 씀
-##       바닥: 복장 굽기 → <출력 폴더>/<복장 이름>/outfit.json
-## 오른쪽: 2D 미리보기 — 기본 몸 퍼펫(DRPuppetSet)에 지금 상태로 임시로 구운 옷을 입혀 재생(상의 · 하의 · 신발 켜고 끄기)
-##         3D 부위 칠하기 — 옷 모델(T-포즈)을 부위 색으로 보고 왼쪽 버튼으로 칠한다
+##       3 부위 칠하기 — 칠할 대상(옷 모델 / 기본 몸) · 도구(붓 / 직선 나누기) · 부위
+##       4 슬롯 — 파트마다 상의 · 하의 · 안 씀(옷은 상의 · 하의 두 가지)
+##       바닥: 굽기 → 기본 몸을 칠했으면 기본 몸 세트에 먼저 넣고, 복장을 <출력 폴더>/<복장 이름>/outfit.json 으로
+## 오른쪽: 2D 미리보기 — 기본 몸 퍼펫에 지금 상태(기본 몸 칠한 것 포함)로 임시로 구운 옷을 입혀 재생
+##         3D 부위 칠하기 — 면마다 실제로 잘리는 부위 색. 붓 · 직선으로 고친다
 ##
 ## 옷은 3D 메시를 떼는 게 아니다: 옷 입은 모델을 기본 몸 세트와 같은 카메라 · 같은 자세로 부위별 2D 그림으로 굽고,
-## 퍼펫의 그 부위 그림만 바꿔 끼운다. 부위 경계는 정점마다 웨이트가 가장 센 뼈로 정해지고, 칠하기로 바꿀 수 있다.
+## 퍼펫의 그 부위 그림만 바꿔 끼운다. 부위 경계는 정점마다 웨이트가 가장 센 뼈로 정해지고, 칠하기로 바꾼다.
 
 const MODEL_FILTER := "*.glb, *.gltf, *.tscn, *.scn ; 뼈대에 붙인 옷 모델"
 const RAW_FILTER := "*.glb, *.gltf ; AI 원본(Tripo 등)"
@@ -22,11 +23,13 @@ const SETS_FILTER := "*.json ; 세트 목록(sets.json)"
 const OUTFIT_FILTER := "*.json ; 구운 복장(outfit.json)"
 const BLENDER_DEFAULT := "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe"
 const BLENDER_SETTING := "dot_rigger/blender_path"
+const META_SECTION := "dot_rigger_outfit"
 const BIND_SCRIPT := "res://pipeline/blender/bind_to_skeleton.py"
 const WEIGHT_BASE_DEFAULT := "res://source3d/UAL1_humanoid.glb"
 const PV_DEBOUNCE := 0.5
-const SLOT_KEYS := ["top", "bottom", "shoes", ""]
+const SLOT_KEYS := ["top", "bottom", ""]
 const ERASE := ""                  # 칠할 부위 "" = 지우개(웨이트대로)
+const CUTS_KEY := "__cuts__"        # 되돌리기 기록에서 "자르기 목록 전체(바뀌기 전)"
 const PART_COLORS := {
 	"Hips": Color(0.86, 0.74, 0.2), "Torso": Color(0.92, 0.33, 0.28), "Head": Color(0.98, 0.84, 0.66),
 	"L_UpperArm": Color(0.25, 0.55, 0.98), "L_Forearm": Color(0.2, 0.82, 0.86), "L_Hand": Color(0.65, 0.92, 1.0),
@@ -35,7 +38,63 @@ const PART_COLORS := {
 	"R_Thigh": Color(0.96, 0.52, 0.16), "R_Calf": Color(0.98, 0.7, 0.34), "R_Foot": Color(1.0, 0.86, 0.56),
 }
 
-var baker: DRBaker
+
+## 칠할 대상 하나(옷 모델 · 기본 몸) — 모델 · 칠하기 · 표시 · 되돌리기를 따로 갖는다
+class PaintTarget:
+	extends RefCounted
+	var kind := ""                     # "outfit" · "base"
+	var baker: DRBaker
+	var ob: DROutfitBaker
+	var scene_path := ""
+	var ov: DRPartOverrides
+	var pos := PackedVector3Array()    # 정점(바인드 = T-포즈, 서피스 이어 붙임)
+	var nrm := PackedVector3Array()
+	var uv := PackedVector2Array()
+	var auto := PackedStringArray()    # 웨이트대로의 파트
+	var keys: Array = []               # 정점 → DRPartOverrides 키
+	var tri := PackedInt32Array()      # 삼각형 → 정점 번호 3개
+	var tri_a := PackedVector3Array()  # 고르기(광선)용
+	var tri_e1 := PackedVector3Array()
+	var tri_e2 := PackedVector3Array()
+	var tex: Texture2D
+	var undo: Array = []
+	var resplit_dirty := false
+
+	## 정점마다 지금 부위(칠한 것 우선)
+	func part_of(i: int) -> String:
+		var p := String(ov.map.get(keys[i], "")) if ov != null else ""
+		if p == "":
+			p = auto[i]
+		if ov != null and not ov.cuts.is_empty():
+			p = ov.cut_part(pos[i], p)
+		return p
+
+	func painted(i: int) -> bool:
+		return ov != null and ov.map.has(keys[i])
+
+
+## 2D 화면 위에 그리는 직선(직선 나누기 도구)
+class LineOverlay:
+	extends Control
+	var a := Vector2.ZERO
+	var b := Vector2.ZERO
+	var on := false
+	var rect := false
+
+	func _draw() -> void:
+		if not on:
+			return
+		if rect:
+			var r := Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), (b - a).abs())
+			draw_rect(r, Color(1.0, 0.85, 0.2, 0.12), true)
+			draw_rect(r, Color(1.0, 0.85, 0.2), false, 2.0)
+			return
+		draw_line(a, b, Color(1.0, 0.85, 0.2), 2.0, true)
+		draw_circle(a, 4.0, Color(1.0, 0.85, 0.2))
+		draw_circle(b, 4.0, Color(1.0, 0.85, 0.2))
+
+
+var baker: DRBaker                      # 옷 모델
 var ob: DROutfitBaker
 var _scene_path := ""
 var _loaded := false
@@ -43,29 +102,28 @@ var _busy := false
 var _filling := false
 var _pv_dirty := false
 var _pv_timer := 0.0
-var _resplit_dirty := false
-var _resplit_timer := 0.0
-var _outfit: DROutfit           # 미리보기용(메모리)
+var _outfit: DROutfit                   # 미리보기용 복장(메모리)
 var _baked: Dictionary = {}
 var _restore_slots: Dictionary = {}
+var _auto_loaded := false
 
-# 칠하기 데이터
-var _ov: DRPartOverrides
-var _pm_pos := PackedVector3Array()     # 표시 메시 정점(바인드 자세 · 모든 서피스 이어 붙임)
-var _pm_nrm := PackedVector3Array()
-var _pm_auto := PackedStringArray()     # 웨이트대로의 파트
-var _pm_surf: Array = []                # [{arrays, start, count, material}]
-var _tri_a := PackedVector3Array()      # 고르기(광선)용 삼각형
-var _tri_e1 := PackedVector3Array()
-var _tri_e2 := PackedVector3Array()
-var _pm_mesh: ArrayMesh
+var _t_outfit: PaintTarget
+var _t_base: PaintTarget
+var _target: PaintTarget                # 지금 칠하는 대상
+var _base_outfit: DROutfit              # 기본 몸을 칠한 뒤 다시 자른 그림(미리보기) — 세트에 넣으면 null
+var _base_baked: Dictionary = {}
+var _base_dirty := false                # 기본 몸 칠한 것이 아직 세트에 안 들어감
+var _base_pv_dirty := false
+
+var _tool := "line"                     # line(직선 자르기) · rect(사각형) · brush(붓)
 var _paint_part := "Torso"
 var _painting := false
-var _stroke: Dictionary = {}            # 이번 붓질에서 바뀐 키 -> 바뀌기 전 파트("" = 웨이트대로)
-var _undo: Array = []
+var _stroke: Dictionary = {}            # 이번 붓질: 대상(PaintTarget) -> {바뀐 키: 바뀌기 전 파트("" = 웨이트대로)}
+var _undo: Array = []                   # 끝난 붓질 · 선들(_stroke 와 같은 모양) — 되돌리기
+var _target_kind := "both"              # 칠할 대상 단추: both · outfit · base
+var _paint_both := false                # 옷 모델에 칠하는 것을 기본 몸에도 같이
 var _last_pick_px := Vector2(-999, -999)
-var _brush_hit := false
-var _brush_pos := Vector3.ZERO
+var _line_on := false
 
 # 1
 var _preset_edit: LineEdit
@@ -87,13 +145,27 @@ var _bind_btn: Button
 var _bind_status: Label
 var _bind_thread: Thread
 # 3 칠하기
+var _tgt_btns: Dictionary = {}          # "outfit" · "base" -> Button
+var _tool_btns: Dictionary = {}         # "brush" · "line" -> Button
 var _part_btns: Dictionary = {}         # 파트(지우개 "") -> Button
 var _brush_spin: SpinBox
 var _front_only: CheckBox
 var _undo_btn: Button
 var _clear_btn: Button
 var _paint_status: Label
-# 4 슬롯
+# 3 관절 경계
+var _joint_opt: OptionButton
+var _joint_on: CheckBox
+var _joint_off: HSlider
+var _joint_tilt: HSlider
+var _joints: Dictionary = {}            # 자식 부위 -> {key, from, to, label, c, d, h}
+var _joint_sel := ""
+var _joint_active := false              # 슬라이더를 움직이는 중(아직 되돌리기 · 저장 전)
+var _joint_snap: Dictionary = {}        # 대상 -> 움직이기 전 자르기 목록
+var _joint_idle := 0.0
+var _joint_mi: MeshInstance3D
+var _disp_dirty := false
+# 5 슬롯
 var _slot_grid: GridContainer
 var _slot_opts: Dictionary = {}         # 파트 -> OptionButton
 # 바닥
@@ -115,6 +187,8 @@ var _pv_msg: Label
 var _view_mode: OptionButton
 var _vp3: SubViewport
 var _pv3: TextureRect
+var _line_ov: LineOverlay
+var _hud3: Label
 var _cam3: Camera3D
 var _pm_mi: MeshInstance3D
 var _brush_mi: MeshInstance3D
@@ -130,13 +204,14 @@ var _drag_from := Vector2.ZERO
 
 
 func _init() -> void:
-	title = "Dot Rigger — 복장 굽기 (옷 갈아입히기)"
-	auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	size = Vector2i(1360, 820)
-	min_size = Vector2i(1100, 660)
-	exclusive = false
-	close_requested.connect(func(): hide())
+	page_title = "복장 굽기 (옷 갈아입히기)"
 	_build_ui()
+	visibility_changed.connect(_on_shown)
+
+
+func _ready() -> void:
+	_restore_fields()
+	_on_shown.call_deferred()
 
 
 func _notification(what: int) -> void:
@@ -144,6 +219,68 @@ func _notification(what: int) -> void:
 		_teardown()
 		if _bind_thread != null and _bind_thread.is_started():
 			_bind_thread.wait_to_finish()
+
+
+## 창이 처음 뜨면 지난 값으로 바로 불러온다(불러오기 버튼을 또 누르지 않게)
+func _on_shown() -> void:
+	if not is_visible_in_tree() or _loaded or _busy:
+		return
+	if _ctx_stale:
+		_ctx_stale = false
+	elif _auto_loaded:
+		return
+	_auto_loaded = true
+	var m := _model_edit.text.strip_edges()
+	if m != "" and ResourceLoader.exists(m) and _preset_edit.text.strip_edges() != "":
+		_on_load.call_deferred()
+
+
+# ---------------------------------------------------------------- 공통 설정 · 지난 값 기억
+
+## 창의 공통 설정(프리셋 · 세트 목록)을 받는다. 이미 불러온 상태에서 바뀌면(세트를 다시 구웠을 때 포함) 이 탭이 보일 때 다시 불러온다.
+## 칠한 것은 파일(<모델>.parts.json)에, 슬롯은 칸에 남아 있어 다시 불러와도 그대로다.
+var _ctx_stale := false
+
+func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
+	if hosted:
+		_preset_edit.get_parent().visible = false
+		_sets_edit.get_parent().visible = false
+	var dirty := changed.has("rebaked")
+	var p := String(ctx.get("preset", ""))
+	if p != "" and p != _preset_edit.text:
+		_preset_edit.text = p
+		dirty = true
+	var s := String(ctx.get("sets", ""))
+	if s != "" and s != _sets_edit.text:
+		_sets_edit.text = s
+		dirty = true
+	if dirty and _loaded:
+		_ctx_stale = true
+	elif dirty and not _loaded and is_visible_in_tree():
+		_auto_loaded = false
+		_on_shown.call_deferred()
+
+
+
+func _restore_fields() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var es := EditorInterface.get_editor_settings()
+	for pair in [["preset", _preset_edit], ["sets", _sets_edit], ["model", _model_edit], ["id", _id_edit], ["out", _out_edit],
+			["raw", _raw_edit], ["wbase", _wbase_edit]]:
+		# 기본값을 꼭 준다 — null 을 주면 값이 없을 때 에디터가 오류를 낸다(10-06: ③ 탭을 열 때 빨간 오류 7줄)
+		var v := String(es.get_project_metadata(META_SECTION, String(pair[0]), ""))
+		if v != "":
+			(pair[1] as LineEdit).text = v
+
+
+func _remember_fields() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var es := EditorInterface.get_editor_settings()
+	for pair in [["preset", _preset_edit], ["sets", _sets_edit], ["model", _model_edit], ["id", _id_edit], ["out", _out_edit],
+			["raw", _raw_edit], ["wbase", _wbase_edit]]:
+		es.set_project_metadata(META_SECTION, String(pair[0]), (pair[1] as LineEdit).text)
 
 
 # ---------------------------------------------------------------- UI 구성
@@ -166,6 +303,7 @@ func _build_ui() -> void:
 	scroll.add_child(col)
 	_build_section_source(col)
 	_build_section_bind(col)
+	_build_section_joints(col)
 	_build_section_paint(col)
 	_build_section_slots(col)
 	_build_footer(left)
@@ -231,14 +369,38 @@ func _check(parent: Control, text: String, on: bool, tip: String) -> CheckBox:
 	return c
 
 
+## 한 줄짜리 토글 단추 묶음(하나만 눌림)
+func _toggle_row(parent: Control, label: String, items: Array, on_pick: Callable) -> Dictionary:
+	var row := HBoxContainer.new()
+	var l := Label.new()
+	l.text = label
+	l.custom_minimum_size = Vector2(70, 0)
+	row.add_child(l)
+	var group := ButtonGroup.new()
+	var out := {}
+	for it in items:
+		var b := Button.new()
+		b.text = String(it[1])
+		b.toggle_mode = true
+		b.button_group = group
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_tip(b, String(it[2]))
+		var key: String = it[0]
+		b.pressed.connect(func(): on_pick.call(key))
+		row.add_child(b)
+		out[key] = b
+	parent.add_child(row)
+	return out
+
+
 func _build_section_source(col: Control) -> void:
 	var s := _section(col, "1. 기본 몸 · 세트 · 옷 모델")
-	_hint(s, "기본 몸(민소매)으로 구운 세트에 옷을 입힌다. 옷 모델은 같은 뼈대에 붙인 것(2번에서 만들거나 이미 붙인 .glb). `불러오기` 하면 오른쪽에 입힌 모습과 3D 부위 색이 나온다.")
-	_preset_edit = _path_row(s, "기본 몸 프리셋", "메인 창에서 기본 몸 세트를 구울 때 쓴 프리셋(.tres) — 도트화 값 · 추가 동작 폴더를 같게 맞추려고 읽는다(모델은 옷 모델로 바꿔 굽는다).", _on_browse_preset)
+	_hint(s, "기본 몸(민소매)으로 구운 세트에 옷을 입힌다. 옷 모델 = 같은 뼈대에 붙인 옷 입은 사람(.glb). 한 번 불러오면 다음에 창을 열 때 자동으로 불러온다.")
+	_preset_edit = _path_row(s, "기본 몸 프리셋", "메인 창에서 기본 몸 세트를 구울 때 쓴 프리셋(.tres) — 기본 몸 모델 · 도트화 값 · 추가 동작 폴더를 여기서 읽는다.", _on_browse_preset)
 	_preset_edit.text = _default_preset()
 	_sets_edit = _path_row(s, "세트 목록", "기본 몸으로 구운 sets.json. 세트마다 같은 카메라 · 같은 레스트 자세로 옷이 구워진다.", _on_browse_sets)
 	_sets_edit.text = "res://puppet/sets.json"
-	_model_edit = _path_row(s, "옷 모델", "기본 몸과 같은 뼈대에 붙인 옷 입은 모델(.glb). 머리 · 손은 굽지 않고 기본 몸 것을 쓴다.", _on_browse_model)
+	_model_edit = _path_row(s, "옷 모델", "기본 몸과 같은 뼈대에 붙인 옷 입은 모델(.glb). 기본 몸 자체를 칠하려면 여기 말고 3번의 [기본 몸] 단추.", _on_browse_model)
 	var row := HBoxContainer.new()
 	var l := Label.new()
 	l.text = "복장 이름"
@@ -267,7 +429,7 @@ func _build_section_source(col: Control) -> void:
 
 func _build_section_bind(col: Control) -> void:
 	var s := _section(col, "2. 옷 모델 새로 만들기 (AI 원본 → 뼈대에 붙이기)", true)
-	_hint(s, "Tripo 등으로 뽑은 옷 입은 사람(.glb, 통짜)을 기본 뼈대에 붙인다 — 방향 맞추기 · 키 맞추기 · 웨이트 옮기기 · 손가락/엄지 맞추기 · 관절 경계 정리. Blender 를 뒤에서 돌리며 수십 초 걸린다. 결과는 res://source3d/characters/<복장 이름>/<복장 이름>.glb 이고 끝나면 1번 옷 모델로 들어가 불러온다.")
+	_hint(s, "Tripo 등으로 뽑은 옷 입은 사람(.glb, 통짜)을 기본 뼈대에 붙인다 — 방향 · 키 · 웨이트 · 손가락/엄지 · 관절 경계. Blender 를 뒤에서 돌리며 수십 초 걸린다. 결과 res://source3d/characters/<복장 이름>/<복장 이름>.glb 가 1번 옷 모델로 들어가 바로 불러온다.")
 	_raw_edit = _path_row(s, "AI 원본", "AI 가 뽑은 .glb — 보통 pipeline/comfy/ 아래(이 폴더는 Godot 가 무시하므로 디스크 경로로 고른다).", _on_browse_raw)
 	_wbase_edit = _path_row(s, "웨이트 원본 몸", "웨이트(어느 살이 어느 뼈를 따라가나)를 가져올 몸 — 기본은 뼈대의 주인인 UAL1 마네킹.", _on_browse_wbase)
 	_wbase_edit.text = WEIGHT_BASE_DEFAULT
@@ -286,7 +448,7 @@ func _build_section_bind(col: Control) -> void:
 	s.add_child(row)
 	_hand_cb = _check(s, "손가락 맞춤", true, "AI 손이 마네킹 손과 크기 · 간격이 달라 손가락 웨이트가 한 칸씩 밀리는 것을 막는다.")
 	_thumb_cb = _check(s, "엄지 맞춤", true, "AI 엄지를 엄지뼈 방향으로 돌려 놓고 웨이트를 옮긴다 — 주먹 쥘 때 엄지가 튀어나오지 않게.")
-	_partfix_cb = _check(s, "관절 경계 정리", true, "어깨 · 팔꿈치 · 고관절 · 무릎에 평면을 세워 조각 경계를 관절에 맞춘다(겨드랑이 살이 팔 조각에 붙는 것 등). 더 고칠 곳은 3번 칠하기로.")
+	_partfix_cb = _check(s, "관절 경계 정리", true, "어깨 · 팔꿈치 · 고관절 · 무릎에 평면을 세워 조각 경계를 관절에 맞춘다. 더 고칠 곳은 3번 칠하기로.")
 	_blender_edit = _path_row(s, "Blender", "blender.exe 경로", _on_browse_blender)
 	_blender_edit.text = _blender_path()
 	_blender_edit.text_changed.connect(func(t):
@@ -299,9 +461,301 @@ func _build_section_bind(col: Control) -> void:
 	_bind_status = _hint(s, "")
 
 
+func _build_section_joints(col: Control) -> void:
+	var s := _section(col, "3. 부위 경계 (관절)")
+	_hint(s, "옷과 몸이 이어지는 자리(목 · 손목 …)의 경계를 곧게 정한다. 관절을 고르고 [곧게]를 켠 뒤 위치 · 기울기를 끌면 3D 의 노란 판이 경계, 2D 가 바로 바뀐다. 그 관절의 두 부위만 자르고(다른 부위는 안 건드림) 옷 모델 · 기본 몸에 똑같이 들어간다 — 기본 몸에 정한 경계는 다른 옷을 불러와도 그대로 따라간다.")
+	var row := HBoxContainer.new()
+	var l := Label.new()
+	l.text = "관절"
+	l.custom_minimum_size = Vector2(70, 0)
+	row.add_child(l)
+	_joint_opt = OptionButton.new()
+	_joint_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_joint_opt.item_selected.connect(func(_i): _on_joint_selected())
+	row.add_child(_joint_opt)
+	_joint_on = CheckBox.new()
+	_joint_on.text = "곧게"
+	_tip(_joint_on, "이 관절의 경계를 곧은 평면으로 자른다(끄면 뼈 웨이트대로 — 들쭉날쭉)")
+	_joint_on.toggled.connect(func(_v): _on_joint_edit(true))
+	row.add_child(_joint_on)
+	s.add_child(row)
+	_joint_off = _joint_slider(s, "위치", -12.0, 12.0, 0.5, "cm", "관절에서 뼈 방향으로 경계를 옮긴다(+ = 자식 쪽: 목이면 위, 손목이면 손 쪽)")
+	_joint_tilt = _joint_slider(s, "기울기", -60.0, 60.0, 1.0, "°", "경계를 앞뒤로 기울인다(목: 깃처럼 앞이 낮게)")
+	var brow := HBoxContainer.new()
+	var b1 := Button.new()
+	b1.text = "목 · 손목 곧게"
+	_tip(b1, "자주 쓰는 경계(목 · 두 손목)를 한 번에 켠다 — 목 +6 cm(깃 위), 손목 −3 cm(소매 끝)")
+	b1.pressed.connect(func(): _enable_joints(["Head", "L_Hand", "R_Hand"]))
+	brow.add_child(b1)
+	var b2 := Button.new()
+	b2.text = "모든 관절 곧게"
+	_tip(b2, "켜지 않은 모든 관절 경계를 시작 위치로 켠다(목 +6 cm, 손목 −3 cm, 나머지 0). 엉덩이는 없음 — 고관절은 평면으로 자르면 조각이 찢긴다")
+	b2.pressed.connect(func(): _enable_joints(DRMeshCutter.JOINT_ORDER))
+	brow.add_child(b2)
+	s.add_child(brow)
+	var urow := HBoxContainer.new()
+	_undo_btn = Button.new()
+	_undo_btn.text = "되돌리기 (Ctrl+Z)"
+	_undo_btn.pressed.connect(_on_undo)
+	urow.add_child(_undo_btn)
+	_clear_btn = Button.new()
+	_clear_btn.text = "경계 · 칠한 것 모두 지우기"
+	_tip(_clear_btn, "칠할 대상(둘 다면 두 모델)의 관절 경계 · 자르기 · 붓 칠한 것을 모두 지운다(되돌리기 가능)")
+	_clear_btn.pressed.connect(_on_clear_paint)
+	urow.add_child(_clear_btn)
+	s.add_child(urow)
+	_paint_status = _hint(s, "")
+
+
+func _joint_slider(parent: Control, label: String, lo: float, hi: float, step: float, unit: String, tip: String) -> HSlider:
+	var row := HBoxContainer.new()
+	var l := Label.new()
+	l.text = label
+	l.custom_minimum_size = Vector2(70, 0)
+	_tip(l, tip)
+	row.add_child(l)
+	var sl := HSlider.new()
+	sl.min_value = lo
+	sl.max_value = hi
+	sl.step = step
+	sl.value = 0.0
+	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_tip(sl, tip)
+	row.add_child(sl)
+	var v := Label.new()
+	v.custom_minimum_size = Vector2(60, 0)
+	v.text = "0 " + unit
+	row.add_child(v)
+	var fmt := "%+.1f " if step < 1.0 else "%+.0f "
+	sl.value_changed.connect(func(x):
+		v.text = fmt % x + unit
+		_on_joint_edit(false))
+	sl.drag_ended.connect(func(_c): _joint_commit())
+	parent.add_child(row)
+	return sl
+
+
+## 관절 목록을 채운다(기본 몸 기준 — 없으면 옷 모델). 상자 크기는 두 모델의 자식 부위 정점으로
+func _fill_joints() -> void:
+	_joints = {}
+	var src := _t_base if _t_base != null else _t_outfit
+	if src == null:
+		return
+	for j in DRMeshCutter.joint_list(src.baker.split, src.baker.source_mesh_instance, src.baker.skeleton):
+		var pts := PackedVector3Array()
+		for tt in [_t_outfit, _t_base]:
+			var t := tt as PaintTarget
+			if t == null:
+				continue
+			for i in t.pos.size():
+				if t.auto[i] == String(j["to"]):
+					pts.append(t.pos[i])
+		j["h"] = DRMeshCutter.joint_box(pts, j["c"], j["d"])
+		_joints[String(j["key"])] = j
+	var keep := _joint_sel
+	_filling = true
+	_joint_opt.clear()
+	for k in DRMeshCutter.JOINT_ORDER:
+		if _joints.has(k):
+			_joint_opt.add_item(String((_joints[k] as Dictionary)["label"]))
+			_joint_opt.set_item_metadata(_joint_opt.item_count - 1, k)
+	_filling = false
+	_refresh_joint_labels()
+	var idx := 0
+	for i in _joint_opt.item_count:
+		if String(_joint_opt.get_item_metadata(i)) == keep:
+			idx = i
+	if _joint_opt.item_count > 0:
+		_joint_opt.select(idx)
+		_on_joint_selected(false)
+
+
+func _refresh_joint_labels() -> void:
+	var src := _t_base if _t_base != null else _t_outfit
+	for i in _joint_opt.item_count:
+		var k := String(_joint_opt.get_item_metadata(i))
+		var cut := _joint_cut(src, k)
+		var lab := String((_joints[k] as Dictionary)["label"])
+		if cut.is_empty():
+			_joint_opt.set_item_text(i, lab)
+		else:
+			_joint_opt.set_item_text(i, "✓ %s  (%+.1f cm, %+.0f°)" % [lab, float(cut.get("offset", 0.0)) * 100.0, float(cut.get("tilt", 0.0))])
+
+
+func _joint_cut(t: PaintTarget, key: String) -> Dictionary:
+	if t == null or t.ov == null:
+		return {}
+	for c in t.ov.cuts:
+		if String((c as Dictionary).get("kind", "")) == "joint" and String((c as Dictionary).get("joint", "")) == key:
+			return c
+	return {}
+
+
+## 관절을 고르면: 슬라이더를 그 경계 값으로, 3D 카메라를 관절로, 노란 판 표시
+func _on_joint_selected(focus: bool = true) -> void:
+	if _filling or _joint_opt.selected < 0:
+		return
+	_joint_commit()
+	_joint_sel = String(_joint_opt.get_item_metadata(_joint_opt.selected))
+	var cut := _joint_cut(_t_base if _t_base != null else _t_outfit, _joint_sel)
+	_filling = true
+	_joint_on.button_pressed = not cut.is_empty()
+	_joint_off.value = float(cut.get("offset", 0.0)) * 100.0
+	_joint_tilt.value = float(cut.get("tilt", 0.0))
+	_filling = false
+	if focus and _joints.has(_joint_sel):
+		_cam_target = (_joints[_joint_sel] as Dictionary)["c"]
+		_cam_dist = 0.75
+		_update_cam()
+	_update_joint_plane()
+
+
+## 슬라이더 · 곧게 체크 → 두 모델의 관절 경계를 바꾼다. 움직이는 동안은 3D 만, 끝나면(_joint_commit) 저장 · 2D
+func _on_joint_edit(commit_now: bool) -> void:
+	if _filling or not _loaded or _joint_sel == "" or not _joints.has(_joint_sel):
+		return
+	if not _joint_active:
+		_joint_active = true
+		_joint_snap = {}
+		for tt in [_t_outfit, _t_base]:
+			if tt != null and (tt as PaintTarget).ov != null:
+				_joint_snap[tt] = (tt as PaintTarget).ov.cuts.duplicate(true)
+	if not commit_now and not _joint_on.button_pressed:
+		_filling = true
+		_joint_on.button_pressed = true     # 위치 · 기울기를 움직이면 켜진다
+		_filling = false
+	elif commit_now and _joint_on.button_pressed and _joint_cut(_t_base if _t_base != null else _t_outfit, _joint_sel).is_empty() 			and _joint_off.value == 0.0 and _joint_tilt.value == 0.0:
+		_filling = true                     # 처음 켤 때는 그 관절의 시작 위치(목 +6 cm)
+		_joint_off.value = float(DRMeshCutter.JOINT_DEFAULT_OFFSET.get(_joint_sel, 0.0)) * 100.0
+		_filling = false
+	_set_joint_on_targets(_joint_sel, _joint_on.button_pressed, _joint_off.value * 0.01, _joint_tilt.value)
+	_update_joint_plane()
+	_disp_dirty = true
+	_joint_idle = 0.0 if commit_now else 0.8
+
+
+func _set_joint_on_targets(key: String, on: bool, offset: float, tilt: float) -> void:
+	var j: Dictionary = _joints[key]
+	var cut := {"kind": "joint", "joint": key, "from": j["from"], "to": j["to"],
+		"offset": snappedf(offset, 0.0001), "tilt": snappedf(tilt, 0.01), "h": snappedf(float(j["h"]), 0.0001),
+		"planes": DRMeshCutter.joint_planes(j["c"], j["d"], offset, tilt, float(j["h"]))}
+	for tt in [_t_outfit, _t_base]:
+		var t := tt as PaintTarget
+		if t == null or t.ov == null:
+			continue
+		var at := -1
+		var first_other := t.ov.cuts.size()
+		for i in t.ov.cuts.size():
+			var c := t.ov.cuts[i] as Dictionary
+			if String(c.get("kind", "")) == "joint":
+				if String(c.get("joint", "")) == key:
+					at = i
+			elif first_other == t.ov.cuts.size():
+				first_other = i
+		if at >= 0:
+			if on:
+				t.ov.cuts[at] = cut.duplicate(true)
+			else:
+				t.ov.cuts.remove_at(at)
+		elif on:
+			t.ov.cuts.insert(first_other, cut.duplicate(true))   # 관절 경계는 직접 자르기보다 앞(먼저 적용)
+
+
+## 관절 경계 바꾼 것을 되돌리기 한 단계로 · 저장 · 다시 자르기 · 2D
+func _joint_commit() -> void:
+	if not _joint_active:
+		return
+	_joint_active = false
+	var entry := {}
+	for t in _joint_snap.keys():
+		if (t as PaintTarget).ov.cuts != _joint_snap[t]:
+			entry[t] = {CUTS_KEY: _joint_snap[t]}
+	_joint_snap = {}
+	if entry.is_empty():
+		return
+	_undo.append(entry)
+	for t in entry.keys():
+		_after_paint_change(t as PaintTarget)
+	_refresh_joint_labels()
+	_update_paint_status()
+
+
+func _enable_joints(keys: Array) -> void:
+	if not _loaded:
+		return
+	_joint_commit()
+	_joint_active = true
+	_joint_snap = {}
+	for tt in [_t_outfit, _t_base]:
+		if tt != null and (tt as PaintTarget).ov != null:
+			_joint_snap[tt] = (tt as PaintTarget).ov.cuts.duplicate(true)
+	var src := _t_base if _t_base != null else _t_outfit
+	for k in keys:
+		if _joints.has(k) and _joint_cut(src, k).is_empty():
+			_set_joint_on_targets(k, true, float(DRMeshCutter.JOINT_DEFAULT_OFFSET.get(k, 0.0)), 0.0)
+	_joint_commit()
+	_on_joint_selected(false)
+	_refresh_display()
+
+
+## 기본 몸의 관절 경계를 옷 모델에도(캐릭터 하나에 경계 하나 — 옷마다 다시 정하지 않게). 옮긴 관절 수(바뀐 게 없으면 0)
+func _sync_joints_from_base() -> int:
+	if _t_base == null or _t_outfit == null or _t_base.ov == null or _t_outfit.ov == null:
+		return 0
+	var want: Array = []
+	for c in _t_base.ov.cuts:
+		if String((c as Dictionary).get("kind", "")) == "joint":
+			want.append((c as Dictionary).duplicate(true))
+	var have: Array = []
+	var rest: Array = []
+	for c in _t_outfit.ov.cuts:
+		if String((c as Dictionary).get("kind", "")) == "joint":
+			have.append(c)
+		else:
+			rest.append(c)
+	if have == want:
+		return 0
+	_t_outfit.ov.cuts = want + rest
+	_after_paint_change(_t_outfit)
+	return maxi(want.size(), 1)
+
+
+## 3D 의 노란 판 = 고른 관절의 경계(꺼져 있으면 흐리게)
+func _update_joint_plane() -> void:
+	if _joint_mi == null:
+		return
+	if not _loaded or _joint_sel == "" or not _joints.has(_joint_sel):
+		_joint_mi.visible = false
+		return
+	var j: Dictionary = _joints[_joint_sel]
+	var pl: Array = DRMeshCutter.joint_planes(j["c"], j["d"], _joint_off.value * 0.01, _joint_tilt.value, float(j["h"]))
+	var n := Vector3(pl[0][0], pl[0][1], pl[0][2])
+	var a := Vector3(pl[1][0], pl[1][1], pl[1][2])
+	var y := n.cross(a).normalized()
+	var x := y.cross(n).normalized()
+	var h := float(j["h"])
+	_joint_mi.transform = Transform3D(Basis(x * h * 2.0, y * h * 2.0, n), (j["c"] as Vector3) + (j["d"] as Vector3) * _joint_off.value * 0.01)
+	var m := _joint_mi.material_override as StandardMaterial3D
+	m.albedo_color = Color(1.0, 0.85, 0.2, 0.45 if _joint_on.button_pressed else 0.15)
+	_joint_mi.visible = true
+
+
 func _build_section_paint(col: Control) -> void:
-	var s := _section(col, "3. 부위 칠하기")
-	_hint(s, "오른쪽 3D 에서 왼쪽 버튼으로 칠한다(붓 = 공 모양 범위). 오른쪽 버튼 끌기 = 돌려 보기 · 가운데 끌기 = 옮기기 · 휠 = 확대 · F = 맞춤 · Ctrl+Z = 되돌리기. 칠한 정점은 웨이트 대신 칠한 부위의 조각으로 잘린다(3D 움직임은 그대로). 예: 상의 자락을 Torso 로 칠하면 상의와 같이 입고 벗는다.")
+	var s := _section(col, "4. 직접 고치기 (고급)", true)
+	_hint(s, "관절 경계로 안 되는 곳만 — 예: 상의 자락을 Torso 로. 오른쪽 3D 의 색 = 실제로 잘리는 조각. 직선 = 선이 지나는 두 부위의 경계만, 사각형 = 화면에 보이는 부위만, 붓 = 보이는 면만(기본) — 뒤에 숨은 다른 부위는 안 건드린다.")
+	_tgt_btns = _toggle_row(s, "칠할 대상", [
+		["both", "둘 다 (기본)", "옷 모델에 칠하는 붓질 · 선이 기본 몸(민소매)의 같은 자리에도 같이 들어간다. 머리 · 손처럼 기본 몸 그림을 그대로 쓰는 조각은 옷 그림 위에 그려지므로, 경계를 옷에만 옮기면 화면이 안 바뀐다(목 · 손목) — 그래서 둘을 같이 자른다"],
+		["outfit", "옷 모델만", "옷 입은 모델의 조각 경계만 — 예: 상의 자락을 Torso 로"],
+		["base", "기본 몸만", "3D 에 기본 몸(민소매)을 띄워 그 조각 경계만 고친다. 굽기 때 기본 몸 세트에 자동으로 들어간다"]],
+		func(k): _switch_target(k))
+	(_tgt_btns["both"] as Button).button_pressed = true
+	_tool_btns = _toggle_row(s, "도구", [
+		["line", "직선 자르기 (L)", "3D 위에 선을 긋는다 — 선이 지나는 부위를 그 선 그대로 곧게 잘라, 고른 부위 쪽을 고른 부위로(앞뒤 함께). 목선 · 손목선 · 허리선. Shift = 수평 · 수직 · 45°"],
+		["rect", "사각형 (R)", "3D 위에 사각형을 끈다 — 사각형 안(앞뒤 함께)이 고른 부위로, 가장자리가 사각형 그대로 곧다"],
+		["brush", "붓 (B)", "왼쪽 버튼으로 문지른다 — 붓 범위 안의 정점이 고른 부위로. 정점 단위라 경계가 삼각형을 따라 들쭉날쭉 — 곧은 경계는 직선 · 사각형으로"]],
+		func(k): _set_tool(k))
+	(_tool_btns["line"] as Button).button_pressed = true
 	var grid := GridContainer.new()
 	grid.columns = 3
 	s.add_child(grid)
@@ -322,7 +776,9 @@ func _build_section_paint(col: Control) -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_tip(b, "이 부위로 칠한다" if pn != ERASE else "칠한 것을 지운다(그 정점은 다시 웨이트대로)")
 		var part_name: String = pn
-		b.pressed.connect(func(): _paint_part = part_name)
+		b.pressed.connect(func():
+			_paint_part = part_name
+			_update_hud())
 		cell.add_child(b)
 		grid.add_child(cell)
 		_part_btns[pn] = b
@@ -335,30 +791,20 @@ func _build_section_paint(col: Control) -> void:
 	_brush_spin.min_value = 0.5
 	_brush_spin.max_value = 40.0
 	_brush_spin.step = 0.5
-	_brush_spin.value = 4.0
+	_brush_spin.value = 3.0
 	_brush_spin.value_changed.connect(func(_v): _update_brush())
 	row.add_child(_brush_spin)
 	_front_only = CheckBox.new()
 	_front_only.text = "보이는 면만"
-	_tip(_front_only, "카메라 쪽을 보는 정점만 칠한다(얇은 천의 뒤쪽까지 칠해지지 않게). 끄면 붓 범위 안을 모두.")
+	_front_only.button_pressed = true
+	_tip(_front_only, "붓: 카메라 쪽을 보는 정점만 칠한다(얇은 천의 뒤쪽까지 칠해지지 않게).")
 	row.add_child(_front_only)
 	s.add_child(row)
-	var brow := HBoxContainer.new()
-	_undo_btn = Button.new()
-	_undo_btn.text = "되돌리기 (Ctrl+Z)"
-	_undo_btn.pressed.connect(_on_undo)
-	brow.add_child(_undo_btn)
-	_clear_btn = Button.new()
-	_clear_btn.text = "칠한 것 모두 지우기"
-	_clear_btn.pressed.connect(_on_clear_paint)
-	brow.add_child(_clear_btn)
-	s.add_child(brow)
-	_paint_status = _hint(s, "")
 
 
 func _build_section_slots(col: Control) -> void:
-	var s := _section(col, "4. 슬롯 (어느 옷으로 쓸지)")
-	_hint(s, "파트마다 상의 · 하의 · 신발 · 안 씀. 게임에서 상의만 / 하의만 따로 입힐 때 이 묶음을 쓴다(시험장 O · P 키). 안 씀(머리 · 손)은 굽지 않고 기본 몸 그대로.")
+	var s := _section(col, "5. 슬롯 (상의 · 하의)")
+	_hint(s, "파트마다 상의 · 하의 · 안 씀. 게임에서 상의만 / 하의만 따로 입힐 때 이 묶음을 쓴다(시험장 O · P 키). 안 씀(머리 · 손)은 굽지 않고 기본 몸 그대로. 발은 하의.")
 	_slot_grid = GridContainer.new()
 	_slot_grid.columns = 4
 	s.add_child(_slot_grid)
@@ -386,9 +832,9 @@ func _build_footer(left: Control) -> void:
 	_out_edit = _path_row(foot, "출력 폴더", "여기 아래 <복장 이름>/ 에 세트별 파트 PNG 와 outfit.json 이 생긴다.", _on_browse_out)
 	_out_edit.text = "res://outfits"
 	_bake_btn = Button.new()
-	_bake_btn.text = "복장 굽기 (모든 자세)"
+	_bake_btn.text = "굽기 (모든 자세)"
 	_bake_btn.disabled = true
-	_tip(_bake_btn, "sets.json 의 모든 세트에 지금 칠하기 · 슬롯으로 굽고 파일로 남긴다. 게임: soldier.wear(DROutfit.load_json(\"…/outfit.json\"))")
+	_tip(_bake_btn, "기본 몸을 칠했으면 먼저 기본 몸 세트(sets.json 의 세트들)에 새 조각 그림을 넣고, 이어서 복장을 모든 세트에 굽는다. 게임: soldier.wear(DROutfit.load_json(\"…/outfit.json\"))")
 	_bake_btn.pressed.connect(_on_bake)
 	foot.add_child(_bake_btn)
 	_progress = ProgressBar.new()
@@ -421,7 +867,7 @@ func _build_preview2d(parent: Control) -> void:
 		if _soldier != null:
 			_soldier.speed_scale = 1.0 if on else 0.0)
 	bar.add_child(_pv_play)
-	for k in ["top", "bottom", "shoes"]:
+	for k in ["top", "bottom"]:
 		var c := CheckBox.new()
 		c.text = String(DROutfitBaker.SLOT_NAMES[k])
 		c.button_pressed = true
@@ -449,7 +895,7 @@ func _build_preview2d(parent: Control) -> void:
 	_pv2.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_pv2.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_pv2.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_tip(_pv2, "기본 몸으로 구운 퍼펫에 지금 칠하기 · 슬롯으로 임시로 구운 옷을 입힌 모습 — 게임에서 보이는 그대로.")
+	_tip(_pv2, "기본 몸 퍼펫에 지금 칠하기 · 슬롯으로 임시로 구운 옷을 입힌 모습 — 게임에서 보이는 그대로. 기본 몸을 칠한 것도 바로 보인다.")
 	panel.add_child(_pv2)
 	_vp2 = SubViewport.new()
 	_vp2.size = Vector2i(460, 620)
@@ -501,6 +947,16 @@ func _build_preview3d(parent: Control) -> void:
 		if _vp3 != null:
 			_vp3.size = Vector2i(maxi(64, int(_pv3.size.x)), maxi(64, int(_pv3.size.y))))
 	panel.add_child(_pv3)
+	_line_ov = LineOverlay.new()
+	_line_ov.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_line_ov.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pv3.add_child(_line_ov)
+	_hud3 = Label.new()
+	_hud3.position = Vector2(8, 6)
+	_hud3.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud3.add_theme_color_override("font_outline_color", Color.BLACK)
+	_hud3.add_theme_constant_override("outline_size", 4)
+	_pv3.add_child(_hud3)
 	_vp3 = SubViewport.new()
 	_vp3.size = Vector2i(460, 620)
 	_vp3.own_world_3d = true
@@ -539,6 +995,18 @@ func _build_preview3d(parent: Control) -> void:
 	_brush_mi.material_override = bm
 	_brush_mi.visible = false
 	_vp3.add_child(_brush_mi)
+	_joint_mi = MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1, 1)
+	_joint_mi.mesh = qm
+	var jm := StandardMaterial3D.new()
+	jm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	jm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	jm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	jm.albedo_color = Color(1.0, 0.85, 0.2, 0.45)
+	_joint_mi.material_override = jm
+	_joint_mi.visible = false
+	_vp3.add_child(_joint_mi)
 	_mat_part = StandardMaterial3D.new()
 	_mat_part.vertex_color_use_as_albedo = true
 	_mat_part.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -548,7 +1016,7 @@ func _build_preview3d(parent: Control) -> void:
 	_mat_mix.vertex_color_use_as_albedo = true
 	_mat_mix.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_pv3.texture = _vp3.get_texture()
-	_hint(box, "왼쪽 버튼 = 칠하기 · 오른쪽 끌기 = 돌리기 · 가운데 끌기 = 옮기기 · 휠 = 확대 · F = 맞춤 · Ctrl+Z = 되돌리기", 300.0)
+	_hint(box, "노란 판 = 고른 관절 경계 · 왼쪽 버튼 = (고급 도구) 선 긋기 · 사각형 · 붓 · 오른쪽 끌기 = 돌리기 · 가운데 끌기 = 옮기기 · 휠 = 확대 · F = 맞춤 · L 직선 · R 사각형 · B 붓 · Ctrl+Z 되돌리기", 300.0)
 
 
 # ---------------------------------------------------------------- 파일 고르기
@@ -595,8 +1063,7 @@ func _on_browse_sets() -> void:
 func _on_browse_model() -> void:
 	_file_dialog(MODEL_FILTER, "옷 모델 — Dot Rigger", false, func(p):
 		_model_edit.text = p
-		if _id_edit.text.strip_edges() == "":
-			_id_edit.text = p.get_file().get_basename().to_lower()
+		_id_edit.text = p.get_file().get_basename().to_lower()
 		_on_load())
 
 
@@ -604,7 +1071,7 @@ func _on_browse_raw() -> void:
 	_file_dialog(RAW_FILTER, "AI 원본(.glb) — Dot Rigger", false, func(p):
 		_raw_edit.text = p
 		if _id_edit.text.strip_edges() == "":
-			_id_edit.text = p.get_file().get_basename().to_lower().get_slice("_", 0) + "_" + p.get_file().get_basename().to_lower().get_slice("_", 1)
+			_id_edit.text = p.get_file().get_basename().to_lower()
 	, true, ProjectSettings.globalize_path("res://pipeline/comfy"))
 
 
@@ -647,7 +1114,7 @@ func _on_open_outfit() -> void:
 	pm.popup_hide.connect(func(): pm.queue_free.call_deferred())
 	add_child(pm)
 	var r := _open_btn.get_global_rect()
-	pm.popup(Rect2i(Vector2i(r.position + Vector2(0, r.size.y)) + position, Vector2i(int(r.size.x), 0)))
+	pm.popup(Rect2i(Vector2i(r.position + Vector2(0, r.size.y)) + window_origin(), Vector2i(int(r.size.x), 0)))
 
 
 ## outfit.json 의 옷 모델 · 세트 · 슬롯으로 다시 연다
@@ -671,7 +1138,7 @@ static func _default_preset() -> String:
 	if FileAccess.file_exists("res://human.tres"):
 		return "res://human.tres"
 	for f in DirAccess.get_files_at("res://"):
-		if String(f).ends_with("_preset.tres") or String(f).ends_with(".tres"):
+		if String(f).ends_with(".tres"):
 			var p := load("res://" + String(f))
 			if p is DRPreset:
 				return "res://" + String(f)
@@ -697,35 +1164,45 @@ func _fail(msg: String) -> void:
 
 
 func _teardown() -> void:
-	if baker != null:
-		baker.cleanup()
+	for t in [_t_outfit, _t_base]:
+		if t != null and (t as PaintTarget).baker != null:
+			(t as PaintTarget).baker.cleanup()
+	_t_outfit = null
+	_t_base = null
+	_target = null
 	baker = null
 	ob = null
 	if is_instance_valid(_soldier):
 		_soldier.queue_free()
 	_soldier = null
 	_outfit = null
+	_base_outfit = null
+	_base_baked = {}
+	_base_dirty = false
 	_baked = {}
 	_loaded = false
+	_undo.clear()
+	_stroke = {}
+	_paint_both = false
+	_joint_active = false
+	_joint_snap = {}
+	_joints = {}
+	if _joint_mi != null:
+		_joint_mi.visible = false
 	if _pm_mi != null:
 		_pm_mi.mesh = null
-	_undo.clear()
-	_stroke.clear()
 
 
-func _on_load() -> void:
-	if _busy:
-		return
-	_busy = true
-	_bake_btn.disabled = true
-	_load_status.text = "불러오는 중…"
+## 프리셋에서 굽기 설정(도트화 값 · 추가 동작 폴더 · 합성)을 읽는다. 기본 몸 모델 경로도 돌려준다
+func _opts_from_preset() -> Dictionary:
 	var opts := DRBaker.Options.new()
 	var preset_path := _preset_edit.text.strip_edges()
+	var base_model := ""
 	if preset_path != "":
 		var p := load(preset_path) as DRPreset
 		if p == null:
-			_fail("프리셋을 열 수 없습니다: %s" % preset_path)
-			return
+			return {"error": "프리셋을 열 수 없습니다: %s" % preset_path}
+		base_model = p.model_path
 		opts.extra_anim_dir = p.extra_anim_dir
 		opts.light_bands = p.light_bands
 		opts.ambient = p.ambient
@@ -734,48 +1211,91 @@ func _on_load() -> void:
 		opts.bleed_rings = p.bleed_rings
 		opts.composites = p.composites.duplicate(true)
 		opts.composite_upper_parts = p.composite_upper_parts
-	var mpath := _model_edit.text.strip_edges()
-	var scene := load(mpath) as PackedScene if mpath != "" and ResourceLoader.exists(mpath) else null
+	return {"opts": opts, "base_model": base_model}
+
+
+## 모델 하나로 칠할 대상 만들기(굽는 도구 · 세트 · 표시 데이터)
+func _make_target(kind: String, model_path: String, opts: DRBaker.Options) -> PaintTarget:
+	var scene := load(model_path) as PackedScene if model_path != "" and ResourceLoader.exists(model_path) else null
 	if scene == null:
-		_fail("옷 모델을 열 수 없습니다: %s (가져오기가 끝났는지 확인)" % mpath)
+		return null
+	var t := PaintTarget.new()
+	t.kind = kind
+	t.scene_path = model_path
+	t.baker = DRBaker.new()
+	if not t.baker.setup(self, scene, DRPartProfile.humanoid(), opts):
+		return null
+	await get_tree().process_frame
+	t.ob = DROutfitBaker.new()
+	t.ob.baker = t.baker
+	if not t.ob.setup(_sets_edit.text.strip_edges()):
+		t.baker.cleanup()
+		return null
+	if kind == "base":
+		for pn in DROutfitBaker.ALL_PARTS:     # 기본 몸은 파트 전부(머리 · 손 포함)를 다시 굽는다
+			t.ob.slots[pn] = "base"
+	t.ov = t.baker.part_overrides
+	_fill_target_mesh(t)
+	return t
+
+
+func _on_load() -> void:
+	if _busy:
+		return
+	_busy = true
+	_bake_btn.disabled = true
+	_load_status.text = "불러오는 중…"
+	var po := _opts_from_preset()
+	if po.has("error"):
+		_fail(String(po["error"]))
+		return
+	var mpath := _model_edit.text.strip_edges()
+	if mpath != "" and mpath == String(po["base_model"]):
+		_fail("옷 모델 칸에 기본 몸(%s)이 들어 있습니다 — 옷 입은 모델을 고르세요. 기본 몸을 칠하려면 불러온 뒤 3번의 [기본 몸] 단추." % mpath)
 		return
 	_teardown()
+	_t_outfit = await _make_target("outfit", mpath, po["opts"])
+	if _t_outfit == null:
+		_fail("옷 모델을 세울 수 없습니다: %s (가져오기가 끝났는지 · 뼈대에 붙인 모델인지 · sets.json 확인)" % mpath)
+		return
+	baker = _t_outfit.baker
+	ob = _t_outfit.ob
 	_scene_path = mpath
-	baker = DRBaker.new()
-	if not baker.setup(self, scene, DRPartProfile.humanoid(), opts):
-		_fail("옷 모델을 세울 수 없습니다(출력 창 참고 — 뼈대에 붙인 모델인지)")
-		baker = null
-		return
-	await get_tree().process_frame
-	ob = DROutfitBaker.new()
-	ob.baker = baker
-	if not ob.setup(_sets_edit.text.strip_edges()):
-		_fail("sets.json 에서 세트를 읽지 못했습니다: %s" % _sets_edit.text)
-		return
 	if _id_edit.text.strip_edges() == "":
 		_id_edit.text = mpath.get_file().get_basename().to_lower()
 	# 슬롯: 구운 복장을 연 경우 그때 것, 아니면 창의 칸
 	_filling = true
 	for pn in _slot_opts.keys():
-		var want: String = SLOT_KEYS[(_slot_opts[pn] as OptionButton).selected]
+		var want: String = SLOT_KEYS[maxi((_slot_opts[pn] as OptionButton).selected, 0)]
 		if not _restore_slots.is_empty():
 			want = String(_restore_slots.get(pn, ""))
+			if want == "shoes":
+				want = "bottom"
 		(_slot_opts[pn] as OptionButton).select(SLOT_KEYS.find(want))
 		ob.slots[pn] = want
 	_filling = false
 	_restore_slots = {}
-	_ov = baker.part_overrides
-	_build_paint_mesh()
 	_fill_view_sets()
 	_loaded = true
+	_target = _t_outfit
+	_show_target()
 	await _build_soldier()
-	_load_status.text = "세트 %d개 · 옷 모델 정점 %d · 칠한 자리 %d곳" % [ob.sets.size(), _pm_pos.size(), _ov.size()]
+	_load_status.text = "세트 %d개 · 옷 모델 정점 %d · 칠한 자리 %d곳" % [ob.sets.size(), _t_outfit.pos.size(), _t_outfit.ov.size()]
 	if ob.warnings.size() > 0:
 		_load_status.text += "\n⚠ " + "\n⚠ ".join(ob.warnings)
-	if baker.extra_anim_warnings.size() > 0:
-		_load_status.text += "\n(추가 동작 경고 %d건 — 출력 창)" % baker.extra_anim_warnings.size()
-	_update_paint_status()
+	_remember_fields()
 	_busy = false
+	# 기본은 `둘 다` — 기본 몸도 불러 둔다. 기본 몸을 칠해 놓고 세트에 안 넣은 것이 있으면 미리보기에 반영하고 굽기 때 넣는다
+	await _switch_target("both")
+	_fill_joints()
+	var nj := _sync_joints_from_base()
+	if nj > 0:
+		_load_status.text += "\n기본 몸에 정한 관절 경계를 이 옷에도 적용했습니다."
+	if _t_base != null and _base_paint_newer_than_sets():
+		_base_dirty = true
+		_base_pv_dirty = true
+		_load_status.text += "\n기본 몸을 칠한 것(%d곳)이 아직 세트에 안 들어가 있어 미리보기에 반영했습니다 — `굽기` 때 세트에 들어갑니다." % _t_base.ov.size()
+	_update_paint_status()
 	_bake_btn.disabled = false
 	_pv_dirty = true
 	_pv_timer = 0.0
@@ -796,6 +1316,92 @@ func _set_index(set_name: String) -> int:
 	return -1
 
 
+# ---------------------------------------------------------------- 칠할 대상 · 도구
+
+## 칠할 대상 단추: both = 둘 다(3D 에는 옷 모델을 띄우고 같은 붓질 · 선을 기본 몸에도) · outfit = 옷 모델만 · base = 기본 몸만
+func _switch_target(kind: String) -> void:
+	if not _loaded or _busy:
+		(_tgt_btns[_target_kind] as Button).set_pressed_no_signal(true)
+		for k in _tgt_btns.keys():
+			if k != _target_kind:
+				(_tgt_btns[k] as Button).set_pressed_no_signal(false)
+		return
+	if kind != "outfit" and not await _ensure_base():
+		kind = "outfit"
+	_target_kind = kind
+	_paint_both = kind == "both"
+	for k in _tgt_btns.keys():
+		(_tgt_btns[k] as Button).set_pressed_no_signal(k == kind)
+	_target = _t_base if kind == "base" else _t_outfit
+	_show_target()
+
+
+## 기본 몸(프리셋의 모델)을 칠할 대상으로 불러 둔다. 이미 있으면 그대로
+func _ensure_base() -> bool:
+	if _t_base != null:
+		return true
+	_busy = true
+	var keep := _status.text
+	_status.text = "기본 몸 불러오는 중…"
+	var po := _opts_from_preset()
+	var bm := String(po.get("base_model", ""))
+	if bm != "" and not po.has("error"):
+		_t_base = await _make_target("base", bm, po["opts"])
+	_busy = false
+	if _t_base == null:
+		_status.text = "⚠ 기본 몸을 불러올 수 없습니다(프리셋의 모델: %s) — 옷 모델만 칠합니다" % bm
+		return false
+	_status.text = keep
+	return true
+
+
+## 기본 몸을 칠한 파일이 구워 둔 세트보다 새것인가 — 칠해 놓고 세트에는 아직 안 들어간 상태(예전 창에서 칠했거나 굽기 전에 닫음)
+func _base_paint_newer_than_sets() -> bool:
+	var po := _opts_from_preset()
+	var pj := DRPartOverrides.path_for(String(po.get("base_model", "")))
+	if not FileAccess.file_exists(pj) or ob == null:
+		return false
+	var t_paint := FileAccess.get_modified_time(pj)
+	var base := ob.sets_json.get_base_dir()
+	for s in ob.sets:
+		var scene := base.path_join(String((s as Dictionary).get("dir", ""))).path_join("puppet.tscn")
+		if FileAccess.file_exists(scene) and FileAccess.get_modified_time(scene) < t_paint:
+			return true
+	return false
+
+
+func _set_tool(kind: String) -> void:
+	_tool = kind
+	_brush_mi.visible = false
+	_update_hud()
+
+
+## 지금 대상을 3D 에 띄운다
+func _show_target() -> void:
+	if _target == null:
+		return
+	_mat_tex.albedo_texture = _target.tex
+	_mat_mix.albedo_texture = _target.tex
+	_refresh_display()
+	_cam_yaw = 0.0
+	_cam_pitch = 0.0
+	_frame_cam()
+	_update_brush()
+	_update_paint_status()
+	_update_hud()
+
+
+func _update_hud() -> void:
+	if _hud3 == null:
+		return
+	var who := "기본 몸" if _target != null and _target.kind == "base" else "옷 모델"
+	if _paint_both:
+		who = "옷 모델 + 기본 몸(둘 다)"
+	var tool := String({"brush": "붓", "line": "직선 자르기", "rect": "사각형"}.get(_tool, _tool))
+	var part := _paint_part if _paint_part != "" else "지우개"
+	_hud3.text = "%s · %s · %s" % [who, tool, part]
+
+
 # ---------------------------------------------------------------- 2D 미리보기
 
 func _build_soldier() -> void:
@@ -811,11 +1417,9 @@ func _build_soldier() -> void:
 	_soldier.speed_scale = 1.0 if _pv_play.button_pressed else 0.0
 	_vp2.add_child(_soldier)
 	await get_tree().process_frame
-	# 세트 캔버스가 크면(384px 등) 처음 한 번 칸에 맞춘다
 	if ob.sets.size() > 0:
 		var vs: Array = ((ob.sets[0] as Dictionary)["rig"] as Dictionary).get("view", {}).get("size", [192, 192])
-		var fit := clampf(float(_vp2.size.y) * 0.92 / float(vs[1]), 0.3, 3.0)
-		_pv_zoom.value = fit
+		_pv_zoom.value = clampf(float(_vp2.size.y) * 0.92 / float(vs[1]), 0.3, 3.0)
 	_filling = true
 	_pv_anim.clear()
 	for an in _soldier.get_animations():
@@ -854,12 +1458,16 @@ func _on_anim_selected(i: int) -> void:
 		_filling = false
 
 
-## 지금 칠하기 · 슬롯으로 모든 세트를 임시로 굽고 입힌다
+## 옷(지금 칠하기 · 슬롯)을 모든 세트에 임시로 굽고, 기본 몸을 칠했으면 기본 몸도 다시 구워 같이 입힌다
 func _refresh_preview() -> void:
 	if not _loaded or ob == null:
 		return
 	_busy = true
 	_status.text = "2D 미리보기 굽는 중…"
+	if _base_pv_dirty and _t_base != null:
+		_base_pv_dirty = false
+		_base_baked = await _t_base.ob.bake_all()
+		_base_outfit = _t_base.ob.to_outfit(_base_baked, "base")
 	ob.warnings = PackedStringArray()
 	_baked = await ob.bake_all()
 	_outfit = ob.to_outfit(_baked, _id_edit.text.strip_edges())
@@ -868,22 +1476,27 @@ func _refresh_preview() -> void:
 	var n := 0
 	for k in _baked.keys():
 		n += (_baked[k] as Dictionary).size()
-	_status.text = "준비됨 — 세트 %d개 · 파트 그림 %d장. 칠하거나 슬롯을 바꾸면 다시 굽는다. 다 됐으면 `복장 굽기`." % [_baked.size(), n]
+	_status.text = "준비됨 — 세트 %d개 · 옷 그림 %d장.%s 다 됐으면 `굽기`." % [_baked.size(), n,
+		" 기본 몸 칠한 것은 굽기 때 세트에 들어간다." if _base_dirty else ""]
 	if ob.warnings.size() > 0:
 		_status.text += "\n⚠ " + "\n⚠ ".join(ob.warnings)
 
 
-## 미리보기 슬롯 체크대로 입힌다
+## 미리보기: 기본 몸(다시 자른 것이 있으면) 위에 체크한 슬롯의 옷
 func _apply_wear() -> void:
-	if not is_instance_valid(_soldier) or _outfit == null:
+	if not is_instance_valid(_soldier):
+		return
+	_soldier.take_off()
+	if _base_outfit != null:
+		_soldier.wear(_base_outfit, [], false)
+	if _outfit == null:
 		return
 	var only: Array = []
 	for k in _wear_cb.keys():
 		if (_wear_cb[k] as CheckBox).button_pressed:
 			only += _outfit.slot_parts(String(k))
-	_soldier.take_off()
 	if only.size() > 0:
-		_soldier.wear(_outfit, only)
+		_soldier.wear(_outfit, only, false)
 
 
 func _on_slot_changed(part: String, i: int) -> void:
@@ -896,21 +1509,13 @@ func _on_slot_changed(part: String, i: int) -> void:
 
 # ---------------------------------------------------------------- 3D 부위 칠하기
 
-## 옷 모델 원본 메시(바인드 자세)를 부위 색 표시용으로 복사하고, 고르기용 삼각형을 준비한다
-func _build_paint_mesh() -> void:
-	_pm_pos = PackedVector3Array()
-	_pm_nrm = PackedVector3Array()
-	_pm_auto = PackedStringArray()
-	_pm_surf = []
-	_tri_a = PackedVector3Array()
-	_tri_e1 = PackedVector3Array()
-	_tri_e2 = PackedVector3Array()
-	var mi := baker.source_mesh_instance
+## 대상 모델의 원본 메시(바인드 자세)에서 정점 · 삼각형 · 웨이트대로의 파트를 읽는다
+func _fill_target_mesh(t: PaintTarget) -> void:
+	var mi := t.baker.source_mesh_instance
 	var src := mi.mesh as ArrayMesh
 	if src == null:
 		return
-	var binds := DRMeshSplitter._bind_map(mi, baker.skeleton)
-	var tex: Texture2D = null
+	var binds := DRMeshSplitter._bind_map(mi, t.baker.skeleton)
 	for si in src.get_surface_count():
 		if src.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES:
 			continue
@@ -920,9 +1525,10 @@ func _build_paint_mesh() -> void:
 		var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES] if arrays[Mesh.ARRAY_BONES] != null else PackedInt32Array()
 		var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS] if arrays[Mesh.ARRAY_WEIGHTS] != null else PackedFloat32Array()
 		var nrm: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL] if arrays[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+		var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV] if arrays[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
 		var vcount := verts.size()
 		var bpv := int(bones.size() / float(maxi(vcount, 1)))
-		var start := _pm_pos.size()
+		var start := t.pos.size()
 		for v in vcount:
 			var best_w := -1.0
 			var best_b := -1
@@ -932,74 +1538,109 @@ func _build_paint_mesh() -> void:
 					best_w = w
 					best_b = bones[v * bpv + k]
 			var skel_b := binds[best_b] if best_b >= 0 and best_b < binds.size() else -1
-			_pm_auto.append(String(baker.split.bone_part.get(skel_b, "")))
-			_pm_pos.append(verts[v])
-			_pm_nrm.append(nrm[v] if nrm.size() == vcount else Vector3.UP)
-		for t in int(idx.size() / 3):
-			var a := verts[idx[t * 3]]
-			_tri_a.append(a)
-			_tri_e1.append(verts[idx[t * 3 + 1]] - a)
-			_tri_e2.append(verts[idx[t * 3 + 2]] - a)
+			t.auto.append(String(t.baker.split.bone_part.get(skel_b, "")))
+			t.pos.append(verts[v])
+			t.nrm.append(nrm[v] if nrm.size() == vcount else Vector3.UP)
+			t.uv.append(uvs[v] if uvs.size() == vcount else Vector2.ZERO)
+			t.keys.append(DRPartOverrides.key_of(verts[v]))
+		for k in idx.size():
+			t.tri.append(start + idx[k])
+		for tt in int(idx.size() / 3):
+			var a := verts[idx[tt * 3]]
+			t.tri_a.append(a)
+			t.tri_e1.append(verts[idx[tt * 3 + 1]] - a)
+			t.tri_e2.append(verts[idx[tt * 3 + 2]] - a)
 		var mat := mi.get_active_material(si)
-		if tex == null and mat is BaseMaterial3D:
-			tex = (mat as BaseMaterial3D).albedo_texture
-		_pm_surf.append({"arrays": arrays, "start": start, "count": vcount})
-	_mat_tex.albedo_texture = tex
-	_mat_mix.albedo_texture = tex
-	_recolor()
-	_apply_view_mode()
-	_cam_yaw = 0.0
-	_cam_pitch = 0.0
-	_frame_cam()
-	_update_brush()
-
-
-## 모델 전체(T-포즈 팔 끝까지)가 칸에 들어오게 — 칸의 가로세로 비율까지 따진다(F 키)
-func _frame_cam() -> void:
-	var m := _pm_mesh if _pm_mesh != null else null
-	if m == null:
-		return
-	var aabb := m.get_aabb()
-	_cam_target = aabb.get_center()
-	var half := tan(deg_to_rad(_cam3.fov * 0.5))
-	var aspect := float(_vp3.size.x) / float(maxi(_vp3.size.y, 1))
-	var need_h := aabb.size.y / (2.0 * half)
-	var need_w := maxf(aabb.size.x, aabb.size.z) / (2.0 * half * maxf(aspect, 0.1))
-	_cam_dist = maxf(need_h, need_w) * 1.12 + aabb.size.z * 0.5
-	_update_cam()
+		if t.tex == null and mat is BaseMaterial3D:
+			t.tex = (mat as BaseMaterial3D).albedo_texture
 
 
 func _part_color(part: String) -> Color:
 	return PART_COLORS.get(part, Color(0.35, 0.35, 0.35))
 
 
-## 부위 색 다시 칠하기(칠한 정점은 조금 밝게)
-func _recolor() -> void:
-	if _pm_surf.is_empty():
+## 면마다 한 색 — 그 면이 실제로 들어가는 조각(세 정점 중 둘 이상이 같은 부위면 그 부위). 붓으로 칠한 면은 조금 밝게.
+## 자르기는 굽기와 같은 방식으로 면을 평면에서 쪼개 보여 준다(겹침 없이) — 3D 의 색 경계 = 실제로 잘리는 곧은 선.
+func _refresh_display() -> void:
+	var t := _target
+	if t == null or t.pos.is_empty():
+		_pm_mi.mesh = null
 		return
+	var n0 := t.pos.size()
+	var vpart := PackedStringArray()
+	vpart.resize(n0)
+	var vpaint := PackedByteArray()
+	vpaint.resize(n0)
+	for i in n0:
+		var p := String(t.ov.map.get(t.keys[i], "")) if t.ov != null else ""
+		vpaint[i] = 1 if p != "" else 0
+		vpart[i] = p if p != "" else t.auto[i]
+	var part_tris := {}
+	for k in int(t.tri.size() / 3):
+		var i0 := t.tri[k * 3]
+		var i1 := t.tri[k * 3 + 1]
+		var i2 := t.tri[k * 3 + 2]
+		var p0 := vpart[i0]
+		var p1 := vpart[i1]
+		var p2 := vpart[i2]
+		var main := p0 if (p0 == p1 or p0 == p2) else (p1 if p1 == p2 else p0)
+		if not part_tris.has(main):
+			part_tris[main] = PackedInt32Array()
+		var arr: PackedInt32Array = part_tris[main]
+		arr.append(i0)
+		arr.append(i1)
+		arr.append(i2)
+		part_tris[main] = arr
+	var pp := t.pos
+	var pn := t.nrm
+	var pu := t.uv
+	if t.ov != null and not t.ov.cuts.is_empty():
+		var src := []
+		src.resize(Mesh.ARRAY_MAX)
+		src[Mesh.ARRAY_VERTEX] = t.pos
+		src[Mesh.ARRAY_NORMAL] = t.nrm
+		src[Mesh.ARRAY_TEX_UV] = t.uv
+		var pool := DRMeshCutter.VertexPool.new(src)
+		var allp := {}
+		for k in PART_COLORS.keys():
+			allp[k] = true
+		for k in part_tris.keys():
+			allp[k] = true
+		DRMeshCutter.apply_cuts(part_tris, t.ov.cuts, pool, allp, 0.0)
+		pp = pool.pos
+		pn = pool.nrm
+		pu = pool.uv
+	var vs := PackedVector3Array()
+	var ns := PackedVector3Array()
+	var us := PackedVector2Array()
+	var cs := PackedColorArray()
+	for part in part_tris.keys():
+		var tris: PackedInt32Array = part_tris[part]
+		var base_c := _part_color(String(part))
+		for k in int(tris.size() / 3):
+			var c := base_c
+			for j in 3:
+				var vi := tris[k * 3 + j]
+				if vi < n0 and vpaint[vi] == 1 and vpart[vi] == part:
+					c = base_c.lerp(Color.WHITE, 0.3)
+					break
+			for j in 3:
+				var vi2 := tris[k * 3 + j]
+				vs.append(pp[vi2])
+				ns.append(pn[vi2])
+				us.append(pu[vi2])
+				cs.append(c)
+	if vs.is_empty():
+		_pm_mi.mesh = null
+		return
+	var arr2 := []
+	arr2.resize(Mesh.ARRAY_MAX)
+	arr2[Mesh.ARRAY_VERTEX] = vs
+	arr2[Mesh.ARRAY_NORMAL] = ns
+	arr2[Mesh.ARRAY_TEX_UV] = us
+	arr2[Mesh.ARRAY_COLOR] = cs
 	var m := ArrayMesh.new()
-	for s in _pm_surf:
-		var sd: Dictionary = s
-		var src: Array = sd["arrays"]
-		var start: int = sd["start"]
-		var count: int = sd["count"]
-		var cols := PackedColorArray()
-		cols.resize(count)
-		for v in count:
-			var p := _pm_pos[start + v]
-			var painted := _ov.part_at(p) if _ov != null else ""
-			var part := painted if painted != "" else _pm_auto[start + v]
-			var c := _part_color(part)
-			cols[v] = c.lerp(Color.WHITE, 0.3) if painted != "" else c
-		var arr := []
-		arr.resize(Mesh.ARRAY_MAX)
-		arr[Mesh.ARRAY_VERTEX] = src[Mesh.ARRAY_VERTEX]
-		arr[Mesh.ARRAY_NORMAL] = src[Mesh.ARRAY_NORMAL]
-		arr[Mesh.ARRAY_TEX_UV] = src[Mesh.ARRAY_TEX_UV]
-		arr[Mesh.ARRAY_COLOR] = cols
-		arr[Mesh.ARRAY_INDEX] = src[Mesh.ARRAY_INDEX]
-		m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-	_pm_mesh = m
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr2)
 	_pm_mi.mesh = m
 	_apply_view_mode()
 
@@ -1026,6 +1667,21 @@ func _update_cam() -> void:
 	_cam3.far = _cam_dist * 10.0
 
 
+## 모델 전체(T-포즈 팔 끝까지)가 칸에 들어오게 — 칸의 가로세로 비율까지 따진다(F 키)
+func _frame_cam() -> void:
+	var m := _pm_mi.mesh
+	if m == null:
+		return
+	var aabb := m.get_aabb()
+	_cam_target = aabb.get_center()
+	var half := tan(deg_to_rad(_cam3.fov * 0.5))
+	var aspect := float(_vp3.size.x) / float(maxi(_vp3.size.y, 1))
+	var need_h := aabb.size.y / (2.0 * half)
+	var need_w := maxf(aabb.size.x, aabb.size.z) / (2.0 * half * maxf(aspect, 0.1))
+	_cam_dist = maxf(need_h, need_w) * 1.12 + aabb.size.z * 0.5
+	_update_cam()
+
+
 func _update_brush() -> void:
 	if _brush_mi == null:
 		return
@@ -1046,20 +1702,22 @@ func _to_vp(rect: TextureRect, vp: SubViewport, p: Vector2) -> Vector2:
 
 ## 화면 점 → 모델 표면의 점(광선과 가장 가까운 삼각형). 못 맞히면 {hit: false}
 func pick(vp_pos: Vector2) -> Dictionary:
-	if _tri_a.is_empty():
+	var t := _target
+	if t == null or t.tri_a.is_empty():
 		return {"hit": false}
 	var o := _cam3.project_ray_origin(vp_pos)
 	var d := _cam3.project_ray_normal(vp_pos)
 	var best := INF
-	for t in _tri_a.size():
-		var e1 := _tri_e1[t]
-		var e2 := _tri_e2[t]
+	var best_k := -1
+	for k in t.tri_a.size():
+		var e1 := t.tri_e1[k]
+		var e2 := t.tri_e2[k]
 		var pv := d.cross(e2)
 		var det := e1.dot(pv)
 		if absf(det) < 1e-12:
 			continue
 		var inv := 1.0 / det
-		var tv := o - _tri_a[t]
+		var tv := o - t.tri_a[k]
 		var u := tv.dot(pv) * inv
 		if u < 0.0 or u > 1.0:
 			continue
@@ -1070,110 +1728,357 @@ func pick(vp_pos: Vector2) -> Dictionary:
 		var dist := e2.dot(qv) * inv
 		if dist > 1e-5 and dist < best:
 			best = dist
+			best_k = k
 	if best == INF:
 		return {"hit": false}
-	return {"hit": true, "pos": o + d * best}
+	return {"hit": true, "pos": o + d * best, "tri": best_k}
 
 
-## 붓질 한 번: 붓 범위 안의 정점을 part 로(part = "" 이면 지움). 바뀐 정점 수
+## 지금 칠해지는 대상들 — `둘 다` 면 옷 모델과 기본 몸에 같은 붓질 · 같은 선이 들어간다.
+## 두 모델은 같은 뼈대 · 같은 T-포즈라 같은 자리의 경계가 같은 곳을 자른다(그래야 조각을 서로 바꿔 끼울 때 이가 맞는다).
+func _paint_targets() -> Array:
+	var out: Array = []
+	if _target != null:
+		out.append(_target)
+	if _paint_both:
+		for t in [_t_outfit, _t_base]:
+			if t != null and not out.has(t):
+				out.append(t)
+	return out
+
+
+## 정점 하나를 part 로(이번 붓질의 되돌리기 기록 포함). 바뀌었으면 true
+func _set_vertex(t: PaintTarget, i: int, part: String) -> bool:
+	var k = t.keys[i]
+	var prev := String(t.ov.map.get(k, ""))
+	if prev == part:
+		return false
+	if not _stroke.has(t):
+		_stroke[t] = {}
+	if not (_stroke[t] as Dictionary).has(k):
+		_stroke[t][k] = prev
+	if part == "":
+		t.ov.map.erase(k)
+	else:
+		t.ov.map[k] = part
+	return true
+
+
+## 붓질 한 번: 붓 범위 안의 정점을 part 로(part = "" 이면 지움). 바뀐 정점 수(모든 대상 합)
 func paint_at(hit: Vector3, part: String, radius: float = -1.0) -> int:
-	if _ov == null:
+	if _target == null:
 		return 0
 	var r := radius if radius > 0.0 else _brush_spin.value * 0.01
-	var r2 := r * r
 	var view_dir := (_cam3.global_position - hit).normalized()
 	var changed := 0
-	var done := {}
-	for i in _pm_pos.size():
-		var p := _pm_pos[i]
-		if p.distance_squared_to(hit) > r2:
+	for tt in _paint_targets():
+		var t := tt as PaintTarget
+		if t.ov == null:
 			continue
-		if _front_only.button_pressed and _pm_nrm[i].dot(view_dir) < 0.0:
-			continue
-		var k := DRPartOverrides.key_of(p)
-		if done.has(k):
-			continue
-		done[k] = true
-		var prev := String(_ov.map.get(k, ""))
-		if prev == part:
-			continue
-		if not _stroke.has(k):
-			_stroke[k] = prev
-		if part == "":
-			_ov.map.erase(k)
-		else:
-			_ov.map[k] = part
-		changed += 1
+		# 화면에 안 보이는 쪽(옷 속의 몸 등)은 표면이 조금 안쪽이라 붓을 넉넉히
+		var rr := r if t == _target else r * 1.5 + 0.015
+		var r2 := rr * rr
+		for i in t.pos.size():
+			if t.pos[i].distance_squared_to(hit) > r2:
+				continue
+			if t == _target and _front_only.button_pressed and t.nrm[i].dot(view_dir) < 0.0:
+				continue
+			if _set_vertex(t, i, part):
+				changed += 1
 	if changed > 0:
-		_recolor()
+		_refresh_display()
 		_update_paint_status()
 	return changed
 
 
-## 붓질이 끝나면 저장하고, 잠시 뒤 다시 잘라 미리보기를 다시 굽는다
+## 직선 자르기: 화면의 선 a → b(뷰포트 좌표)로 자른다 — 삼각형을 평면에서 쪼개므로 경계가 그은 선 그대로 곧다(DRMeshCutter).
+## 선 근처에서 가장 많이 걸린 부위(칠할 부위 말고)를 "자를 부위"로 잡고, 카메라와 선이 이루는 평면으로 그 부위를 둘로 나눠
+## 칠할 부위가 이미 있는 쪽(없으면 작은 쪽)을 칠할 부위로. 선의 양 끝 사이(화면 기준)만 — 앞뒤는 함께 잘린다.
+## `둘 다` 면 같은 자르기(같은 평면 · 같은 자를 부위)를 다른 대상에도 넣는다.
+## 돌려주는 값: {changed(부위가 바뀐 정점 수 합), source, per: {kind: 바뀐 수}}
+func split_line(a: Vector2, b: Vector2, part: String) -> Dictionary:
+	var t := _target
+	if t == null or t.ov == null or a.distance_to(b) < 6.0:
+		return {"changed": 0}
+	if part == ERASE:
+		return {"changed": 0, "erase": true}
+	# 선 끝을 조금 늘린다 — 끝이 모델 가장자리에 살짝 못 미치거나, `둘 다` 에서 옷 속의 몸이 옷보다 조금 삐져 있어도 끝까지 잘리게
+	var ext := (b - a).normalized() * ((b - a).length() * 0.08 + 10.0)
+	var a2 := a - ext
+	var b2 := b + ext
+	var o := _cam3.project_ray_origin(a2)
+	var na := _cam3.project_ray_normal(a2)
+	var nb := _cam3.project_ray_normal(b2)
+	var n := na.cross(nb).normalized()
+	var seg := b2 - a2
+	var seg_len := seg.length()
+	var u := seg / seg_len
+	var near_count := {}
+	var cand: Array = []                    # [쪽(+1/−1), 지금 부위]
+	for i in t.pos.size():
+		var p := t.pos[i]
+		if _cam3.is_position_behind(p):
+			continue
+		var s := _cam3.unproject_position(p)
+		var tt := (s - a2).dot(u) / seg_len
+		if tt < 0.0 or tt > 1.0:
+			continue
+		var cur := t.part_of(i)
+		cand.append([1 if n.dot(p - o) >= 0.0 else -1, cur])
+		if absf((s - a2).dot(Vector2(-u.y, u.x))) < 14.0 and cur != part:
+			near_count[cur] = int(near_count.get(cur, 0)) + 1
+	if near_count.is_empty():
+		return {"changed": 0}
+	var source := ""
+	var best := -1
+	for k in near_count.keys():
+		if int(near_count[k]) > best:
+			best = int(near_count[k])
+			source = String(k)
+	# 칠할 부위가 이미 있는 쪽 = 그 쪽으로 넓힌다. 없으면 자를 부위의 작은 쪽
+	var tgt_side := {1: 0, -1: 0}
+	var src_side := {1: 0, -1: 0}
+	for c in cand:
+		if String(c[1]) == part:
+			tgt_side[c[0]] += 1
+		elif String(c[1]) == source:
+			src_side[c[0]] += 1
+	var pick_side := 1
+	if tgt_side[1] != tgt_side[-1]:
+		pick_side = 1 if tgt_side[1] > tgt_side[-1] else -1
+	else:
+		pick_side = 1 if src_side[1] <= src_side[-1] else -1
+	if pick_side < 0:
+		n = -n
+	# 선의 양 끝 = 카메라 광선을 품은 두 평면(안쪽을 보게)
+	var sa := na.cross(n).normalized()
+	if sa.dot(nb) < 0.0:
+		sa = -sa
+	var sb := nb.cross(n).normalized()
+	if sb.dot(na) < 0.0:
+		sb = -sb
+	var planes := [_plane(n, o), _plane(sa, o), _plane(sb, o)]
+	var r := _add_cut({"to": part, "from": source, "planes": planes, "kind": "line"})
+	r["source"] = source
+	return r
+
+
+## 사각형 자르기: 화면의 사각형(뷰포트 좌표 a · b 대각) 안 = 칠할 부위(앞뒤 함께, 어느 부위든). 가장자리가 사각형 그대로 곧다.
+func rect_cut(a: Vector2, b: Vector2, part: String) -> Dictionary:
+	if _target == null or _target.ov == null:
+		return {"changed": 0}
+	if part == ERASE:
+		return {"changed": 0, "erase": true}
+	var lo := Vector2(minf(a.x, b.x), minf(a.y, b.y))
+	var hi := Vector2(maxf(a.x, b.x), maxf(a.y, b.y))
+	if hi.x - lo.x < 4.0 or hi.y - lo.y < 4.0:
+		return {"changed": 0}
+	# 사각형 안에서 화면에 보이는(맨 앞) 부위만 — 뒤에 숨은 다른 부위(반대쪽 팔 · 몸 뒤)는 안 건드린다
+	var only := {}
+	for gy in 9:
+		for gx in 9:
+			var h := pick(lo + (hi - lo) * Vector2((gx + 0.5) / 9.0, (gy + 0.5) / 9.0))
+			if not bool(h.get("hit", false)):
+				continue
+			var k := int(h["tri"])
+			var vp := _target.part_of(_target.tri[k * 3])
+			var vp1 := _target.part_of(_target.tri[k * 3 + 1])
+			var vp2 := _target.part_of(_target.tri[k * 3 + 2])
+			var main := vp if (vp == vp1 or vp == vp2) else (vp1 if vp1 == vp2 else vp)
+			if main != part:
+				only[main] = true
+	if only.is_empty():
+		return {"changed": 0}
+	var corners := [lo, Vector2(hi.x, lo.y), hi, Vector2(lo.x, hi.y)]
+	var o := _cam3.project_ray_origin(lo)
+	var mid := _cam3.project_ray_normal((lo + hi) * 0.5)
+	var planes: Array = []
+	for i in 4:
+		var ra := _cam3.project_ray_normal(corners[i])
+		var rb := _cam3.project_ray_normal(corners[(i + 1) % 4])
+		var nn := ra.cross(rb).normalized()
+		if nn.dot(mid) < 0.0:
+			nn = -nn
+		planes.append(_plane(nn, o))
+	var r := _add_cut({"to": part, "from": "*", "only": only.keys(), "planes": planes, "kind": "rect"})
+	r["source"] = ", ".join(PackedStringArray(only.keys()))
+	return r
+
+
+func _plane(nv: Vector3, o: Vector3) -> Array:
+	return [snappedf(nv.x, 0.000001), snappedf(nv.y, 0.000001), snappedf(nv.z, 0.000001), snappedf(nv.dot(o), 0.000001)]
+
+
+## 자르기 하나를 칠하는 대상(들)에 넣는다(되돌리기 기록 포함). 부위가 바뀐 정점 수를 센다
+func _add_cut(cut: Dictionary) -> Dictionary:
+	var per := {}
+	var total := 0
+	for tt in _paint_targets():
+		var t := tt as PaintTarget
+		if t.ov == null:
+			continue
+		var before := PackedStringArray()
+		before.resize(t.pos.size())
+		for i in t.pos.size():
+			before[i] = t.part_of(i)
+		if not _stroke.has(t):
+			_stroke[t] = {}
+		if not (_stroke[t] as Dictionary).has(CUTS_KEY):
+			_stroke[t][CUTS_KEY] = t.ov.cuts.duplicate(true)
+		t.ov.cuts.append(cut.duplicate(true))
+		var ch := 0
+		for i in t.pos.size():
+			if t.part_of(i) != before[i]:
+				ch += 1
+		per[t.kind] = ch
+		total += ch
+	_refresh_display()
+	_update_paint_status()
+	return {"changed": total, "per": per}
+
+
+## 붓질 · 선 긋기가 끝나면 저장하고, 잠시 뒤 다시 잘라 2D 를 다시 굽는다
 func end_stroke() -> void:
 	_painting = false
 	if _stroke.is_empty():
 		return
-	_undo.append(_stroke)
+	var done := _stroke
 	_stroke = {}
-	_after_paint_change()
+	_undo.append(done)
+	for t in done.keys():
+		_after_paint_change(t as PaintTarget)
 
 
-func _after_paint_change() -> void:
-	if _ov != null:
-		_ov.save()
+func _after_paint_change(t: PaintTarget) -> void:
+	if t.ov != null:
+		t.ov.save()
 		if Engine.is_editor_hint():
-			EditorInterface.get_resource_filesystem().update_file(DRPartOverrides.path_for(_scene_path))
-	_resplit_dirty = true
-	_resplit_timer = PV_DEBOUNCE
+			EditorInterface.get_resource_filesystem().update_file(DRPartOverrides.path_for(t.scene_path))
+	t.resplit_dirty = true
+	if t.kind == "base":
+		_base_dirty = true
+		_base_pv_dirty = true
+	_pv_dirty = true
+	_pv_timer = PV_DEBOUNCE
 	_update_paint_status()
 
 
+## 되돌리기 — 마지막 붓질 · 선 하나(둘 다에 들어간 것은 둘 다 되돌린다)
 func _on_undo() -> void:
-	if _undo.is_empty() or _ov == null:
+	_joint_commit()        # 관절 슬라이더를 움직이던 중이면 그것부터 한 단계로
+	if _undo.is_empty():
 		return
 	var last: Dictionary = _undo.pop_back()
-	for k in last.keys():
-		var prev := String(last[k])
-		if prev == "":
-			_ov.map.erase(k)
-		else:
-			_ov.map[k] = prev
-	_recolor()
-	_after_paint_change()
+	for tt in last.keys():
+		var t := tt as PaintTarget
+		if t == null or t.ov == null:
+			continue
+		var ch: Dictionary = last[tt]
+		for k in ch.keys():
+			if k is String and k == CUTS_KEY:
+				t.ov.cuts = (ch[k] as Array).duplicate(true)
+				continue
+			var prev := String(ch[k])
+			if prev == "":
+				t.ov.map.erase(k)
+			else:
+				t.ov.map[k] = prev
+		_after_paint_change(t)
+	_refresh_display()
+	_after_cuts_reset()
 
 
+## 되돌리기 · 모두 지우기 뒤: 관절 칸(체크 · 슬라이더 · 목록 표시)을 지금 경계에 맞춘다
+func _after_cuts_reset() -> void:
+	_joint_active = false
+	_joint_snap = {}
+	if _joint_opt != null and _joint_opt.item_count > 0:
+		_refresh_joint_labels()
+		_on_joint_selected(false)
+
+
+## 지금 칠하는 대상(들)의 칠한 것을 모두 지운다(되돌리기 가능)
 func _on_clear_paint() -> void:
-	if _ov == null or _ov.is_empty():
-		return
 	var snap := {}
-	for k in _ov.map.keys():
-		snap[k] = String(_ov.map[k])
+	for tt in _paint_targets():
+		var t := tt as PaintTarget
+		if t.ov == null or t.ov.is_empty():
+			continue
+		var s := {}
+		for k in t.ov.map.keys():
+			s[k] = String(t.ov.map[k])
+		s[CUTS_KEY] = t.ov.cuts.duplicate(true)
+		snap[t] = s
+		t.ov.map.clear()
+		t.ov.cuts.clear()
+	if snap.is_empty():
+		return
 	_undo.append(snap)
-	_ov.map.clear()
-	_recolor()
-	_after_paint_change()
+	for t in snap.keys():
+		_after_paint_change(t as PaintTarget)
+	_refresh_display()
+	_after_cuts_reset()
 
 
 func _update_paint_status() -> void:
 	if _paint_status == null:
 		return
-	if _ov == null:
+	if _target == null:
 		_paint_status.text = ""
 		return
-	_paint_status.text = "칠한 자리 %d곳 · 되돌리기 %d번 가능 · 저장: %s" % [_ov.size(), _undo.size(), DRPartOverrides.path_for(_scene_path)]
+	var lines := PackedStringArray()
+	for tt in [_t_outfit, _t_base]:
+		var t := tt as PaintTarget
+		if t != null and t.ov != null:
+			var nj := 0
+			for c in t.ov.cuts:
+				if String((c as Dictionary).get("kind", "")) == "joint":
+					nj += 1
+			lines.append("%s — 관절 경계 %d · 직접 자르기 %d · 붓 %d곳 (%s)" % ["기본 몸" if t.kind == "base" else "옷 모델", nj, t.ov.cuts.size() - nj, t.ov.size(), DRPartOverrides.path_for(t.scene_path).get_file()])
+	lines.append("되돌리기 %d번 가능" % _undo.size())
+	if _base_dirty:
+		lines.append("기본 몸 칠한 것은 `굽기` 때 기본 몸 세트에 같이 들어갑니다(① 탭에서 다시 구울 필요 없음).")
+	_paint_status.text = "\n".join(lines)
 	_undo_btn.disabled = _undo.is_empty()
 
 
 func _on_pv3_input(ev: InputEvent) -> void:
-	if not _loaded:
+	if not _loaded or _target == null:
 		return
 	if ev is InputEventMouseButton:
 		var mb := ev as InputEventMouseButton
 		_pv3.grab_focus()
 		if mb.button_index == MOUSE_BUTTON_LEFT:
-			if mb.pressed:
+			if _tool == "line" or _tool == "rect":
+				if mb.pressed:
+					_line_on = true
+					_line_ov.on = true
+					_line_ov.rect = _tool == "rect"
+					_line_ov.a = mb.position
+					_line_ov.b = mb.position
+					_line_ov.queue_redraw()
+				elif _line_on:
+					_line_on = false
+					_line_ov.on = false
+					_line_ov.queue_redraw()
+					var end_pt := _line_ov.b if _tool == "line" else mb.position
+					_stroke = {}
+					var va := _to_vp(_pv3, _vp3, _line_ov.a)
+					var vb := _to_vp(_pv3, _vp3, end_pt)
+					var r := split_line(va, vb, _paint_part) if _tool == "line" else rect_cut(va, vb, _paint_part)
+					end_stroke()
+					if bool(r.get("erase", false)):
+						_status.text = "직선 · 사각형은 지우개로 못 씁니다 — 자르기를 없애려면 Ctrl+Z(되돌리기) 또는 `칠한 것 · 자르기 모두 지우기`."
+						return
+					if int(r.get("changed", 0)) > 0:
+						var per: Dictionary = r.get("per", {})
+						var detail := "옷 모델 %d곳" % int(per.get("outfit", 0)) if per.has("outfit") else ""
+						if per.has("base"):
+							detail += ("" if detail == "" else " · ") + "기본 몸 %d곳" % int(per.get("base", 0))
+						_status.text = "%s: %s → %s (%s)" % ["직선 자르기" if _tool == "line" else "사각형", String(r.get("source", "사각형 안")), _paint_part, detail]
+					else:
+						_status.text = "바뀐 곳 없음 — 선은 부위 경계를 지나게, 사각형은 모델을 덮게 그어 주세요."
+			elif mb.pressed:
 				_painting = true
 				_stroke = {}
 				_paint_from_screen(mb.position)
@@ -1205,10 +2110,17 @@ func _on_pv3_input(ev: InputEvent) -> void:
 			var k := _cam_dist * 0.0015
 			_cam_target += (-_cam3.global_transform.basis.x * dd2.x + _cam3.global_transform.basis.y * dd2.y) * k
 			_update_cam()
+		elif _line_on:
+			var pb := mm.position
+			if _tool == "line" and mm.shift_pressed:      # Shift = 수평 · 수직 · 45°
+				var dv := pb - _line_ov.a
+				pb = _line_ov.a + Vector2.from_angle(snappedf(dv.angle(), PI / 4.0)) * dv.length()
+			_line_ov.b = pb
+			_line_ov.queue_redraw()
 		elif _painting:
 			if mm.position.distance_to(_last_pick_px) >= 3.0:
 				_paint_from_screen(mm.position)
-		elif mm.position.distance_to(_last_pick_px) >= 6.0:
+		elif _tool == "brush" and mm.position.distance_to(_last_pick_px) >= 6.0:
 			_hover(mm.position)
 	elif ev is InputEventKey and (ev as InputEventKey).pressed:
 		var ke := ev as InputEventKey
@@ -1216,25 +2128,31 @@ func _on_pv3_input(ev: InputEvent) -> void:
 			_frame_cam()
 		elif ke.keycode == KEY_Z and ke.ctrl_pressed:
 			_on_undo()
+		elif ke.keycode == KEY_B:
+			(_tool_btns["brush"] as Button).button_pressed = true
+			_set_tool("brush")
+		elif ke.keycode == KEY_L:
+			(_tool_btns["line"] as Button).button_pressed = true
+			_set_tool("line")
+		elif ke.keycode == KEY_R:
+			(_tool_btns["rect"] as Button).button_pressed = true
+			_set_tool("rect")
 
 
 func _paint_from_screen(p: Vector2) -> void:
 	_last_pick_px = p
 	var h := pick(_to_vp(_pv3, _vp3, p))
-	_brush_hit = bool(h.get("hit", false))
-	_brush_mi.visible = _brush_hit
-	if _brush_hit:
-		_brush_pos = h["pos"]
-		_brush_mi.position = _brush_pos
-		paint_at(_brush_pos, _paint_part)
+	_brush_mi.visible = bool(h.get("hit", false))
+	if _brush_mi.visible:
+		_brush_mi.position = h["pos"]
+		paint_at(h["pos"], _paint_part)
 
 
 func _hover(p: Vector2) -> void:
 	_last_pick_px = p
 	var h := pick(_to_vp(_pv3, _vp3, p))
-	_brush_hit = bool(h.get("hit", false))
-	_brush_mi.visible = _brush_hit
-	if _brush_hit:
+	_brush_mi.visible = bool(h.get("hit", false))
+	if _brush_mi.visible:
 		_brush_mi.position = h["pos"]
 
 
@@ -1311,22 +2229,34 @@ func _on_bind_done(code: int, log_text: String, out_res: String) -> void:
 # ---------------------------------------------------------------- 굽기 · 매 프레임
 
 func _process(delta: float) -> void:
-	if not visible or not _loaded:
+	if not is_visible_in_tree() or not _loaded:
 		return
-	if _resplit_dirty and not _busy and not _painting:
-		_resplit_timer -= delta
-		if _resplit_timer <= 0.0:
-			_resplit_dirty = false
-			baker.resplit(_ov)
-			_pv_dirty = true
-			_pv_timer = 0.0
-	if _pv_dirty and not _busy and not _painting:
+	if _busy or _painting or _line_on:
+		return
+	if _joint_active:
+		_joint_idle -= delta
+		if _joint_idle <= 0.0:
+			_joint_commit()
+	if _disp_dirty:
+		_disp_dirty = false
+		_refresh_display()
+	if _ctx_stale:
+		_ctx_stale = false
+		_on_load()
+		return
+	for t in [_t_outfit, _t_base]:
+		var pt := t as PaintTarget
+		if pt != null and pt.resplit_dirty:
+			pt.resplit_dirty = false
+			pt.baker.resplit(pt.ov)
+	if _pv_dirty:
 		_pv_timer -= delta
 		if _pv_timer <= 0.0:
 			_pv_dirty = false
 			_refresh_preview()
 
 
+## 굽기: 기본 몸을 칠했으면 기본 몸 세트에 먼저 넣고, 이어서 복장을 모든 세트에
 func _on_bake() -> void:
 	if not _loaded or _busy:
 		return
@@ -1334,15 +2264,32 @@ func _on_bake() -> void:
 	if id == "":
 		_status.text = "⚠ 복장 이름을 적어 주세요"
 		return
-	if _resplit_dirty:
-		_resplit_dirty = false
-		baker.resplit(_ov)
+	for t in [_t_outfit, _t_base]:
+		var pt := t as PaintTarget
+		if pt != null and pt.resplit_dirty:
+			pt.resplit_dirty = false
+			pt.baker.resplit(pt.ov)
 	_busy = true
 	_bake_btn.disabled = true
+	var msg := PackedStringArray()
+	if _base_dirty and _t_base != null:
+		_status.text = "기본 몸 세트 다시 굽는 중…"
+		_base_baked = await _t_base.ob.bake_all()
+		var done := _t_base.ob.write_base_sets(_base_baked)
+		msg.append("기본 몸 세트 %d개에 새 조각 그림 넣음 (%s)" % [done.size(), ", ".join(done)])
+		for w in _t_base.ob.warnings:
+			msg.append("⚠ " + w)
+		_base_dirty = false
+		_base_pv_dirty = false
+		_base_outfit = null
+		if is_instance_valid(_soldier):
+			_soldier.reload()
+		if Engine.is_editor_hint():
+			EditorInterface.get_resource_filesystem().scan()
 	var cb := func(i, n, nm):
 		_progress.max_value = n
 		_progress.value = i + 1
-		_status.text = "굽는 중 %d/%d — %s" % [i + 1, n, nm]
+		_status.text = "복장 굽는 중 %d/%d — %s" % [i + 1, n, nm]
 	ob.progress.connect(cb)
 	var res: Dictionary = await ob.run(_out_edit.text.strip_edges(), id, _scene_path)
 	ob.progress.disconnect(cb)
@@ -1350,11 +2297,14 @@ func _on_bake() -> void:
 	_bake_btn.disabled = false
 	_progress.value = 0
 	if bool(res.get("ok", false)):
-		_status.text = "완료 — 세트 %d개 → %s\n게임: soldier.wear(DROutfit.load_json(\"%s\")) · 시험장 F6 의 O(상의) · P(하의)" % [(res["sets"] as Array).size(), String(res["json"]).get_base_dir(), String(res["json"])]
-		var ws: PackedStringArray = res.get("warnings", PackedStringArray())
-		if ws.size() > 0:
-			_status.text += "\n⚠ " + "\n⚠ ".join(ws)
+		msg.append("복장 완료 — 세트 %d개 → %s · 시험장 F6 의 O(상의) · P(하의)" % [(res["sets"] as Array).size(), String(res["json"]).get_base_dir()])
+		for w in res.get("warnings", PackedStringArray()):
+			msg.append("⚠ " + String(w))
 		if Engine.is_editor_hint():
 			EditorInterface.get_resource_filesystem().scan()
+		_remember_fields()
 	else:
-		_status.text = "⚠ 굽기 실패: %s" % String(res.get("error", "?"))
+		msg.append("⚠ 복장 굽기 실패: %s" % String(res.get("error", "?")))
+	_status.text = "\n".join(msg)
+	_update_paint_status()
+	_apply_wear()

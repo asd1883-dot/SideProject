@@ -4,6 +4,7 @@
     python pipeline/check_character.py source3d/characters/human_base/human_base.glb
     python pipeline/check_character.py <glb> --anims Idle_Loop,Sprint_Loop,Rifle_Aiming_Idle --yaw -55
     python pipeline/check_character.py <glb> --anims Sprint_Loop --rest_time 0.42      (레스트 = 0.42초 프레임)
+    python pipeline/check_character.py <샌드박스 안 glb> --sandbox C:/Users/Dev/Documents/1941_thumb   (다른 샌드박스 — glb 가 그 안에 있으면 복사 없이 그대로)
 
 ⚠ 레스트 시점이 다르면 결과가 뒤집힐 수 있다(10-02: 첫 프레임 레스트에선 좋아 보인 뚜껑이 사용자의 Sprint 63% 레스트에선 얼룩).
   사용자 창의 "레스트 자동" 값(예: Sprint 63% = 0.67초 x 0.63)을 --rest_time 으로 맞춰 확인할 것.
@@ -44,6 +45,8 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1].startswith("--"):
         print(__doc__)
         return 2
+    global SANDBOX
+    SANDBOX = os.path.abspath(arg("sandbox", SANDBOX))
     src = os.path.abspath(sys.argv[1])
     name = os.path.splitext(os.path.basename(src))[0]
     anims = arg("anims", ",".join(DEFAULT_ANIMS)).split(",")
@@ -53,12 +56,16 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     # 1) 샌드박스로 복사(glb · .import(뼈 이름표) · 텍스처)
-    rel = os.path.relpath(os.path.dirname(src), PROJECT)
-    dst_dir = os.path.join(SANDBOX, rel)
-    os.makedirs(dst_dir, exist_ok=True)
-    for f in os.listdir(os.path.dirname(src)):
-        if f.startswith(name) and not f.endswith(".import") or f == name + ".glb.import":
-            shutil.copy2(os.path.join(os.path.dirname(src), f), os.path.join(dst_dir, f))
+    in_sandbox = os.path.normcase(src).startswith(os.path.normcase(SANDBOX) + os.sep)
+    if in_sandbox:                      # 이미 샌드박스 안(후보 모델) — 복사 없이 그 자리 그대로
+        rel = os.path.relpath(os.path.dirname(src), SANDBOX)
+    else:
+        rel = os.path.relpath(os.path.dirname(src), PROJECT)
+        dst_dir = os.path.join(SANDBOX, rel)
+        os.makedirs(dst_dir, exist_ok=True)
+        for f in os.listdir(os.path.dirname(src)):
+            if f.startswith(name) and not f.endswith(".import") or f == name + ".glb.import":
+                shutil.copy2(os.path.join(os.path.dirname(src), f), os.path.join(dst_dir, f))
     if not os.path.exists(src + ".import") or "retarget/bone_map" not in open(src + ".import", encoding="utf-8").read():
         print("경고: %s.import 에 뼈 이름표(BoneMap)가 없습니다 — 추가 동작(라이플 등)이 T-포즈로 멈춥니다" % name)
     model_res = "res://" + rel.replace("\\", "/") + "/" + name + ".glb"

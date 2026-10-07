@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## 복장 확인 CLI — 기본 몸 퍼펫(DRPuppetSet)에 복장을 입혀 동작마다 몇 프레임 찍어 한 장으로 붙인다.
-##   줄 1 = 몸 그대로 · 줄 2 = 복장 전부 · 줄 3 = 상의만(하의 · 신발은 몸 그대로) — 옷만 갈아입는 것 확인용
+##   줄 1 = 몸 그대로 · 줄 2 = 복장 전부 · 줄 3 = 상의만(하의는 몸 그대로) — 옷만 갈아입는 것 확인용
 ##
 ##   godot --path . --resolution 900x700 --script res://addons/dot_rigger/tools/outfit_check_cli.gd -- \
 ##       --sets=res://puppet/sets.json --outfit=res://outfits/m36/outfit.json --out=res://puppet_test/_outfit_check.png

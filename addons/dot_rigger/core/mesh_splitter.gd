@@ -40,6 +40,7 @@ static func _bind_map(mi: MeshInstance3D, skel: Skeleton3D) -> PackedInt32Array:
 
 
 ## overrides = 부위 칠하기(DRPartOverrides). 칠한 정점은 웨이트 대신 칠한 파트로 간다(없는 파트 이름은 무시).
+## 그다음 overrides.cuts(자르기)로 삼각형을 평면에서 쪼개 곧은 경계를 낸다(DRMeshCutter — 새 정점이 서피스에 덧붙는다).
 static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile,
 		bleed_rings: int = 1, overrides: DRPartOverrides = null) -> SplitResult:
 	var res := SplitResult.new()
@@ -110,6 +111,7 @@ static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile,
 		var tcount := int(idx.size() / 3)
 
 		# 2-2) 파트별 삼각형 배정
+		var part_tris := {}       # part -> PackedInt32Array
 		for part in seen.keys():
 			var member := {}          # vertex idx -> true
 			for v in vcount:
@@ -131,12 +133,23 @@ static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile,
 				var a2 := idx[t * 3]; var b2 := idx[t * 3 + 1]; var c2 := idx[t * 3 + 2]
 				if member.has(a2) or member.has(b2) or member.has(c2):
 					out_idx.append(a2); out_idx.append(b2); out_idx.append(c2)
+			if not out_idx.is_empty():
+				part_tris[part] = out_idx
+
+		# 2-3) 자르기 — 곧은 경계(삼각형을 평면에서 쪼갬, 새 정점은 서피스 끝에 덧붙음)
+		var surf_arrays := arrays
+		if overrides != null and not overrides.cuts.is_empty():
+			var pool := DRMeshCutter.VertexPool.new(arrays)
+			DRMeshCutter.apply_cuts(part_tris, overrides.cuts, pool, seen, DRMeshCutter.MARGIN)
+			surf_arrays = pool.finish()
+
+		for part in part_tris.keys():
+			var out_idx: PackedInt32Array = part_tris[part]
 			if out_idx.is_empty():
 				continue
-
 			# 정점 배열은 원본을 그대로 재사용하고 인덱스만 교체한다.
 			# (미사용 정점은 그리지 않으므로 결과는 동일, 리맵 비용 절약)
-			var new_arrays := arrays.duplicate(true)
+			var new_arrays := surf_arrays.duplicate(false)
 			new_arrays[Mesh.ARRAY_INDEX] = out_idx
 			if not per_part_surfaces.has(part):
 				per_part_surfaces[part] = []

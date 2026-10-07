@@ -82,7 +82,7 @@ func _run() -> void:
 	_rm_dir(ProjectSettings.globalize_path(OUT.path_join("kar98k_smoke")))
 	var win := DREquipWindow.new()
 	root.add_child(win)
-	win.popup_centered(Vector2i(1180, 720))   # 창(1240x800) 안에 제목줄까지 들어오게 — 문서용 캡처
+	win.test_layout(Vector2i(1180, 720))   # 창(1240x800) 안에 제목줄까지 들어오게 — 문서용 캡처
 	await process_frame
 
 	print("[1] 창 구성")
@@ -412,7 +412,7 @@ func _run() -> void:
 	_check(String((d.get("part_rules", {}) as Dictionary).get("L_Hand", "")) == "weapon_front", "공통 규칙이 equip.json 에 저장")
 	var win2 := DREquipWindow.new()
 	root.add_child(win2)
-	win2.popup_centered(Vector2i(1180, 720))
+	win2.test_layout(Vector2i(1180, 720))
 	await process_frame
 	win2._preset_edit.text = PRESET
 	win2._open_json(json)

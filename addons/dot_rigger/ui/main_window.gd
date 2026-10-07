@@ -1,8 +1,9 @@
 @tool
-extends Window
+extends DRPage
 class_name DRMainWindow
 
-## A뷰 — 3D 모델을 고정 시점에서 보고, 파트 분리를 확인하고, 베이크한다.
+## 캐릭터 굽기 페이지(Dot Rigger 창의 ① 탭) — 3D 모델을 고정 시점에서 보고, 파트 분리를 확인하고, 베이크한다.
+## (이름은 창 시절 그대로 DRMainWindow — 10-06 부터는 DRHubWindow 의 탭 페이지다)
 ## UI 는 .tscn 없이 코드로 구성한다(에디터 없이도 수정/리뷰가 되도록).
 
 const DEF_OUT := "res://puppet"
@@ -158,15 +159,11 @@ var _giz_pitch := 0.0
 
 
 func _init() -> void:
-	title = "Dot Rigger — 3D → 2D 컷아웃 리그"
+	page_title = "캐릭터 굽기 (3D → 2D 컷아웃)"
 	# 에디터는 Control 의 텍스트를 자기 번역 사전으로 자동 번역한다.
 	# 그래서 애니메이션 이름 "Idle" 이 목록에 "대기" 로 표시되는 등
 	# 데이터가 원본과 다르게 보인다. 이 창의 문구는 전부 하드코딩이므로 끈다.
 	auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	size = Vector2i(1180, 780)
-	min_size = Vector2i(900, 600)
-	exclusive = false
-	close_requested.connect(func(): hide())
 	_build_ui()
 
 
@@ -1223,6 +1220,7 @@ func _on_save_preset() -> void:
 			_preset_path = path
 			_preset_label.text = "프리셋: %s" % path.get_file()
 			_status.text = "프리셋 저장 완료 — %s" % path
+			context_changed.emit({"preset": path})
 			if Engine.is_editor_hint():
 				EditorInterface.get_resource_filesystem().scan()
 		else:
@@ -1231,15 +1229,30 @@ func _on_save_preset() -> void:
 
 func _on_load_preset() -> void:
 	_file_dialog(false, PRESET_FILTER, "프리셋 불러오기 — Dot Rigger", "", func(p):
-		var path: String = String(p)
-		var res: Resource = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
-		if res is DRPreset:
-			_preset_path = path
-			_preset_label.text = "프리셋: %s" % path.get_file()
-			_apply_preset(res as DRPreset)
-			_status.text = "프리셋 적용 — %s" % path
-		else:
-			_status.text = "Dot Rigger 프리셋이 아닙니다: %s" % path)
+		if _load_preset_path(String(p)):
+			context_changed.emit({"preset": String(p)}))
+
+
+## 프리셋 파일을 읽어 적용한다(불러오기 단추 · 창의 공통 설정이 같이 쓴다)
+func _load_preset_path(path: String) -> bool:
+	var res: Resource = null
+	if path != "" and FileAccess.file_exists(path):
+		res = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
+	if not (res is DRPreset):
+		_status.text = "Dot Rigger 프리셋이 아닙니다: %s" % path
+		return false
+	_preset_path = path
+	_preset_label.text = "프리셋: %s" % path.get_file()
+	_apply_preset(res as DRPreset)
+	_status.text = "프리셋 적용 — %s" % path
+	return true
+
+
+## 창의 공통 설정 — 프리셋이 바뀌면(또는 이 페이지를 처음 열면) 그 프리셋을 바로 적용한다
+func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
+	var p := String(ctx.get("preset", ""))
+	if changed.has("preset") and p != "" and p != _preset_path:
+		_load_preset_path(p)
 
 
 func _current_opts() -> DRBaker.Options:
@@ -2359,6 +2372,8 @@ func _on_bake() -> void:
 	_progress.value = 0
 	if bool(res.get("ok", false)):
 		var msg := ""
+		# 구운 설정 = 프리셋. 장비 · 복장 탭이 이 프리셋(모델 · 도트화 값 · 세트 목록)을 읽으므로 구울 때 같이 저장해 어긋나지 않게 한다
+		var saved_preset := _preset_path != "" and ResourceSaver.save(_collect_preset(), _preset_path) == OK
 		if res.has("sets"):
 			var lines := PackedStringArray()
 			for e in res["sets"]:
@@ -2373,6 +2388,7 @@ func _on_bake() -> void:
 			var left: PackedStringArray = res.get("left_dirs", PackedStringArray())
 			if left.size() > 0:
 				msg += "\n⚠ 옛 세트 폴더에 다른 파일이 있어 남겼습니다: %s" % ", ".join(left)
+			context_changed.emit({"sets": out.path_join("sets.json"), "rebaked": true})
 		else:
 			msg = "완료 — 파트 %d개, 애니 %d개 → %s" % [
 				res["parts"].size(), res["animations"].size(), res["scene"]]
@@ -2381,6 +2397,10 @@ func _on_bake() -> void:
 				msg += "  (예전 애니 %d개 유지: %s)" % [kept.size(), ", ".join(kept)]
 			if String(res.get("dropped_reason", "")) != "":
 				msg += "\n⚠ " + String(res["dropped_reason"])
+			if FileAccess.file_exists(out.path_join("sets.json")):
+				msg += "\n⚠ 세트 목록(6번)이 비어 있어 단일 퍼펫으로 구웠습니다 — 장비 · 복장 탭은 %s/sets.json 의 세트를 봅니다(이번 굽기는 거기 안 들어감). 6번에서 세트로 담고 다시 구우세요." % out
+		if saved_preset:
+			msg += "\n프리셋 저장됨: %s" % _preset_path.get_file()
 		_status.text = msg
 		EditorInterface.get_file_system_dock().navigate_to_path(String(res["scene"]))
 	else:

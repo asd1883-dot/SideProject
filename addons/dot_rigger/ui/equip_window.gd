@@ -1,8 +1,9 @@
 @tool
-extends Window
+extends DRPage
 class_name DREquipWindow
 
-## Dot Rigger — 장비(무기·헬멧) 굽기 창.  프로젝트 > 도구 > Dot Rigger — 장비 굽기.
+## Dot Rigger — 장비(무기·헬멧) 굽기 페이지(Dot Rigger 창의 ② 탭).  프로젝트 > 도구 > Dot Rigger.
+## (이름은 창 시절 그대로 DREquipWindow. 창 안에서는 프리셋 · 세트 목록을 위의 `공통 설정` 줄에서 받는다)
 ##
 ## 왼쪽: 1 캐릭터 프리셋 · sets.json · 무기 모델 → 2 무기 파트 보이기/숨기기 → 3 잡는 법(자동 그립 + 기즈모 조정)
 ##       → 4 총의 기본 자리(앞 조각은 자동) → 바닥의 굽기.
@@ -177,13 +178,43 @@ var _gz_dtheta := 0.0
 
 
 func _init() -> void:
-	title = "Dot Rigger — 장비 굽기 (무기·헬멧)"
-	auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED   # 동작 이름 "Idle" 이 "대기" 로 번역돼 보이지 않게
-	size = Vector2i(1240, 800)
-	min_size = Vector2i(1000, 640)
-	exclusive = false
-	close_requested.connect(func(): hide())
+	page_title = "장비 굽기 (무기 · 헬멧)"
 	_build_ui()
+
+
+## 창의 공통 설정(프리셋 · 세트 목록)을 받는다. 이미 불러온 상태에서 바뀌면(세트를 다시 구웠을 때 포함)
+## 지금 그립 · 조정을 그대로 둔 채 다시 불러온다 — 이 탭이 보일 때.
+var _ctx_stale := false
+
+func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
+	if hosted:
+		_preset_edit.get_parent().visible = false
+		_sets_edit.get_parent().visible = false
+	var dirty := changed.has("rebaked")
+	var p := String(ctx.get("preset", ""))
+	if p != "" and p != _preset_edit.text:
+		_preset_edit.text = p
+		dirty = true
+	var s := String(ctx.get("sets", ""))
+	if s != "" and s != _sets_edit.text:
+		_sets_edit.text = s
+		dirty = true
+	if dirty and _loaded:
+		_ctx_stale = true
+
+
+func set_page_active(on: bool) -> void:
+	super.set_page_active(on)
+	if on:
+		_reload_if_stale()
+
+
+func _reload_if_stale() -> void:
+	if not _ctx_stale or _busy or eb == null:
+		return
+	_ctx_stale = false
+	_restore = eb.to_dict()      # `구운 장비 열기` 와 같은 길 — 그립 · 조정 · 규칙을 되돌린다
+	_on_load()
 
 
 func _notification(what: int) -> void:
@@ -867,7 +898,7 @@ func _on_open_equip() -> void:
 	pm.popup_hide.connect(func(): pm.queue_free.call_deferred())
 	add_child(pm)
 	var r := _open_btn.get_global_rect()
-	pm.popup(Rect2i(Vector2i(r.position + Vector2(0, r.size.y)) + position, Vector2i(int(r.size.x), 0)))
+	pm.popup(Rect2i(Vector2i(r.position + Vector2(0, r.size.y)) + window_origin(), Vector2i(int(r.size.x), 0)))
 
 
 func _open_equip_dialog() -> void:
@@ -1379,7 +1410,10 @@ func _refresh_pv2() -> void:
 
 
 func _process(delta: float) -> void:
-	if not visible or not _loaded:
+	if not is_visible_in_tree() or not _loaded:
+		return
+	if _ctx_stale and not _busy and _gz_active == "":
+		_reload_if_stale()
 		return
 	if _pv2_dirty and not _busy and _gz_active == "":
 		_pv2_timer -= delta

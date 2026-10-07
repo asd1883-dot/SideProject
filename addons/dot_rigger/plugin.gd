@@ -1,75 +1,44 @@
 @tool
 extends EditorPlugin
 
-## Dot Rigger — 프로젝트 > 도구 메뉴에 창을 띄운다.
-## (Unity 의 EditorWindow 와 같은 사용감: 독이 아니라 독립 창)
+## Dot Rigger — 프로젝트 > 도구 메뉴에 창 하나를 띄운다.
+## 창(DRHubWindow) 안에 탭 페이지: ① 캐릭터 굽기 · ② 장비 굽기 · ③ 복장 굽기.
+## (10-06 이전에는 기능마다 창이 따로였다 — 여러 창을 껐다 켜는 게 번거로워 한 창의 탭으로 합쳤다)
 
-const MENU_ITEM := "Dot Rigger (3D → 2D 컷아웃)"
+const MENU_ITEM := "Dot Rigger"
 const MENU_RESET := "Dot Rigger — 개발 내용 갱신"
-const MENU_EQUIP := "Dot Rigger — 장비 굽기 (무기·헬멧)"
-const MENU_OUTFIT := "Dot Rigger — 복장 굽기 (옷 갈아입히기)"
 
-var _window: DRMainWindow
-var _equip_window: DREquipWindow
-var _outfit_window: DROutfitWindow
+var _hub: DRHubWindow
 
 
 func _enter_tree() -> void:
 	add_tool_menu_item(MENU_ITEM, _open)
 	add_tool_menu_item(MENU_RESET, _reopen)
-	add_tool_menu_item(MENU_EQUIP, _open_equip)
-	add_tool_menu_item(MENU_OUTFIT, _open_outfit)
 
 
 func _exit_tree() -> void:
-	remove_tool_menu_item(MENU_OUTFIT)
-	remove_tool_menu_item(MENU_EQUIP)
 	remove_tool_menu_item(MENU_ITEM)
 	remove_tool_menu_item(MENU_RESET)
 	_free_window()
 
 
 func _free_window() -> void:
-	if is_instance_valid(_window):
-		_window.queue_free()
-	_window = null
-	if is_instance_valid(_equip_window):
-		_equip_window.queue_free()
-	_equip_window = null
-	if is_instance_valid(_outfit_window):
-		_outfit_window.queue_free()
-	_outfit_window = null
+	if is_instance_valid(_hub):
+		_hub.queue_free()
+	_hub = null
 
 
-## 창을 닫아도 hide() 만 되므로 인스턴스는 살아 있다.
-## 하던 작업(불러온 모델/각도/선택)을 유지하려는 의도지만,
-## 애드온 코드를 고친 뒤에는 옛 인스턴스가 그대로 다시 떠서
-## 새 UI 가 안 보이고 에러가 난다. 그럴 때 _reopen 을 쓴다.
+## 창을 닫아도 hide() 만 되므로 인스턴스는 살아 있다 — 탭마다 하던 작업(불러온 모델 · 각도 · 조정 · 칠하기)이 유지된다.
+## 마지막에 보던 탭으로 열린다. 애드온 코드를 고친 뒤에는 옛 인스턴스가 그대로 떠서 새 UI 가 안 보이므로 _reopen 을 쓴다.
 func _open() -> void:
-	if not is_instance_valid(_window):
-		_window = DRMainWindow.new()
-		EditorInterface.get_base_control().add_child(_window)
-	_window.popup_centered(Vector2i(1180, 780))
+	if not is_instance_valid(_hub):
+		_hub = DRHubWindow.new()
+		EditorInterface.get_base_control().add_child(_hub)
+	_hub.open()
 
 
-## 개발 내용 갱신 — 열려 있던 Dot Rigger 창(메인 · 장비)을 버린다. 다음에 메뉴로 열면 고친 코드로 새로 만들어진다.
+## 개발 내용 갱신 — 열려 있던 Dot Rigger 창을 버린다. 다음에 메뉴로 열면 고친 코드로 새로 만들어진다.
 ## 창은 띄우지 않는다(09-29 사용자 요청: 갱신만 하고 창이 뜨지 않게).
 func _reopen() -> void:
 	_free_window()
 	print("[Dot Rigger] 개발 내용 갱신 — 창을 다시 열면 새 코드로 뜹니다.")
-
-
-## 장비(무기·헬멧) 굽기 창 — 캐릭터 프리셋 + sets.json + 무기 모델을 읽어 그립을 맞추고 모든 세트에 맞춰 굽는다
-func _open_equip() -> void:
-	if not is_instance_valid(_equip_window):
-		_equip_window = DREquipWindow.new()
-		EditorInterface.get_base_control().add_child(_equip_window)
-	_equip_window.popup_centered(Vector2i(1240, 800))
-
-
-## 복장 굽기 창 — 옷 입은 모델을 기본 몸 세트에 맞춰 부위별로 굽는다(부위 칠하기 · 슬롯 · 뼈대에 붙이기)
-func _open_outfit() -> void:
-	if not is_instance_valid(_outfit_window):
-		_outfit_window = DROutfitWindow.new()
-		EditorInterface.get_base_control().add_child(_outfit_window)
-	_outfit_window.popup_centered(Vector2i(1360, 820))
