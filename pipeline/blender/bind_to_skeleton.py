@@ -3,8 +3,8 @@
 
     blender -b --factory-startup -P pipeline/blender/bind_to_skeleton.py -- \
         --base <기준 몸.glb(뼈대 · 동작 · 스킨 메시)> --src <생성한 모델.glb> --out <결과.glb> [--keep_base 0|1] [--fit height|span]
-        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 0] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
-     맨몸(human_base, 10-07): --part_fix_legs 1 · 옷(uniform_m36): 기본값. 원본 = pipeline/comfy/human_8581eb8d.glb · uniform_m36_80eaf512.glb, 기준 = source3d/UAL1_humanoid.glb
+        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
+     맨몸(human_base) · 옷(uniform_m36) 모두 기본값(다리 정리 켬 — 10-08 옷도 되돌림). 원본 = pipeline/comfy/human_8581eb8d.glb · uniform_m36_80eaf512.glb, 기준 = source3d/UAL1_humanoid.glb
 
 1. 기준 몸(UAL1_humanoid.glb)을 바인드 포즈(T-포즈)로 연다. 뼈대 · 동작은 그대로 쓴다.
 2. 생성한 모델(Tripo)의 메시를 하나로 합치고, 기준 몸의 스킨 메시에 크기 · 위치를 맞춘다.
@@ -516,9 +516,10 @@ def main():
             chains.append({"bones": ["upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd], "parent": "clavicle_" + sd,
                            "family": lambda n, sd=sd: n in ("upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd) or (n.startswith(FINGERS) and n.endswith("_" + sd)),
                            "steal": ("clavicle_" + sd, "spine_03", "spine_02"), "steal_r": float(a.get("steal_r", "0.075"))})
-            # 다리 관절 경계 정리 — 기본 끔(옷): 웨이트 1 로 덮은 경계가 사타구니 면을 레스트 자세에서 26 배까지 늘였다(M36, 10-07).
-            # 끄면 5.5 배 · 2D 사타구니 들쭉날쭉이 사라짐. 맨몸(human_base)은 켜서 붙였다(--part_fix_legs 1 — 끈 쪽이 2D 에서 낫지 않았음).
-            if a.get("part_fix_legs", "0") != "1":
+            # 다리 관절 경계 정리 — 기본 켬(10-08 되돌림). 끄면 3D 사타구니 면 늘어남은 줄지만(26 → 5.5 배) 2D 조각의 관절 부분이
+            # 고무처럼 비틀린 채 잘려, 2D 에서 다리를 벌리면 사타구니 · 무릎 뒤 틈이 더 벌어졌다(틈 픽셀 2563 → 2980, 02 U22).
+            # 2D 컷아웃은 인형처럼 딱딱한 다리가 낫다 — 맨몸 · 옷 모두 켬.
+            if a.get("part_fix_legs", "1") != "1":
                 continue
             chains.append({"bones": ["thigh_" + sd, "calf_" + sd, "foot_" + sd], "parent": "pelvis",
                            "family": lambda n, sd=sd: n in ("thigh_" + sd, "calf_" + sd, "foot_" + sd, "ball_" + sd),

@@ -57,6 +57,9 @@ var z_override: PackedStringArray = PackedStringArray()
 ## 애니 값은 "레스트 포즈·카메라 기준 상대값"이라 둘이 같을 때만 섞는다.
 ## 다르면 예전 애니는 버리고 dropped_reason 에 이유를 남긴다. 이름이 같은 애니는 이번 것으로 교체.
 var keep_previous: bool = true
+## 관절 받침(10-08) — 그리기 순서상 아래 조각이 관절 공(위 조각의 관절 둘레)을 같이 품어, 관절이 돌아 위 조각이 비켜나도
+## 틈(바탕 · 외곽선 색)이 안 보이게 한다. 끄면 예전처럼 조각이 경계에서 딱 잘린다.
+var joint_tuck: bool = true
 ## 실행 결과: 예전 rig.json 에서 이어 담은 애니 이름 / 이어 담지 못한 이유("" = 없음)
 var kept_anims: PackedStringArray = PackedStringArray()
 var dropped_reason: String = ""
@@ -130,7 +133,20 @@ func run() -> Dictionary:
 		_rest_snap[pn] = {"head": rp.rest_head2d, "angle": rp.rest_angle, "len": rp.rest_len2d, "depth": rp.rest_depth}
 	_layer_order_snap = baker.rig.rest_layer_order()
 
-	# 2) 파트별 스프라이트 렌더
+	# 2) 애니메이션 투영 — 파트를 그리기 전에 한다(자동 그리기 순서면 프레임마다의 앞뒤를 보고 관절 받침 짝을 정하므로)
+	var ai := 0
+	for aname in anim_names:
+		ai += 1
+		progress.emit("애니메이션 투영", ai, anim_names.size())
+		var key := baker.resolve_anim(aname)
+		if key == "":
+			key = aname
+		_anim_data[key] = await _project_anim(aname)
+	baker.set_rest_pose()
+	await RenderingServer.frame_post_draw
+
+	# 3) 파트별 스프라이트 렌더 — 관절 받침: 그리기 순서상 아래 조각에 위 조각의 관절 공을 같이 그린다(02 U23)
+	baker.tuck_pairs = _tuck_pairs()
 	var names := baker.rig.order
 	var total := names.size()
 	var i := 0
@@ -155,16 +171,7 @@ func run() -> Dictionary:
 		_part_crop[part] = used
 		_part_img[part] = final_img
 		final_img.save_png(out_dir.path_join("parts/%s.png" % part))
-
-	# 3) 애니메이션 투영
-	var ai := 0
-	for aname in anim_names:
-		ai += 1
-		progress.emit("애니메이션 투영", ai, anim_names.size())
-		var key := baker.resolve_anim(aname)
-		if key == "":
-			key = aname
-		_anim_data[key] = await _project_anim(aname)
+	baker.tuck_pairs = {}
 
 	# 4) 같은 폴더에 예전에 구운 애니가 있으면 이어 담는다(같은 레스트 포즈·시점일 때만)
 	#    rig.json 을 덮어쓰기 전에 읽어야 한다.
@@ -185,6 +192,31 @@ func run() -> Dictionary:
 		"kept": kept_anims,
 		"dropped_reason": dropped_reason,
 	}
+
+
+## 관절 받침 짝(이번 그리기 순서). 자동 순서면 이번에 투영한 프레임과 이어 담을 수도 있는 예전 rig.json 프레임에서
+## 앞뒤가 한 번도 안 바뀌는 관절만 — 바뀌는 관절에 공을 넣으면 그 프레임에서 공이 위 조각을 덮는다.
+func _tuck_pairs() -> Dictionary:
+	if not joint_tuck or baker.split == null:
+		return {}
+	var order := baker.rig.expand_layers(resolve_layer_order())
+	var frames_z: Array = []
+	if z_override.is_empty():
+		var anims: Array = _anim_data.values()
+		var path := out_dir.path_join("rig.json")
+		if keep_previous and FileAccess.file_exists(path):
+			var doc = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if doc is Dictionary and (doc as Dictionary).get("animations") is Dictionary:
+				anims.append_array(((doc as Dictionary)["animations"] as Dictionary).values())
+		for ad in anims:
+			for fr in (ad as Dictionary).get("frames", []):
+				var fz := {}
+				var pd: Dictionary = (fr as Dictionary).get("parts", {})
+				for pn in pd.keys():
+					if (pd[pn] as Dictionary).has("z"):
+						fz[pn] = int(pd[pn]["z"])
+				frames_z.append(fz)
+	return DRMeshSplitter.tuck_pairs(baker.split.joints, order, frames_z)
 
 
 ## 출력 폴더의 예전 rig.json 에서 애니메이션을 가져와 이번 결과에 합친다.

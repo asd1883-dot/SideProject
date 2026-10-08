@@ -5,7 +5,7 @@ class_name DROutfit
 ## 복장 — 옷 모델을 퍼펫의 세트마다(같은 카메라 · 같은 레스트 자세) 구운 파트 그림 묶음.
 ## 퍼펫(기본 몸)의 그 파트 그림만 바꿔 끼운다. 머리 · 손처럼 복장에 없는 파트는 몸 그대로.
 ##   굽기: tools/outfit_bake_cli.gd → res://outfits/<id>/outfit.json + <세트>/parts/<파트>.png
-##   쓰기: DRPuppetSet.wear(DROutfit.load_json("res://outfits/m36/outfit.json")) / take_off()
+##   쓰기: DRPuppetSet.wear(DROutfit.load_json("res://outfits/uniform_m36/outfit.json")) / take_off()
 ##
 ## 상의 · 하의를 따로 섞으려면 only_parts 로 일부 파트만 입힌다(예: 상의 = Torso · 팔).
 
@@ -14,6 +14,9 @@ class_name DROutfit
 @export var sets: Dictionary = {}
 ## 파트 -> 슬롯("top" 상의 · "bottom" 하의 — 옛 파일의 "shoes" 는 하의). 복장 굽기 창에서 정한 것 — 비면 아래 기본 묶음
 @export var slots: Dictionary = {}
+## 세트 이름 -> 구울 때 그 세트의 카메라 표시(view_sig). 세트를 다시 구워 해상도 · 카메라 · 레스트가 바뀌면 이 복장 그림은
+## 크기 · 자리가 안 맞는다(10-08: 384 로 구운 복장을 256 세트에 입혀 통째로 어긋남) → 입힐 때 비교해 안 맞으면 안 입힌다. 옛 파일은 비어 있음(비교 안 함).
+@export var views: Dictionary = {}
 
 ## 상의 · 하의(+ 발) 기본 묶음(파트 이름) — slots 가 없는 옛 outfit.json 용
 const TOP := ["Torso", "L_UpperArm", "L_Forearm", "R_UpperArm", "R_Forearm"]
@@ -39,6 +42,20 @@ func slot_parts(slot: String) -> Array:
 		if s == slot:
 			out.append(pn)
 	return out
+
+
+## 세트 rig.json 의 view → 비교용 한 줄(해상도 · 직교 크기 · 레스트 시점 · 방향)
+static func view_sig(view: Dictionary) -> String:
+	if view.is_empty():
+		return ""
+	var s: Array = view.get("size", [0, 0])
+	return "%dx%d|%.4f|%.4f|%.2f" % [int(s[0]), int(s[1]), float(view.get("ortho_size", 0.0)), float(view.get("rest_time", 0.0)), float(view.get("yaw", 0.0))]
+
+
+## 이 복장이 그 세트(지금 카메라 표시 sig)에 맞게 구운 것인가. 모르면(옛 파일 · 표시 없음) 맞는 것으로 친다
+func fits(set_name: String, sig: String) -> bool:
+	var v := String(views.get(set_name, ""))
+	return v == "" or sig == "" or v == sig
 
 
 ## 그 세트에서 입힐 파트들(only 가 비면 전부)
@@ -78,6 +95,7 @@ static func load_json(path: String) -> DROutfit:
 			var c: Array = pd.get("crop", [0, 0, 0, 0])
 			out[pn] = {"texture": tex, "crop": Vector2(float(c[0]), float(c[1]))}
 		o.sets[String(sn)] = out
+		o.views[String(sn)] = String((ss[sn] as Dictionary).get("view", ""))
 	return o
 
 

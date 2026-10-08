@@ -4,7 +4,7 @@
     python pipeline/check_character.py source3d/characters/human_base/human_base.glb
     python pipeline/check_character.py <glb> --anims Idle_Loop,Sprint_Loop,Rifle_Aiming_Idle --yaw -55
     python pipeline/check_character.py <glb> --anims Sprint_Loop --rest_time 0.42      (레스트 = 0.42초 프레임)
-    python pipeline/check_character.py <샌드박스 안 glb> --sandbox C:/Users/Dev/Documents/1941_thumb   (다른 샌드박스 — glb 가 그 안에 있으면 복사 없이 그대로)
+    python pipeline/check_character.py <샌드박스 안 glb> --sandbox C:/Users/Dev/Documents/<다른 샌드박스>   (다른 샌드박스 — glb 가 그 안에 있으면 복사 없이 그대로)
 
 ⚠ 레스트 시점이 다르면 결과가 뒤집힐 수 있다(10-02: 첫 프레임 레스트에선 좋아 보인 뚜껑이 사용자의 Sprint 63% 레스트에선 얼룩).
   사용자 창의 "레스트 자동" 값(예: Sprint 63% = 0.67초 x 0.63)을 --rest_time 으로 맞춰 확인할 것.

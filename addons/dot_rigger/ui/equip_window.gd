@@ -71,6 +71,8 @@ class GizmoNode:
 		return ""
 
 
+const PV_BG_DEFAULT := Color(0.36, 0.42, 0.36)   # 2D 미리보기 기본 배경
+var _pv_bg2: ColorRect                          # 2D 미리보기 배경(공통 설정 줄의 "미리보기 배경")
 var baker: DRBaker
 var eb: DREquipBaker
 var _sets: Array = []
@@ -185,6 +187,11 @@ func _init() -> void:
 ## 창의 공통 설정(프리셋 · 세트 목록)을 받는다. 이미 불러온 상태에서 바뀌면(세트를 다시 구웠을 때 포함)
 ## 지금 그립 · 조정을 그대로 둔 채 다시 불러온다 — 이 탭이 보일 때.
 var _ctx_stale := false
+
+func set_preview_bg(c: Color) -> void:
+	if _pv_bg2 != null:
+		_pv_bg2.color = c if c.a > 0.0 else PV_BG_DEFAULT
+
 
 func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
 	if hosted:
@@ -763,10 +770,12 @@ func _build_preview2d(parent: Control) -> void:
 	_vp2.transparent_bg = false
 	_vp2.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(_vp2)
-	var bg := ColorRect.new()
-	bg.color = Color(0.36, 0.42, 0.36)
-	bg.size = Vector2(_vp2.size)
-	_vp2.add_child(bg)
+	_pv_bg2 = ColorRect.new()
+	_pv_bg2.color = PV_BG_DEFAULT
+	_pv_bg2.size = Vector2(_vp2.size)
+	# 퍼펫의 외곽선 밑깔개(z −1)보다 아래 — z 0 이면 배경이 외곽선을 덮어 실루엣 선이 사라지고 관절 틈마다 배경이 비쳤다(10-08 "3번 탭에 몸이 뚫려 보임")
+	_pv_bg2.z_index = RenderingServer.CANVAS_ITEM_Z_MIN
+	_vp2.add_child(_pv_bg2)
 	_gizmo = GizmoNode.new()
 	_gizmo.name = "Gizmo"
 	_gizmo.z_index = 4000

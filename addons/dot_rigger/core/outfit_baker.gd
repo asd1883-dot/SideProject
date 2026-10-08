@@ -31,6 +31,8 @@ var sets_json := "res://puppet/sets.json"
 var sets: Array = []
 var slots: Dictionary = DEFAULT_SLOTS.duplicate()
 var warnings: PackedStringArray = PackedStringArray()
+## 관절 받침(10-08, DRExporter.joint_tuck 과 같음) — 끄면 조각이 경계에서 딱 잘린다
+var joint_tuck := true
 
 
 func setup(p_sets_json: String) -> bool:
@@ -60,6 +62,7 @@ func bake_set(sd: Dictionary) -> Dictionary:
 		return out
 	await RenderingServer.frame_post_draw
 	var grow := int((sd["rig"] as Dictionary).get("outline_px", 0))
+	baker.tuck_pairs = tuck_pairs_for(sd)     # 관절 받침 — 그리기 순서상 아래 조각에 위 조각의 관절 공(같은 슬롯끼리)
 	for pn in wear_parts():
 		if not baker.part_nodes.has(pn):
 			continue
@@ -70,7 +73,30 @@ func bake_set(sd: Dictionary) -> Dictionary:
 		if grow > 0:   # 아웃라인은 셰이더가 텍스처 안에만 그리므로 그 두께만큼 여유(익스포터와 같게)
 			used = used.grow(grow).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
 		out[pn] = {"image": img.get_region(used), "crop": used}
+	baker.tuck_pairs = {}
 	return out
+
+
+## 이 세트의 그리기 순서(rig.json)로 관절 받침 짝을 정한다 — 자동 순서로 구운 세트는 모든 프레임에서 아래 · 위가 그대로인 관절만.
+## 슬롯이 같은 조각끼리만(기본 몸을 다시 자를 때는 파트 전부가 한 슬롯).
+func tuck_pairs_for(sd: Dictionary) -> Dictionary:
+	if not joint_tuck or baker.split == null:
+		return {}
+	var rig: Dictionary = sd.get("rig", {})
+	var order := PackedStringArray(rig.get("z_order", []))
+	if order.is_empty():
+		order = PackedStringArray(rig.get("layer_order", []))
+	var frames_z: Array = []
+	if not bool(rig.get("z_order_manual", false)):
+		for an in (rig.get("animations", {}) as Dictionary).values():
+			for fr in (an as Dictionary).get("frames", []):
+				var fz := {}
+				var pd: Dictionary = (fr as Dictionary).get("parts", {})
+				for pn in pd.keys():
+					if (pd[pn] as Dictionary).has("z"):
+						fz[pn] = int(pd[pn]["z"])
+				frames_z.append(fz)
+	return DRMeshSplitter.tuck_pairs(baker.split.joints, order, frames_z, slots)
 
 
 ## 모든 세트(only_set 을 주면 그 세트만) → {세트 이름: {파트: {image, crop}}}
@@ -98,7 +124,16 @@ func to_outfit(baked: Dictionary, id: String = "") -> DROutfit:
 			var d: Dictionary = baked[sname][pn]
 			parts[pn] = {"texture": ImageTexture.create_from_image(d["image"]), "crop": Vector2((d["crop"] as Rect2i).position)}
 		o.sets[sname] = parts
+		o.views[sname] = _set_sig(String(sname))
 	return o
+
+
+## 그 세트의 지금 카메라 표시(DROutfit.view_sig)
+func _set_sig(sname: String) -> String:
+	for s in sets:
+		if String((s as Dictionary)["name"]) == sname:
+			return DROutfit.view_sig(((s as Dictionary).get("rig", {}) as Dictionary).get("view", {}))
+	return ""
 
 
 ## 기본 몸 세트에 다시 자른 파트 그림을 그대로 넣는다(복장 창에서 기본 몸을 칠한 뒤 — 메인 창에서 다시 굽지 않아도 되게).
@@ -182,7 +217,7 @@ func run(out_root: String, id: String, model_path: String = "") -> Dictionary:
 			(d["image"] as Image).save_png(root.path_join(rel))
 			var c: Rect2i = d["crop"]
 			parts[pn] = {"image": rel, "crop": [c.position.x, c.position.y, c.size.x, c.size.y]}
-		doc["sets"][sname] = {"dir": sdir, "parts": parts}
+		doc["sets"][sname] = {"dir": sdir, "parts": parts, "view": _set_sig(String(sname))}   # 이 세트를 이 카메라로 구웠다(세트를 다시 구우면 안 맞음)
 	var jp := root.path_join("outfit.json")
 	var f := FileAccess.open(jp, FileAccess.WRITE)
 	if f == null:

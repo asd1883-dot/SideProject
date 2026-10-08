@@ -51,6 +51,12 @@ func apply_context(_ctx: Dictionary, _changed: PackedStringArray) -> void:
 	pass
 
 
+## 미리보기 배경색(창 위 공통 설정 줄에서 고름, 10-08). c.a == 0 = 기본(페이지마다 원래 색). 페이지가 자기 미리보기에 적용한다.
+## 자홍 같은 튀는 색이면 조각 사이 구멍 · 비침이 잘 보인다.
+func set_preview_bg(_c: Color) -> void:
+	pass
+
+
 ## 검사 도구용 — 창 없이 root 에 넣었을 때 왼쪽 위에 이 크기로 놓는다(화면 캡처 · 배치 검사가 이 틀 기준)
 func test_layout(sz: Vector2i) -> void:
 	set_anchors_preset(Control.PRESET_TOP_LEFT)

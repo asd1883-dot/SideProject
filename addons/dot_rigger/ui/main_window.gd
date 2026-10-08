@@ -143,6 +143,7 @@ const PUPPET_SCALE_MAX := 8.0
 ## 레스트 틀 밖으로 나가는 동작도 프리뷰에서 잘리지 않게 캔버스보다 넓게 그린다. 틀은 얇은 선으로 표시.
 const PUPPET_PAD := 0.25
 var _canvas_box: Control
+var _pv_bg: ColorRect
 var _puppet_sig := ""
 var _play_t := 0.0
 
@@ -734,6 +735,11 @@ func _build_ui() -> void:
 	_pv_area.gui_input.connect(_on_preview_input)
 	_pv_area.resized.connect(_layout_preview)
 	pv_panel.add_child(_pv_area)
+	_pv_bg = ColorRect.new()          # 미리보기 배경(공통 설정 줄의 "미리보기 배경") — 기본은 투명(패널 색)
+	_pv_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pv_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pv_bg.color = Color(0, 0, 0, 0)
+	_pv_area.add_child(_pv_bg)
 	_preview = TextureRect.new()
 	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_preview.stretch_mode = TextureRect.STRETCH_SCALE
@@ -1249,6 +1255,11 @@ func _load_preset_path(path: String) -> bool:
 
 
 ## 창의 공통 설정 — 프리셋이 바뀌면(또는 이 페이지를 처음 열면) 그 프리셋을 바로 적용한다
+func set_preview_bg(c: Color) -> void:
+	if _pv_bg != null:
+		_pv_bg.color = c        # a == 0 이면 투명 = 패널 색(기본)
+
+
 func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
 	var p := String(ctx.get("preset", ""))
 	if changed.has("preset") and p != "" and p != _preset_path:
@@ -1506,10 +1517,11 @@ func _layout_preview() -> void:
 # 지정한 순서를 확인하려면 여기서 같은 방식으로 다시 그려 봐야 한다.
 
 ## 파트 이미지에 영향을 주는 모든 값. 이게 그대로면 캐시를 재사용한다.
+## 그리기 순서도 넣는다 — 관절 받침(아래 조각이 품는 관절 공)이 순서에 따라 달라진다
 func _render_sig() -> String:
-	return "%s|%d|%d|%.2f|%.2f|%d" % [
+	return "%s|%d|%d|%.2f|%.2f|%d|%s" % [
 		_view_sig(), int(_bleed.value), int(_bands.value),
-		_ambient.value, _alpha.value, int(_levels.value)]
+		_ambient.value, _alpha.value, int(_levels.value), ",".join(_order_from_list())]
 
 
 func _ensure_part_cache() -> void:
@@ -1517,8 +1529,11 @@ func _ensure_part_cache() -> void:
 	if sig == _part_sig and not _part_imgs.is_empty():
 		return
 	_part_imgs.clear()
+	# 관절 받침 — 굽기와 같게 지금 목록 순서로 아래 조각에 위 조각의 관절 공을 같이 그린다(02 U23)
+	baker.tuck_pairs = DRMeshSplitter.tuck_pairs(baker.split.joints, _part_order_from_list())
 	for p in baker.rig.order:
 		_part_imgs[p] = await baker.render_part(String(p))
+	baker.tuck_pairs = {}
 	_part_sig = sig
 
 

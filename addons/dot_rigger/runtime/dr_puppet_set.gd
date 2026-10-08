@@ -128,7 +128,9 @@ func reload() -> void:
 				player.get_animation(an).loop_mode = Animation.LOOP_LINEAR
 			if not _anim_to_set.has(String(an)):
 				_anim_to_set[String(an)] = _entries.size()
-		_entries.append({"name": String(sd.get("name", "")), "holder": holder, "puppet": puppet, "player": player, "anims": names, "origin": origin})
+		var rig_doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(base.path_join(String(sd.get("rig", ""))))) if String(sd.get("rig", "")) != "" else null
+		var vsig := DROutfit.view_sig((rig_doc as Dictionary).get("view", {})) if rig_doc is Dictionary else ""
+		_entries.append({"name": String(sd.get("name", "")), "holder": holder, "puppet": puppet, "player": player, "anims": names, "origin": origin, "view_sig": vsig})
 		var al: Dictionary = sd.get("aim_limits", {})
 		for an in al.keys():
 			var v: Array = al[an]
@@ -221,6 +223,10 @@ func _apply_outfit() -> int:
 		var changed := 0
 		for layer in _outfit_layers:
 			var o := (layer as Array)[0] as DROutfit
+			if not o.fits(String(ed["name"]), String(ed.get("view_sig", ""))):
+				# 세트를 다시 구운 뒤(해상도 · 카메라 · 레스트가 바뀜) 복장을 안 다시 구웠다 — 입히면 크기 · 자리가 통째로 어긋난다
+				push_warning("[DRPuppetSet] 복장 '%s' 은 세트 '%s' 를 지금과 다른 설정으로 구운 것이라 입히지 않았습니다 — 세트를 다시 구웠으면 ③ 복장 탭에서 [굽기]로 복장도 다시 구우세요." % [o.id, String(ed["name"])])
+				continue
 			changed += pup.wear_parts(o.parts_for(String(ed["name"]), (layer as Array)[1]))
 		if changed > 0:
 			n += 1

@@ -67,6 +67,20 @@ var model_root: Node3D
 var skeleton: Skeleton3D
 var anim_player: AnimationPlayer
 var part_nodes: Dictionary = {}    # part -> MeshInstance3D
+## 관절 받침 짝 {아래 조각: [위 조각 …]}(10-08, DRMeshSplitter.tuck_pairs) — render_part(아래)가 위 조각의 관절 둘레(관절점 중심 원)를
+## 아래 조각 그림의 빈 곳에 채운다. 관절이 돌아 위 조각이 비켜난 틈을 아래 조각이 메운다(평소엔 위 조각에 가려 안 보임).
+## 굽는 쪽(익스포터 · 복장 굽기 · 메인 창 2D 순서)이 그 세트의 그리기 순서로 정해 두고 다 그리면 비운다. 비면 꺼짐(평소 3D 보기 · 부위만 보기)
+var tuck_pairs: Dictionary = {}:
+	set(v):
+		tuck_pairs = v
+		_tuck_body = null      # 세트(카메라 · 레스트)가 바뀌었을 수 있다 — 몸 실루엣을 다시 잰다
+## 관절 받침 원 반지름 = 레스트 몸 전체 실루엣 안에 드는 가장 큰 원(관절점 중심) × tuck_fit + tuck_pad 픽셀, 관절 둘레(3D)를 넘지 않게.
+## 실루엣 안의 원이라 위 조각이 어느 쪽으로 돌아도 원 밖으로 안 튀어나온다(둥근 관절) — 크게 잡으면 레스트 모양 토막이 남아 보였다(10-08 어깨).
+## 두 조각만의 실루엣으로 재면 다른 조각이 덮던 작은 틈에 걸려 원이 2~3px 로 쪼그라들었다(10-08 뒷다리 고관절 → 사타구니 틈 그대로).
+static var tuck_fit := 1.0
+static var tuck_pad := 1.0
+static var tuck_max := 1.0      # 관절 둘레(3D) 상한에 곱하는 값
+var _tuck_body: Image = null    # 레스트 몸 전체(모든 파트) — 관절 받침 원의 크기를 재는 실루엣
 ## 파트로 자르기 전의 원본 스킨드 메시(숨겨 둠) — 복장 창의 부위 칠하기가 정점을 읽는다
 var source_mesh_instance: MeshInstance3D
 ## 이 모델의 부위 칠하기(<모델>.parts.json, 없으면 빈 것)
@@ -544,6 +558,7 @@ func resplit(ov: DRPartOverrides = null) -> void:
 			mi.mesh = null      # 칠해서 정점이 하나도 안 남은 파트 — 그림이 비어 굽기에서 빠진다
 	split.meshes = ns.meshes
 	split.tri_counts = ns.tri_counts
+	split.joints = ns.joints
 
 
 func _apply_dot_material(mi: MeshInstance3D, shader: Shader) -> void:
@@ -849,8 +864,61 @@ func set_rest_pose() -> void:
 
 ## 파트 하나만 보이게 하고 한 장 렌더. 나머지는 숨기므로
 ## 가려진 부분까지 온전한 스프라이트가 나온다(= 컷아웃에 필요한 형태).
+## tuck_pairs 에 이 파트가 있으면 위 조각들의 관절 둘레를 빈 곳에 채운다(관절 받침).
 func render_part(part: String) -> Image:
-	return await render_parts(PackedStringArray([part]))
+	var img: Image = await render_parts(PackedStringArray([part]))
+	if tuck_pairs.has(part):
+		for up in (tuck_pairs[part] as PackedStringArray):
+			await _tuck_joint(img, part, String(up))
+	return img
+
+
+## 관절 받침 하나: 위 조각(up)을 따로 그려, 관절점 중심 원 안에서 아래 조각(img) 이 빈 픽셀을 위 조각 픽셀로 채운다.
+## 원 = 레스트 몸 전체 실루엣 안에 드는 가장 큰 원(× tuck_fit + tuck_pad), 관절 둘레(3D)를 넘지 않게.
+func _tuck_joint(img: Image, lo: String, up: String) -> void:
+	var jd := {}
+	for j in split.joints:
+		var pc := [String((j as Dictionary)["parent"]), String((j as Dictionary)["child"])]
+		if pc.has(lo) and pc.has(up):
+			jd = j
+			break
+	if jd.is_empty() or float(jd["radius"]) <= 0.0 or not rig.parts.has(String(jd["child"])):
+		return
+	var cp: DRRigModel.Part = rig.parts[String(jd["child"])]
+	if cp.root_bone < 0:
+		return
+	var ss: float = float(maxi(1, opts.supersample))
+	var head3d := (skeleton.global_transform * skeleton.get_bone_global_pose(cp.root_bone)).origin
+	var c := camera.unproject_position(head3d) / ss
+	var r_max := float(jd["radius"]) * float(opts.view_size.y) / maxf(camera.size, 0.0001) * tuck_max
+	if _tuck_body == null:
+		_tuck_body = await render_all_parts_composite()
+	var up_img: Image = await render_parts(PackedStringArray([up]))
+	var w := img.get_width()
+	var h := img.get_height()
+	# 레스트 몸 실루엣 안에 드는 가장 큰 원: 관절점에서 가장 가까운 빈(바탕) 픽셀까지
+	var r_in := r_max
+	var n := int(ceil(r_max)) + 1
+	for y in range(maxi(int(c.y) - n, 0), mini(int(c.y) + n + 1, h)):
+		for x in range(maxi(int(c.x) - n, 0), mini(int(c.x) + n + 1, w)):
+			if _tuck_body.get_pixel(x, y).a >= 0.5:
+				continue
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(c)
+			if d < r_in:
+				r_in = d
+	var r := minf(r_in * tuck_fit + tuck_pad, r_max)
+	if r < 1.0:
+		return
+	var m := int(ceil(r))
+	for y in range(maxi(int(c.y) - m, 0), mini(int(c.y) + m + 1, h)):
+		for x in range(maxi(int(c.x) - m, 0), mini(int(c.x) + m + 1, w)):
+			if Vector2(x + 0.5, y + 0.5).distance_to(c) > r:
+				continue
+			if img.get_pixel(x, y).a >= 0.5:
+				continue
+			var u := up_img.get_pixel(x, y)
+			if u.a >= 0.5:
+				img.set_pixel(x, y, u)
 
 
 ## 지정한 파트들만 보이게 하고 한 장 렌더.

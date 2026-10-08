@@ -30,6 +30,9 @@ var _ctx := {"preset": "", "sets": ""}   # 세 탭이 같이 쓰는 설정
 var _preset_edit: LineEdit
 var _sets_edit: LineEdit
 var _ctx_note: Label
+var _bg_pick: ColorPickerButton
+var _preview_bg := Color(0, 0, 0, 0)   # a == 0 = 기본(탭마다 원래 색)
+var _bg_restored := false
 
 
 func _init() -> void:
@@ -174,6 +177,27 @@ func _build_ui() -> void:
 	_ctx_note.custom_minimum_size = Vector2(160, 0)
 	_ctx_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	crow.add_child(_ctx_note)
+	# 미리보기 배경(10-08 사용자 요청) — ① ② ③ 미리보기에 같이. 자홍이면 조각 사이 구멍 · 비침이 잘 보인다
+	var bl := Label.new()
+	bl.text = "미리보기 배경"
+	bl.tooltip_text = "① 캐릭터 · ② 장비 · ③ 복장 미리보기의 바탕색. 자홍처럼 튀는 색으로 두면 조각 사이 구멍 · 비침이 잘 보인다. 굽는 그림에는 안 들어간다."
+	bl.mouse_filter = Control.MOUSE_FILTER_STOP
+	crow.add_child(bl)
+	_bg_pick = ColorPickerButton.new()
+	_bg_pick.custom_minimum_size = Vector2(36, 0)
+	_bg_pick.edit_alpha = false
+	_bg_pick.tooltip_text = bl.tooltip_text
+	_bg_pick.color = Color(0.36, 0.42, 0.36)
+	_bg_pick.color_changed.connect(func(c): set_preview_bg(c))
+	crow.add_child(_bg_pick)
+	for preset in [["자홍", Color(1, 0, 1)], ["기본", Color(0, 0, 0, 0)]]:
+		var pb := Button.new()
+		pb.text = String(preset[0])
+		pb.flat = true
+		pb.tooltip_text = "미리보기 배경을 %s 으로" % preset[0] if preset[0] != "기본" else "미리보기 배경을 원래 색으로"
+		var pc: Color = preset[1]
+		pb.pressed.connect(func(): set_preview_bg(pc))
+		crow.add_child(pb)
 
 	var margin := MarginContainer.new()
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -224,6 +248,26 @@ func _pick_file(filter: String, title_text: String, on_pick: Callable) -> void:
 # ---------------------------------------------------------------- 공통 설정
 
 ## 처음 한 번: 지난번 값 → 없으면 프로젝트에서 찾은 프리셋 · 그 출력 폴더의 sets.json
+## 미리보기 배경 — 만든 탭 모두에 적용하고 기억한다(c.a == 0 = 기본)
+func set_preview_bg(c: Color) -> void:
+	_preview_bg = c
+	if _bg_pick != null and c.a > 0.0:
+		_bg_pick.color = c
+	for k in _pages.keys():
+		(_pages[k] as DRPage).set_preview_bg(c)
+	if Engine.is_editor_hint():
+		EditorInterface.get_editor_settings().set_project_metadata(META_SECTION, "preview_bg", c.to_html(true) if c.a > 0.0 else "")
+
+
+## 지난번 미리보기 배경 불러오기(open 때)
+func _restore_preview_bg() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var h := String(EditorInterface.get_editor_settings().get_project_metadata(META_SECTION, "preview_bg", ""))
+	if h != "" and Color.html_is_valid(h):
+		set_preview_bg(Color.html(h))
+
+
 func _init_context() -> void:
 	var preset := ""
 	var sets := ""
@@ -323,6 +367,9 @@ func open(key: String = "") -> void:
 			mode = Window.MODE_WINDOWED
 		_rescue_if_offscreen()
 		grab_focus()
+	if not _bg_restored:
+		_bg_restored = true
+		_restore_preview_bg()
 	open_page(key)
 
 
@@ -406,6 +453,7 @@ func open_page(key: String) -> void:
 		if String(_ctx["preset"]) == "" and String(_ctx["sets"]) == "":
 			_init_context()
 		page.apply_context(_ctx.duplicate(), PackedStringArray(["preset", "sets"]))
+		page.set_preview_bg(_preview_bg)
 	for k in _pages.keys():
 		var pg := _pages[k] as DRPage
 		var on: bool = k == key

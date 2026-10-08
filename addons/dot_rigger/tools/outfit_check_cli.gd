@@ -4,7 +4,7 @@ extends SceneTree
 ##   줄 1 = 몸 그대로 · 줄 2 = 복장 전부 · 줄 3 = 상의만(하의는 몸 그대로) — 옷만 갈아입는 것 확인용
 ##
 ##   godot --path . --resolution 900x700 --script res://addons/dot_rigger/tools/outfit_check_cli.gd -- \
-##       --sets=res://puppet/sets.json --outfit=res://outfits/m36/outfit.json --out=res://puppet_test/_outfit_check.png
+##       --sets=res://puppet/sets.json --outfit=res://outfits/uniform_m36/outfit.json --out=res://puppet_test/_outfit_check.png
 
 var _args := {}
 
@@ -40,6 +40,7 @@ func _run() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.16, 0.17, 0.2)
 	bg.size = Vector2(cell)
+	bg.z_index = RenderingServer.CANVAS_ITEM_Z_MIN     # 퍼펫 외곽선 밑깔개(z −1)보다 아래
 	vp.add_child(bg)
 	var pset := DRPuppetSet.new()
 	pset.sets_json = _arg("sets", "res://puppet/sets.json")

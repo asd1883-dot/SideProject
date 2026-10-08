@@ -178,6 +178,7 @@ func _run() -> void:
 		var bg := ColorRect.new()
 		bg.color = Color(0.36, 0.42, 0.36)
 		bg.size = Vector2(vp.size)
+		bg.z_index = RenderingServer.CANVAS_ITEM_Z_MIN     # 퍼펫 외곽선 밑깔개(z −1)보다 아래
 		vp.add_child(bg)
 		var soldier := DRPuppetSet.new()
 		soldier.sets_json = eb.sets_json

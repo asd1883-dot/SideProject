@@ -94,6 +94,8 @@ class LineOverlay:
 		draw_circle(b, 4.0, Color(1.0, 0.85, 0.2))
 
 
+const PV_BG_DEFAULT := Color(0.36, 0.42, 0.36)   # 2D 미리보기 기본 배경
+var _pv_bg2: ColorRect                          # 2D 미리보기 배경(공통 설정 줄의 "미리보기 배경")
 var baker: DRBaker                      # 옷 모델
 var ob: DROutfitBaker
 var _scene_path := ""
@@ -240,6 +242,11 @@ func _on_shown() -> void:
 ## 창의 공통 설정(프리셋 · 세트 목록)을 받는다. 이미 불러온 상태에서 바뀌면(세트를 다시 구웠을 때 포함) 이 탭이 보일 때 다시 불러온다.
 ## 칠한 것은 파일(<모델>.parts.json)에, 슬롯은 칸에 남아 있어 다시 불러와도 그대로다.
 var _ctx_stale := false
+
+func set_preview_bg(c: Color) -> void:
+	if _pv_bg2 != null:
+		_pv_bg2.color = c if c.a > 0.0 else PV_BG_DEFAULT
+
 
 func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
 	if hosted:
@@ -699,6 +706,31 @@ func _enable_joints(keys: Array) -> void:
 	_refresh_display()
 
 
+## 저장된 복장(<출력 폴더>/<복장 이름>/outfit.json)이 지금 세트와 다른 설정으로 구운 것인가 — 맞으면 "", 아니면 알림 문장.
+## 세트를 ① 탭에서 다시 구우면(해상도 등) 저장된 복장은 게임 · F6 에서 안 입혀진다(10-08). 미리보기는 그때그때 새로 구워 멀쩡해 보인다.
+func _saved_outfit_stale() -> String:
+	var jp := _out_edit.text.strip_edges().path_join(_id_edit.text.strip_edges()).path_join("outfit.json")
+	if ob == null or not FileAccess.file_exists(jp):
+		return ""
+	var v: Variant = JSON.parse_string(FileAccess.get_file_as_string(jp))
+	if not (v is Dictionary):
+		return ""
+	var saved: Dictionary = (v as Dictionary).get("sets", {})
+	var bad: Array = []
+	for s in ob.sets:
+		var sname := String((s as Dictionary)["name"])
+		if not saved.has(sname):
+			bad.append("%s(없음)" % sname)
+			continue
+		var was := String((saved[sname] as Dictionary).get("view", ""))
+		var now := DROutfit.view_sig(((s as Dictionary).get("rig", {}) as Dictionary).get("view", {}))
+		if was != "" and now != "" and was != now:
+			bad.append("%s(%s → %s)" % [sname, was.get_slice("|", 0), now.get_slice("|", 0)])
+	if bad.is_empty():
+		return ""
+	return "저장된 복장 %s 이 지금 세트와 다르게 구운 것입니다: %s — [굽기]로 다시 구우세요(안 그러면 게임 · F6 에서 안 입혀짐)." % [jp.get_file(), ", ".join(PackedStringArray(bad))]
+
+
 ## 기본 몸의 관절 경계를 옷 모델에도(캐릭터 하나에 경계 하나 — 옷마다 다시 정하지 않게). 옮긴 관절 수(바뀐 게 없으면 0)
 func _sync_joints_from_base() -> int:
 	if _t_base == null or _t_outfit == null or _t_base.ov == null or _t_outfit.ov == null:
@@ -902,10 +934,12 @@ func _build_preview2d(parent: Control) -> void:
 	_vp2.transparent_bg = false
 	_vp2.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(_vp2)
-	var bg := ColorRect.new()
-	bg.color = Color(0.36, 0.42, 0.36)
-	bg.size = Vector2(_vp2.size)
-	_vp2.add_child(bg)
+	_pv_bg2 = ColorRect.new()
+	_pv_bg2.color = PV_BG_DEFAULT
+	_pv_bg2.size = Vector2(_vp2.size)
+	# 퍼펫의 외곽선 밑깔개(z −1)보다 아래 — z 0 이면 배경이 외곽선을 덮어 실루엣 선이 사라지고 관절 틈마다 배경이 비쳤다(10-08 "3번 탭에 몸이 뚫려 보임")
+	_pv_bg2.z_index = RenderingServer.CANVAS_ITEM_Z_MIN
+	_vp2.add_child(_pv_bg2)
 	_pv2.texture = _vp2.get_texture()
 	_pv_msg = _hint(box, "", 300.0)
 
@@ -1288,6 +1322,9 @@ func _on_load() -> void:
 	# 기본은 `둘 다` — 기본 몸도 불러 둔다. 기본 몸을 칠해 놓고 세트에 안 넣은 것이 있으면 미리보기에 반영하고 굽기 때 넣는다
 	await _switch_target("both")
 	_fill_joints()
+	var stale := _saved_outfit_stale()
+	if stale != "":
+		_load_status.text += "\n⚠ " + stale
 	var nj := _sync_joints_from_base()
 	if nj > 0:
 		_load_status.text += "\n기본 몸에 정한 관절 경계를 이 옷에도 적용했습니다."
@@ -1516,6 +1553,7 @@ func _fill_target_mesh(t: PaintTarget) -> void:
 	if src == null:
 		return
 	var binds := DRMeshSplitter._bind_map(mi, t.baker.skeleton)
+	var leg_rules := DRMeshSplitter.leg_rules(mi, t.baker.skeleton, t.baker.split.part_bones, t.baker.split.bone_part)
 	for si in src.get_surface_count():
 		if src.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES:
 			continue
@@ -1538,7 +1576,7 @@ func _fill_target_mesh(t: PaintTarget) -> void:
 					best_w = w
 					best_b = bones[v * bpv + k]
 			var skel_b := binds[best_b] if best_b >= 0 and best_b < binds.size() else -1
-			t.auto.append(String(t.baker.split.bone_part.get(skel_b, "")))
+			t.auto.append(DRMeshSplitter.leg_part(String(t.baker.split.bone_part.get(skel_b, "")), verts[v], leg_rules))   # 굽기와 같은 다리 규칙
 			t.pos.append(verts[v])
 			t.nrm.append(nrm[v] if nrm.size() == vcount else Vector3.UP)
 			t.uv.append(uvs[v] if uvs.size() == vcount else Vector2.ZERO)
