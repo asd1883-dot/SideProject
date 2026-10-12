@@ -42,6 +42,13 @@ func _go() -> void:
 	for i in 60:
 		await get_tree().process_frame
 	_expect(hub._current == "equip" and hub.page("equip") != null, "② 장비 탭 열림")
+	# 10-12: 무기 칸이 비면 아무것도 안 떠서 "캐릭터 프리셋을 뭘 넣어도 안 뜬다" — 열기만 해도 캐릭터는 떠야 한다
+	var eqp = hub.page("equip")
+	var waited := 0
+	while (eqp._busy or eqp._soldier == null) and waited < 3000:
+		await get_tree().process_frame
+		waited += 1
+	_expect(is_instance_valid(eqp._soldier) and eqp._pv3.texture != null, "② 탭을 열면 캐릭터(2D · 3D)가 저절로 뜸(무기 없이도)")
 	# 닫기(X) → 다시 열기: 같은 자리 · 같은 탭
 	hub.position += Vector2i(120, 60)
 	var where := hub.position

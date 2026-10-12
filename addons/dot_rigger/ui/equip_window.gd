@@ -72,6 +72,7 @@ class GizmoNode:
 
 
 const PV_BG_DEFAULT := Color(0.36, 0.42, 0.36)   # 2D 미리보기 기본 배경
+const META_SECTION := "dot_rigger_equip"           # 지난 값(무기 · 장비 이름 · 슬롯 · 출력 폴더) — 에디터 프로젝트 메타데이터
 var _pv_bg2: ColorRect                          # 2D 미리보기 배경(공통 설정 줄의 "미리보기 배경")
 var baker: DRBaker
 var eb: DREquipBaker
@@ -84,6 +85,8 @@ var _pv2_dirty := false
 var _pv2_timer := 0.0
 var _last_baked: Dictionary = {}
 var _restore: Dictionary = {}  # `구운 장비 열기…` 로 읽은 equip.json — 불러온 뒤 되돌린다
+var _auto_loaded := false      # 탭이 처음 보일 때 한 번 저절로 불러왔다
+var _load_again := false       # 불러오는 중에 무기를 골랐다 — 끝나면 다시 불러온다
 
 # 1
 var _preset_edit: LineEdit
@@ -182,6 +185,43 @@ var _gz_dtheta := 0.0
 func _init() -> void:
 	page_title = "장비 굽기 (무기 · 헬멧)"
 	_build_ui()
+	visibility_changed.connect(_on_shown)
+
+
+func _ready() -> void:
+	_restore_fields()
+	_on_shown.call_deferred()
+
+
+## 탭이 처음 보이면(에디터) 공통 설정의 캐릭터로 바로 불러온다 — 무기가 없으면 캐릭터만(10-12: 무기 칸이 비면 아무것도 안 떠서
+## "캐릭터 프리셋을 뭘 넣어도 안 뜬다"). 명령줄 검사는 자기가 칸을 채우고 부르므로 에디터에서만.
+func _on_shown() -> void:
+	if not Engine.is_editor_hint() or not is_visible_in_tree() or _loaded or _busy or _auto_loaded:
+		return
+	_auto_loaded = true
+	var p := _preset_edit.text.strip_edges()
+	var s := _sets_edit.text.strip_edges()
+	if p != "" and ResourceLoader.exists(p) and s != "" and FileAccess.file_exists(s):
+		_on_load.call_deferred()
+
+
+func _restore_fields() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var es := EditorInterface.get_editor_settings()
+	for pair in [["weapon", _weapon_edit], ["id", _id_edit], ["slot", _slot_edit], ["out", _out_edit]]:
+		# 기본값을 꼭 준다 — null 이면 값이 없을 때 에디터가 오류를 낸다(02 U18)
+		var v := String(es.get_project_metadata(META_SECTION, String(pair[0]), ""))
+		if v != "":
+			(pair[1] as LineEdit).text = v
+
+
+func _remember_fields() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var es := EditorInterface.get_editor_settings()
+	for pair in [["weapon", _weapon_edit], ["id", _id_edit], ["slot", _slot_edit], ["out", _out_edit]]:
+		es.set_project_metadata(META_SECTION, String(pair[0]), (pair[1] as LineEdit).text)
 
 
 ## 창의 공통 설정(프리셋 · 세트 목록)을 받는다. 이미 불러온 상태에서 바뀌면(세트를 다시 구웠을 때 포함)
@@ -208,6 +248,12 @@ func apply_context(ctx: Dictionary, changed: PackedStringArray) -> void:
 		dirty = true
 	if dirty and _loaded:
 		_ctx_stale = true
+	elif dirty and not _loaded:
+		if _busy:
+			_load_again = true      # 불러오는 중 — 끝나면 바뀐 캐릭터로 다시
+		elif is_visible_in_tree():
+			_auto_loaded = false    # 캐릭터만 띄운 상태 · 아직 안 불러온 상태 — 바뀐 캐릭터로 다시
+			_on_shown.call_deferred()
 
 
 func set_page_active(on: bool) -> void:
@@ -368,12 +414,13 @@ func _vec_row(parent: Control, label: String, names: Array, lo: float, hi: float
 
 func _build_section_source(col: Control) -> void:
 	var s := _section(col, "1. 캐릭터 · 세트 · 무기")
-	_hint(s, "세트를 구울 때 쓴 캐릭터 프리셋과 sets.json, 그리고 무기 3D 모델을 고르고 `불러오기`. 무기는 병사와 같은 카메라·같은 레스트 자세로 자세(세트)마다 한 장씩 구워진다.")
+	_hint(s, "세트를 구울 때 쓴 캐릭터 프리셋과 sets.json, 그리고 무기 3D 모델을 고르고 `불러오기`. 무기는 병사와 같은 카메라·같은 레스트 자세로 자세(세트)마다 한 장씩 구워진다. 탭을 열면 캐릭터는 저절로 뜨고(무기 칸이 비어 있으면 캐릭터만), 무기를 고르면 바로 손에 붙는다.")
 	_preset_edit = _path_row(s, "캐릭터 프리셋", "메인 창의 `0. 프리셋` 으로 저장한 .tres — 모델·추가 동작 폴더·도트화 값(명암 단계 등)을 세트를 구울 때와 같게 맞추려고 읽는다.", _on_browse_preset)
 	_preset_edit.text = _default_preset()
 	_sets_edit = _path_row(s, "세트 목록", "세트 굽기가 남긴 sets.json. 여기 적힌 세트마다 무기 그림이 한 장씩 나온다.", _on_browse_sets)
 	_sets_edit.text = "res://puppet/sets.json"
 	_weapon_edit = _path_row(s, "무기 모델", "3D 무기 파일. OBJ 는 가져오기 형식이 Mesh(기본)면 한 덩어리로 들어온다 — 파트별로 숨기려면 2번의 안내대로 Scene 으로.", _on_browse_weapon)
+	_weapon_edit.text_submitted.connect(func(_t): _on_load())
 	var row := HBoxContainer.new()
 	var l1 := Label.new()
 	l1.text = "장비 이름"
@@ -960,6 +1007,14 @@ func _fail(msg: String) -> void:
 	_busy = false
 	_loaded = false
 	_bake_btn.disabled = true
+	_load_again_if_asked()
+
+
+## 불러오는 사이에 무기를 골랐으면(그때는 무시됐다) 지금 다시 불러온다
+func _load_again_if_asked() -> void:
+	if _load_again:
+		_load_again = false
+		_on_load.call_deferred()
 
 
 func _teardown() -> void:
@@ -984,6 +1039,8 @@ func _teardown() -> void:
 
 func _on_load() -> void:
 	if _busy:
+		if not _loaded:
+			_load_again = true      # 불러오는 중(미리보기 · 굽기 중이면 예전처럼 무시)
 		return
 	_busy = true
 	_bake_btn.disabled = true
@@ -1013,10 +1070,8 @@ func _on_load() -> void:
 		_fail("캐릭터 모델을 열 수 없습니다: %s" % model_path)
 		return
 	var wpath := _weapon_edit.text.strip_edges()
-	var wres: Resource = DREquipBaker.load_weapon(wpath)
-	if wres == null or not (wres is PackedScene or wres is Mesh):
-		_fail("무기 모델을 열 수 없습니다: %s" % wpath)
-		return
+	var wres: Resource = DREquipBaker.load_weapon(wpath) if wpath != "" else null
+	var has_weapon := wres != null and (wres is PackedScene or wres is Mesh)
 	_teardown()
 	baker = DRBaker.new()
 	if not baker.setup(self, scene, DRPartProfile.humanoid(), opts):
@@ -1027,15 +1082,18 @@ func _on_load() -> void:
 	eb = DREquipBaker.new()
 	eb.baker = baker
 	eb.sets_json = _sets_edit.text.strip_edges()
+	_sets = eb.read_sets()
+	if _sets.is_empty():
+		_fail("sets.json 에서 세트를 읽지 못했습니다: %s" % eb.sets_json)
+		return
+	if not has_weapon:
+		await _show_character_only(wpath)
+		return
 	eb.set_weapon(wres, wpath)
 	eb.id = _id_edit.text.strip_edges() if _id_edit.text.strip_edges() != "" else wpath.get_file().get_basename().to_lower()
 	_id_edit.text = eb.id
 	eb.slot = _slot_edit.text.strip_edges()
 	eb.weapon_scale = _scale.value
-	_sets = eb.read_sets()
-	if _sets.is_empty():
-		_fail("sets.json 에서 세트를 읽지 못했습니다: %s" % eb.sets_json)
-		return
 	if not baker.rig.parts.has("R_Hand"):
 		_load_status.text = "⚠ R_Hand 파트가 없습니다 — 붙일 손을 직접 고르세요"
 	_fill_parts()
@@ -1074,9 +1132,28 @@ func _on_load() -> void:
 	# 여기서야 손을 뗀다(그 전에 풀면 병사를 만드는 사이에 보기 조작이 끼어든다)
 	_busy = false
 	_bake_btn.disabled = false
+	_remember_fields()
 	_on_view_set_changed()
 	_pv2_dirty = true
 	_pv2_timer = 0.0
+	_load_again_if_asked()
+
+
+## 무기 없이 캐릭터만 — 2D 병사와 3D 몸을 띄우고 무기를 고르라고 안내한다. 그립 · 굽기는 무기가 있어야 하므로 _loaded 는 false 그대로.
+## (10-12: 무기 칸이 비면 불러오기가 통째로 멈춰 "캐릭터 프리셋을 뭘 넣어도 어떤 모델이라도 안 뜬다")
+func _show_character_only(wpath: String) -> void:
+	var gs := DREquipBaker.pick_grip_set(_sets)
+	_grip_set_name = String(gs["name"])
+	_fill_view_sets()
+	_view_set.select(maxi(_set_index(_grip_set_name), 0))
+	eb.apply_set(gs)          # 3D 도 그 세트의 카메라 · 레스트 자세로
+	_pv3.texture = baker.viewport.get_texture()
+	await _build_soldier()
+	var why := "무기 모델 칸이 비어 있습니다" if wpath == "" else "무기 모델을 열 수 없습니다: %s" % wpath
+	_load_status.text = "캐릭터를 띄웠습니다(세트 %d개). %s — `무기 모델` 칸의 … 로 고르면 바로 손에 붙습니다." % [_sets.size(), why]
+	_status.text = "무기 모델을 고르세요(1번) — 고르면 바로 불러옵니다."
+	_busy = false
+	_load_again_if_asked()
 
 
 func _set_index(set_name: String) -> int:
@@ -1353,7 +1430,7 @@ func _build_soldier() -> void:
 	_soldier.name = "PreviewSoldier"
 	_soldier.run_in_editor = true
 	_soldier.force_loop = true
-	_soldier.sets_json = eb.sets_json
+	_soldier.sets_json = _sets_edit.text.strip_edges()
 	_soldier.position = Vector2(_vp2.size.x * 0.5, _vp2.size.y * 0.85)
 	_soldier.scale = Vector2(_pv2_zoom.value, _pv2_zoom.value)
 	_soldier.speed_scale = 1.0 if _pv2_play.button_pressed else 0.0

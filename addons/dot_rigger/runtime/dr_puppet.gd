@@ -5,7 +5,8 @@ class_name DRPuppet
 ## 베이크된 2D 컷아웃 퍼펫의 런타임. 장비 장착/해제를 담당한다.
 ##
 ## 전체 실루엣 아웃라인으로 구운 씬은 파트마다 stretch/outline(밑깔개, z −1)이 있다.
-## 장비도 같은 밑깔개를 하나 더 받아야 헬멧 같은 돌출부 바깥에도 선이 이어진다.
+## 장비는 자기 밑깔개를 **장비 바로 아래 z**(장비 z − 1)에 받는다 — 몸 위를 지나가도 장비 테두리가 끊기지 않는다.
+## (10-12 전엔 몸과 같은 z −1 이라 몸과 겹친 부분만 선이 사라져 그 부분이 얇아 보였다 — 사용자 "일관성 있게")
 ##
 ## 필요한 정보(파트별 레스트 피벗/각도)는 씬 안에 이미 들어 있으므로
 ## rig.json 을 런타임에 읽지 않는다:
@@ -17,7 +18,7 @@ signal unequipped(slot: String)
 
 var _parts: Dictionary = {}      # part 이름 -> {bone, stretch, rest_head, rest_angle}
 var _equipped: Dictionary = {}   # slot -> Sprite2D
-var _equipped_outline: Dictionary = {}   # slot -> Sprite2D (전체 실루엣 밑깔개, 없으면 키 없음)
+var _equipped_outline: Dictionary = {}   # slot -> Sprite2D (장비 자기 테두리 밑깔개, 장비 z − 1 — 없으면 키 없음)
 var _z_follow: Dictionary = {}   # slot -> {art: 기준 파트의 Sprite2D, gap: int} — z_after_part 로 장착한 장비
 var _equipped_overlays: Dictionary = {}   # slot -> Array[Sprite2D] — 앞 조각(장비 위에 그리는 파트 조각)
 var _hidden_parts: Dictionary = {}       # slot -> PackedStringArray — 장비를 드는 동안 안 그리는 파트
@@ -56,6 +57,9 @@ func _process(_delta: float) -> void:
 		var spr := _equipped.get(slot, null) as Sprite2D
 		if is_instance_valid(art) and is_instance_valid(spr):
 			spr.z_index = art.z_index + int(f["gap"])
+			var zol := _equipped_outline.get(slot, null) as Sprite2D
+			if is_instance_valid(zol):
+				zol.z_index = spr.z_index - 1
 			for o in _equipped_overlays.get(slot, []):
 				if is_instance_valid(o) and (o as Sprite2D).get_meta("kind", "part") == "part":
 					(o as Sprite2D).z_index = spr.z_index + 1
@@ -171,10 +175,11 @@ func equip(item: DREquipItem) -> bool:
 	spr.set_meta("equip_angle", item.angle)
 	spr.position = (item.offset - Vector2(info["rest_head"])).rotated(-ra if on_stretch else 0.0)
 	if _outline_material != null:
-		# 전체 실루엣 밑깔개 — 본체와 같은 자리·같은 z(모든 파트 뒤)
+		# 장비 자기 테두리 밑깔개 — 같은 자리, 장비 바로 아래 z. 장비보다 뒤인 파트 위에도 테두리가 그대로 보이고,
+		# 장비보다 앞인 파트(받치는 손 · 올린 머리 등)는 장비와 함께 테두리도 가린다
 		var ol := spr.duplicate() as Sprite2D
 		ol.name = "equip_%s_outline" % item.slot
-		ol.z_index = _outline_z
+		ol.z_index = spr.z_index - 1
 		ol.modulate = Color.WHITE
 		ol.material = _outline_material
 		host.add_child(ol)
