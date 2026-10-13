@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="SoldierType" format=3]
+
+[ext_resource type="Resource" path="res://game/units/rifleman_motions.tres" id="1_r7pbs"]
+[ext_resource type="Script" path="res://game/data/soldier_type.gd" id="2_jtjq3"]
+[ext_resource type="Resource" path="res://game/units/kar98k.tres" id="3_dtbeu"]
+
+[resource]
+script = ExtResource("2_jtjq3")
+weapon = ExtResource("3_dtbeu")
+outfit_json = "res://outfits/uniform_m36/outfit.json"
+motions = ExtResource("1_r7pbs")

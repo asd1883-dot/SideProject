@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3]
+
+[ext_resource type="Script" path="res://game/data/weapon_data.gd" id="1_5pdem"]
+
+[resource]
+script = ExtResource("1_5pdem")
+display_name = "Kar98k"
+range_m = 26.0
+bullet_speed = 400.0
+spread_deg = 1.6

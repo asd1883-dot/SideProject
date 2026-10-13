@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="MotionTable" format=3]
+
+[ext_resource type="Script" path="res://game/data/motion_table.gd" id="1_x1ky6"]
+
+[resource]
+script = ExtResource("1_x1ky6")
+motions = Dictionary[String, String]({
+"걷기": "Sprint",
+"달리기": "Sprint"
+})
