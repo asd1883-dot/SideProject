@@ -397,7 +397,7 @@ func _run_spawn_probe() -> void:
 	lines.append("LOADTEST 만들기 | %-34s | 한 명 %.2f ms" % ["숨긴 채로(빈 화면에서)", _spawn_ms / 100.0])
 	_root.visible = true
 	# 자동 측정 끝의 "나눠 재기"에서는 2.4 ms 가 나왔다 — 바로 앞에 한 일(씬 100번 만들기 · rig.json 100번 읽기) 중 무엇 때문인지
-	var ps := load("res://puppet/Sprint/puppet.tscn") as PackedScene
+	var ps := load(_first_set_path("scene")) as PackedScene
 	for mode in ["rig.json 100번 읽은 직후", "퍼펫 씬 100개 만들어 둔 직후", "퍼펫 씬 100개 만들었다 지운 뒤"]:
 		n = 0
 		spawn()
@@ -406,7 +406,7 @@ func _run_spawn_probe() -> void:
 		var raw: Array[Node] = []
 		if String(mode).begins_with("rig.json"):
 			for i in 100:
-				JSON.parse_string(FileAccess.get_file_as_string("res://puppet/Sprint/rig.json"))
+				JSON.parse_string(FileAccess.get_file_as_string(_first_set_path("rig")))
 		else:
 			for i in 100:
 				var p := ps.instantiate()
@@ -431,10 +431,22 @@ func _run_spawn_probe() -> void:
 	get_tree().quit()
 
 
+## sets.json 의 첫 세트에서 씬("scene") · 리그("rig") 파일 경로를 얻는다 — 세트 이름(폴더)을 바꿔 다시 구워도 이 시험이 따라가게
+func _first_set_path(key: String) -> String:
+	var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(SETS_JSON)) if FileAccess.file_exists(SETS_JSON) else null
+	if doc is Dictionary:
+		for sd in (doc as Dictionary).get("sets", []):
+			var rel := String((sd as Dictionary).get(key, ""))
+			if rel != "":
+				return SETS_JSON.get_base_dir().path_join(rel)
+	push_error("[load_test] %s 에 세트가 없습니다 — 먼저 Dot Rigger ① 에서 세트를 구우세요" % SETS_JSON)
+	return ""
+
+
 ## 병사 한 명을 만드는 시간이 어디서 드는지 — 씬 만들기 / rig.json 읽기 / DRPuppetSet 전체. 100번 평균(ms)
 func _spawn_probe() -> Dictionary:
 	var reps := 100
-	var ps := load("res://puppet/Sprint/puppet.tscn") as PackedScene
+	var ps := load(_first_set_path("scene")) as PackedScene
 	var made: Array[Node] = []
 	var t0 := Time.get_ticks_usec()
 	for i in reps:
@@ -446,7 +458,7 @@ func _spawn_probe() -> Dictionary:
 		p.queue_free()
 	t0 = Time.get_ticks_usec()
 	for i in reps:
-		JSON.parse_string(FileAccess.get_file_as_string("res://puppet/Sprint/rig.json"))
+		JSON.parse_string(FileAccess.get_file_as_string(_first_set_path("rig")))
 	var js := float(Time.get_ticks_usec() - t0) / 1000.0 / float(reps)
 	n = reps
 	order = 0
