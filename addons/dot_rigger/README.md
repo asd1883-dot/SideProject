@@ -467,6 +467,10 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
   Mixamo 는 고른 캐릭터에 따라 `mixamorig:` · `mixamorig9:` 처럼 번호가 붙는다(지금 파일들은 `mixamorig9`). 접두사가 다른 파일은
   `make_bonemap_cli.gd -- --kind=mixamo --prefix=mixamorig_ --out=...` 로 표를 하나 더 만들거나, 3번에서 `새 BoneMap` 을 골라 자동 짝 맞춤을 쓴다.
 - 되풀이 재생할 동작(조준 대기 등)은 고급 임포트 설정의 그 애니메이션에서 `Loop Mode` 를 켠다.
+- **손목 비틀림(10-14)**: Mixamo 동작은 손을 아래팔 축으로 100 ~ 130° 비틀고 아래팔은 0° 로 둔다(UAL 동작은 반대로 아래팔이 비튼다).
+  맨팔 모델은 손목 살이 꼬여 가늘어지고 뾰족하게 튄다. 모델에 아래팔 비틀림 뼈(이름에 `twist` 가 든 아래팔의 자식 —
+  `pipeline/blender/bind_to_skeleton.py --forearm_twist 1`)가 있으면, 베이커가 동작을 불러올 때 손의 비틀림 × 그 뼈의 자리 비율만큼
+  돌리는 트랙을 모든 동작에 넣는다(`DRBaker.Options.forearm_twist`, 기본 켬 · 비틀림 뼈가 없는 모델은 아무 일 없음).
 - 두 캐릭터의 체형이 달라 **양손 간격이 원본과 다르다**(UAL 은 어깨가 좁아 Mixamo 원본보다 25% 좁음). 동작 내내 일정하므로
   소총이 손 사이에서 미끄러지지는 않는다 — 소총 그림을 이 캐릭터의 손 간격에 맞춰 그리면 된다.
 - 검사: `tools/retarget_check_cli.gd` (기존 동작 보존 · 파일 전부 경고 없이 얹힘 · 힙 높이 · 굽기).

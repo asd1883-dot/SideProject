@@ -3,7 +3,7 @@
 
     blender -b --factory-startup -P pipeline/blender/bind_to_skeleton.py -- \
         --base <기준 몸.glb(뼈대 · 동작 · 스킨 메시)> --src <생성한 모델.glb> --out <결과.glb> [--keep_base 0|1] [--fit height|span]
-        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--finger_fit 1] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
+        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--finger_fit 1] [--forearm_twist 1] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
      맨몸(human_base) · 옷(uniform_m36) 모두 기본값(다리 정리 켬 — 10-08 옷도 되돌림). 원본 = pipeline/comfy/human_8581eb8d.glb · uniform_m36_80eaf512.glb, 기준 = source3d/UAL1_humanoid.glb
 
 1. 기준 몸(UAL1_humanoid.glb)을 바인드 포즈(T-포즈)로 연다. 뼈대 · 동작은 그대로 쓴다.
@@ -644,6 +644,82 @@ def main():
             finger_fit["%s_%s" % (finger, side)] = {"moved_cm": round(moved * 100, 1), "turn_deg": round(turn, 1)}
         bpy.ops.object.mode_set(mode="OBJECT")
 
+    # 아래팔 비틀림 뼈(forearm_twist, 10-14) — Mixamo 동작은 손을 아래팔 축으로 100 ~ 130° 비틀면서 아래팔은 0°로 두고(손목이 다 떠안음),
+    # UAL 동작은 아래팔이 비튼다(손목 0°). 이 몸의 살은 UAL 에서 옮겨 와 손목이 큰 비틀림을 못 받는다 → Mixamo 소총 동작에서
+    # 손목이 사탕 껍질처럼 꼬여 가늘어지고 뾰족하게 튐(사용자: "팔목 자체가 휘어졌다"). 비틀림을 손목에 몰든 팔꿈치에 몰든 100° 가 넘으면
+    # 그 자리가 무너졌다(시험) → 아래팔에 비틀림 뼈 둘(팔꿈치→손목 TW1 · TW2 지점)을 넣고, 아래팔 살 웨이트를 그 자리에 따라
+    # 아래팔 · 비틀림1 · 비틀림2 · 손으로 나눈다(삼각 함수). 비틀림 뼈는 동작에 없으므로 Dot Rigger(DRBaker)가 손의 비틀림 × 자리 비율로 돌린다.
+    # 같이: 웨이트 부드럽게(smooth)가 손목 손 웨이트를 아래팔 중간까지 번지게 해 두어(손을 비틀면 아래팔 중간이 가시처럼 튐) 그것도 걷힌다.
+    forearm_twist = {}
+    if a.get("forearm_twist", "1") == "1":
+        TW1, TW2 = 0.45, 0.85
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = arm
+        arm.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        Wm = arm.matrix_world
+        axes = {}
+        for side in ("l", "r"):
+            la, hd = arm.data.edit_bones.get("lowerarm_" + side), arm.data.edit_bones.get("hand_" + side)
+            if la is None or hd is None:
+                continue
+            E, Wr = la.head.copy(), hd.head.copy()          # 아마추어 공간
+            z = la.z_axis.copy()
+            for name, t0, t1 in (("lowerarm_twist_01_" + side, TW1, TW2), ("lowerarm_twist_02_" + side, TW2, 1.0)):
+                eb = arm.data.edit_bones.get(name) or arm.data.edit_bones.new(name)
+                eb.head = E + (Wr - E) * t0
+                eb.tail = E + (Wr - E) * t1
+                eb.parent = la
+                eb.use_connect = False
+                eb.use_deform = True
+                eb.align_roll(z)
+            axes[side] = (Wm @ E, Wm @ Wr)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        for side, (E, Wr) in axes.items():
+            names = ["lowerarm_" + side, "lowerarm_twist_01_" + side, "lowerarm_twist_02_" + side, "hand_" + side]
+            for n in names:
+                if n not in body.vertex_groups:
+                    body.vertex_groups.new(name=n)
+            gi = {n: body.vertex_groups[n].index for n in names}
+            ax = Wr - E
+            L2 = ax.length_squared
+            moved = 0
+            for v in body.data.vertices:
+                cur = {g.group: g.weight for g in v.groups}
+                w_la, w_hd = cur.get(gi[names[0]], 0.0), cur.get(gi[names[3]], 0.0)
+                if w_la <= 1e-4:
+                    continue                                  # 아래팔 웨이트가 없는 정점(손바닥 · 손가락 · 윗팔)은 그대로
+                p = body.matrix_world @ v.co
+                t = (p - E).dot(ax) / L2
+                radial = ((p - E) - ax * t).length
+                if t <= 0.0 or radial > 0.12:
+                    continue                                  # 팔꿈치 안쪽 · 팔에서 먼 살은 그대로
+                if t >= 1.0:
+                    new = {gi[names[2]]: w_la}                # 손목 너머 살에 남은 아래팔 웨이트 = 손목 쪽 비틀림 뼈로(손목에서 끊기지 않게)
+                    keep_hand = True
+                else:
+                    W_arm = w_la + w_hd                       # 아래팔 + (번진) 손 웨이트를 자리에 따라 다시 나눈다
+                    if t < TW1:
+                        new = {gi[names[0]]: W_arm * (TW1 - t) / TW1, gi[names[1]]: W_arm * t / TW1}
+                    elif t < TW2:
+                        new = {gi[names[1]]: W_arm * (TW2 - t) / (TW2 - TW1), gi[names[2]]: W_arm * (t - TW1) / (TW2 - TW1)}
+                    else:
+                        new = {gi[names[2]]: W_arm * (1.0 - t) / (1.0 - TW2), gi[names[3]]: W_arm * (t - TW2) / (1.0 - TW2)}
+                    keep_hand = False
+                for g in list(v.groups):
+                    if g.group == gi[names[0]] or (g.group == gi[names[3]] and not keep_hand):
+                        body.vertex_groups[g.group].remove([v.index])
+                for g_i, w in new.items():
+                    if w > 1e-5:
+                        body.vertex_groups[g_i].add([v.index], w, "ADD")
+                moved += 1
+            forearm_twist[side] = moved
+        bpy.ops.object.select_all(action="DESELECT")
+        body.select_set(True)
+        bpy.context.view_layer.objects.active = body
+        bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
+        bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+
     body.parent = arm
     body.matrix_parent_inverse = arm.matrix_world.inverted()
     am = body.modifiers.new("Armature", "ARMATURE")
@@ -718,7 +794,7 @@ def main():
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
-        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
+        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "forearm_twist": forearm_twist, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),
         "actions": len(bpy.data.actions), "kept_base": keep_base, "out": out_path,

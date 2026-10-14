@@ -42,6 +42,10 @@ class Options:
 	var composites: Array = []
 	## 상체로 칠 파트(이 파트들의 뼈는 upper 애니에서). 비면 DEFAULT_UPPER_PARTS.
 	var composite_upper_parts: PackedStringArray = PackedStringArray()
+	## 아래팔 비틀림 뼈(이름에 twist 가 든 아래팔의 자식 뼈 — bind_to_skeleton.py --forearm_twist)가 있으면, 동작마다 손이 아래팔 축으로
+	## 비튼 각도 × 그 뼈의 자리 비율(팔꿈치 0 → 손목 1)만큼 돌리는 트랙을 넣는다. Mixamo 동작은 손목에서 100 ~ 130° 를 비틀어
+	## 손목 살이 꼬였다(10-14). 비틀림 뼈가 없는 모델은 아무 일도 안 한다.
+	var forearm_twist: bool = true
 	## 제자리로 만들 동작 이름 — 뿌리 뼈(힙)가 처음 → 끝 사이에 수평으로 간 거리를 지운다(Mixamo `In Place` 와 같은 효과).
 	## 걸음마다 들썩임 · 좌우 흔들림은 남는다. 원본 파일은 안 바뀐다(메모리에서만).
 	var in_place: PackedStringArray = PackedStringArray()
@@ -97,6 +101,8 @@ var composite_warnings: PackedStringArray = PackedStringArray()
 var composite_info: Array = []
 ## 제자리로 바꿔 끼운 동작의 원래 것 {이름: Animation} — 끄면 되돌린다
 var _in_place_orig: Dictionary = {}
+## 아래팔 비틀림 트랙을 넣은 동작 수(0 = 비틀림 뼈가 없거나 비튼 동작이 없음)
+var twist_anims: int = 0
 var _owns_library := false
 
 var _host: Node
@@ -122,6 +128,9 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 	extra_anim_warnings = PackedStringArray()
 	if opts.extra_anim_dir.strip_edges() != "":
 		_load_extra_anims(opts.extra_anim_dir.strip_edges())
+	twist_anims = 0
+	if anim_player != null and opts.forearm_twist:
+		twist_anims = _add_forearm_twist()   # 제자리 · 합성보다 먼저 — 그 둘은 이 트랙을 그대로 옮긴다
 	_in_place_orig = {}
 	if anim_player != null and opts.in_place.size() > 0:
 		apply_in_place(opts.in_place)     # 합성보다 먼저 — 합성의 하체가 제자리가 된 동작을 쓰게
@@ -359,6 +368,92 @@ func apply_in_place(names: PackedStringArray) -> PackedStringArray:
 		_in_place_orig[n] = orig
 		changed.append(n)
 	return changed
+
+
+## 아래팔 비틀림 뼈를 손의 비틀림에 맞춰 돌리는 트랙을 모든 동작에 넣는다. 돌려주는 값 = 트랙을 넣은 동작 수.
+## 손의 회전(아래팔 기준)을 쉬는 자세와 비교해 아래팔 축(손 쉬는 자리 방향) 둘레 비틀림 θ 를 구하고,
+## 비틀림 뼈 = θ × 자리 비율 f(아래팔 시작 0 → 손목 1)만큼 그 축으로 돌린다. 손 자신은 그대로(손 방향은 원래 동작과 같다).
+## 살은 bind_to_skeleton.py 가 자리에 따라 아래팔 · 비틀림1 · 비틀림2 · 손으로 나눠 두었다 → 한 구간이 떠안는 비틀림이 θ 의 40 % 남짓.
+func _add_forearm_twist() -> int:
+	var arms: Array = []    # [아래팔, 손, [[비틀림 뼈, 비율] …]]
+	for pr in [["LeftLowerArm", "LeftHand"], ["RightLowerArm", "RightHand"], ["lowerarm_l", "hand_l"], ["lowerarm_r", "hand_r"]]:
+		var la := skeleton.find_bone(pr[0])
+		var hd := skeleton.find_bone(pr[1])
+		if la < 0 or hd < 0 or skeleton.get_bone_parent(hd) != la:
+			continue
+		var a_l := skeleton.get_bone_rest(hd).origin
+		var L := a_l.length()
+		if L < 1e-4:
+			continue
+		a_l /= L
+		var tws: Array = []
+		for c in skeleton.get_bone_children(la):
+			if skeleton.get_bone_name(c).to_lower().contains("twist"):
+				tws.append([c, clampf(skeleton.get_bone_rest(c).origin.dot(a_l) / L, 0.0, 1.0)])
+		if not tws.is_empty():
+			arms.append([la, hd, tws, a_l])
+	if arms.is_empty():
+		return 0
+	var lib := _own_library()
+	var count := 0
+	for an in lib.get_animation_list():
+		var n := String(an)
+		if n == PREVIEW_ANIM or n == "RESET":
+			continue
+		var src := lib.get_animation(n)
+		var plan: Array = []   # [[경로 앞부분, 손 트랙, 팔 정보] …]
+		for arm in arms:
+			var hd_name := skeleton.get_bone_name(int(arm[1]))
+			for ti in src.get_track_count():
+				if src.track_get_type(ti) == Animation.TYPE_ROTATION_3D and src.track_get_key_count(ti) > 0 \
+						and src.track_get_path(ti).get_concatenated_subnames() == hd_name:
+					plan.append([String(src.track_get_path(ti)).get_slice(":", 0), ti, arm])
+					break
+		if plan.is_empty():
+			continue
+		# 비튼 동작만 바꾼다(UAL 동작은 손 비틀림이 거의 0 — 그대로 둔다)
+		var biggest := 0.0
+		for p in plan:
+			var arm: Array = p[2]
+			var rq := skeleton.get_bone_rest(int(arm[1])).basis.get_rotation_quaternion()
+			var a_h: Vector3 = rq.inverse() * (arm[3] as Vector3)
+			for k in src.track_get_key_count(int(p[1])):
+				biggest = maxf(biggest, absf(_twist_about(rq.inverse() * (src.track_get_key_value(int(p[1]), k) as Quaternion), a_h)))
+		if biggest < deg_to_rad(2.0):
+			continue
+		var a := src.duplicate(true) as Animation   # 모델 자신의 동작은 가져온(캐시된) 것과 같은 객체 — 사본을 고친다
+		for p in plan:
+			var arm: Array = p[2]
+			var ti_h: int = p[1]
+			var rq := skeleton.get_bone_rest(int(arm[1])).basis.get_rotation_quaternion()
+			var a_l: Vector3 = arm[3]
+			var a_h := rq.inverse() * a_l
+			for tw in arm[2]:
+				var bi: int = tw[0]
+				var f: float = tw[1]
+				var path := NodePath("%s:%s" % [p[0], skeleton.get_bone_name(bi)])
+				var old := a.find_track(path, Animation.TYPE_ROTATION_3D)
+				if old >= 0:
+					a.remove_track(old)
+				var nt := a.add_track(Animation.TYPE_ROTATION_3D)
+				a.track_set_path(nt, path)
+				a.track_set_interpolation_type(nt, Animation.INTERPOLATION_LINEAR)
+				var rt := skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+				for k in a.track_get_key_count(ti_h):
+					var th := _twist_about(rq.inverse() * (a.track_get_key_value(ti_h, k) as Quaternion), a_h)
+					a.rotation_track_insert_key(nt, a.track_get_key_time(ti_h, k), (Quaternion(a_l, th * f) * rt).normalized())
+		lib.remove_animation(n)
+		lib.add_animation(n, a)
+		count += 1
+	return count
+
+
+## q 의 축 ax(단위) 둘레 비틀림 각도(라디안, 부호 포함) — 스윙-트위스트 분해의 트위스트
+static func _twist_about(q: Quaternion, ax: Vector3) -> float:
+	var p := Vector3(q.x, q.y, q.z).dot(ax)
+	var tw := Quaternion(ax.x * p, ax.y * p, ax.z * p, q.w).normalized()
+	var ang := 2.0 * acos(clampf(absf(tw.w), 0.0, 1.0))
+	return ang if (p * tw.w) >= 0.0 else -ang
 
 
 ## 그 동작이 처음 → 끝 사이에 수평으로 간 거리(m, 제자리로 바꾸기 전 기준). 뿌리 뼈가 안 움직이면 0
