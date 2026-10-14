@@ -225,6 +225,15 @@ func _load_extra_anims(dir_path: String) -> void:
 		if found.is_empty():
 			extra_anim_warnings.append("%s — 동작이 없음" % fname)
 			continue
+		# Mixamo 를 With Skin 으로 받으면 진짜 동작(mixamo.com) 옆에 키가 하나뿐인 멈춘 자세(Take 001)가 같이 온다.
+		# 그대로 두면 동작이 둘이라 파일 이름 대신 "mixamo_com" · "Take_001" 로 들어간다(10-14 Rifle Idle) → 멈춘 것은 뺀다
+		if found.size() > 1:
+			var moving := {}
+			for src_name in found.keys():
+				if not _is_static_anim(found[src_name]):
+					moving[src_name] = found[src_name]
+			if moving.size() > 0:
+				found = moving
 		for src_name in found.keys():
 			var anim: Animation = found[src_name]
 			# 동작이 하나뿐인 파일(Mixamo 는 전부 "mixamo.com")은 파일 이름이 곧 동작 이름
@@ -241,7 +250,8 @@ func _load_extra_anims(dir_path: String) -> void:
 					continue
 				anim.track_set_path(ti, NodePath("%s:%s" % [skel_path, sub]))
 			if bone_tracks == 0 or missing == bone_tracks:
-				extra_anim_warnings.append("%s — 뼈 이름이 모델과 하나도 안 맞아 뺌. 모델과 이 파일 양쪽 임포트 설정에 BoneMap(리타깃)을 지정했는지 확인" % fname)
+				extra_anim_warnings.append("%s — 뼈 이름이 모델과 하나도 안 맞아 뺌. 모델과 이 파일 양쪽 임포트 설정에 BoneMap(리타깃)을 지정했는지 확인" % fname
+					+ " (에디터에서는 같은 폴더 파일이 쓰는 BoneMap 을 자동으로 넣고 다시 가져온다 — 잠시 뒤 `모델 불러오기` 를 다시 누를 것)")
 				continue
 			if missing > 0:
 				extra_anim_warnings.append("%s — 모델에 없는 뼈 트랙 %d/%d개(그 트랙은 무시됨)" % [new_name, missing, bone_tracks])
@@ -252,6 +262,14 @@ func _load_extra_anims(dir_path: String) -> void:
 			extra_anims.append(new_name)
 	for w in extra_anim_warnings:
 		push_warning("[DotRigger] 추가 동작: " + w)
+
+
+## 모든 트랙의 키가 하나 이하 = 움직이지 않는 자세 하나(바인드 포즈 테이크 등)
+static func _is_static_anim(a: Animation) -> bool:
+	for ti in a.get_track_count():
+		if a.track_get_key_count(ti) > 1:
+			return false
+	return true
 
 
 ## 이 베이커만의 기본 라이브러리를 돌려준다(처음 부를 때 만든다).

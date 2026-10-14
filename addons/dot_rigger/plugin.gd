@@ -14,12 +14,38 @@ var _hub: DRHubWindow
 func _enter_tree() -> void:
 	add_tool_menu_item(MENU_ITEM, _open)
 	add_tool_menu_item(MENU_RESET, _reopen)
+	# 추가 동작 파일에 BoneMap 자동 지정(DRBoneMapAuto) — 가져오기가 끝날 때마다 + 켤 때 한 번 전체
+	EditorInterface.get_resource_filesystem().resources_reimported.connect(_on_resources_reimported)
+	_auto_bone_map.call_deferred(PackedStringArray())
 
 
 func _exit_tree() -> void:
 	remove_tool_menu_item(MENU_ITEM)
 	remove_tool_menu_item(MENU_RESET)
+	var fs := EditorInterface.get_resource_filesystem()
+	if fs.resources_reimported.is_connected(_on_resources_reimported):
+		fs.resources_reimported.disconnect(_on_resources_reimported)
 	_free_window()
+
+
+func _on_resources_reimported(paths: PackedStringArray) -> void:
+	_auto_bone_map.call_deferred(paths)
+
+
+## 같은 폴더의 다른 파일이 쓰는 BoneMap 을 새 파일에도 넣고 다시 가져온다. 다시 가져오면 이미 지정돼 있어 또 고치지 않는다
+func _auto_bone_map(paths: PackedStringArray) -> void:
+	var fs := EditorInterface.get_resource_filesystem()
+	if fs.is_scanning():
+		get_tree().create_timer(1.0).timeout.connect(_auto_bone_map.bind(paths))
+		return
+	var redo := PackedStringArray()
+	for fix in DRBoneMapAuto.find_fixes(paths):
+		if DRBoneMapAuto.apply(fix):
+			redo.append(String(fix["path"]))
+			print("[Dot Rigger] BoneMap 자동 지정: %s ← %s (뼈 이름 %d%% 맞음, 같은 폴더의 다른 파일과 같은 표 · 텍스처는 안 꺼냄)" % [
+				String(fix["path"]).get_file(), String(fix["bonemap"]).get_file(), int(round(float(fix["match"]) * 100.0))])
+	if redo.size() > 0:
+		fs.reimport_files(redo)
 
 
 func _free_window() -> void:
