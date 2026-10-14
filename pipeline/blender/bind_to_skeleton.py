@@ -3,7 +3,7 @@
 
     blender -b --factory-startup -P pipeline/blender/bind_to_skeleton.py -- \
         --base <기준 몸.glb(뼈대 · 동작 · 스킨 메시)> --src <생성한 모델.glb> --out <결과.glb> [--keep_base 0|1] [--fit height|span]
-        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
+        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--finger_fit 1] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
      맨몸(human_base) · 옷(uniform_m36) 모두 기본값(다리 정리 켬 — 10-08 옷도 되돌림). 원본 = pipeline/comfy/human_8581eb8d.glb · uniform_m36_80eaf512.glb, 기준 = source3d/UAL1_humanoid.glb
 
 1. 기준 몸(UAL1_humanoid.glb)을 바인드 포즈(T-포즈)로 연다. 뼈대 · 동작은 그대로 쓴다.
@@ -594,6 +594,56 @@ def main():
     for name in drop:
         body.vertex_groups.remove(body.vertex_groups[name])
 
+    # 손가락 뼈 맞춤(finger_fit, 10-14) — 웨이트는 손가락마다 맞게 붙어 있는데(색칠 확인), 기준 뼈대의 손가락 뼈가 AI 손가락 살에서
+    # 옆으로 2.4 ~ 3.7 cm 비켜 있었다(마네킹 0.4 ~ 0.8 cm). 손가락을 구부리면 살 밖의 축을 중심으로 접혀 살이 아래로 늘어진 뭉치가 되고
+    # 펴진 손가락만 길게 남아 "엄지가 길고 손목이 휘었다"(사용자, Mixamo Rifle Idle). 살은 그대로 두고 **뼈를 살 중심선으로** 옮긴다:
+    # 손가락마다 그 손가락 웨이트 > 0.5 정점들의 주축(PCA)을 구하고, 마디(01 · 02 · 03 머리, 03 꼬리, leaf 꼬리)를 그 선 위로
+    # 투영(길이 방향 자리는 유지). 엄지는 thumb_fit 으로 이미 0.5 ~ 0.7 cm 라 건드리지 않는다. 롤은 원래 축을 따라 다시 맞춘다.
+    finger_fit = {}
+    if a.get("finger_fit", "1") == "1":
+        import numpy as np
+        gname = {g.index: g.name for g in body.vertex_groups}
+        pts_by = {}
+        for side in ("l", "r"):
+            for finger in ("index", "middle", "ring", "pinky"):
+                names = {"%s_0%d_%s" % (finger, i, side) for i in (1, 2, 3)} | {"%s_04_leaf_%s" % (finger, side)}
+                P = [body.matrix_world @ v.co for v in body.data.vertices
+                     if sum(g.weight for g in v.groups if gname.get(g.group, "") in names) > 0.5]
+                if len(P) >= 12:
+                    pts_by[(side, finger)] = P
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = arm
+        arm.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        Wm = arm.matrix_world
+        Wi = Wm.inverted()
+        for (side, finger), P in pts_by.items():
+            ebs = [arm.data.edit_bones.get("%s_0%d_%s" % (finger, i, side)) for i in (1, 2, 3)]
+            leaf = arm.data.edit_bones.get("%s_04_leaf_%s" % (finger, side))
+            if None in ebs:
+                continue
+            chain = ebs + ([leaf] if leaf else [])
+            J = [Wm @ ebs[0].head, Wm @ ebs[1].head, Wm @ ebs[2].head, Wm @ ebs[2].tail] + ([Wm @ leaf.tail] if leaf else [])
+            A = np.array([[p.x, p.y, p.z] for p in P])
+            c = A.mean(axis=0)
+            _, _, vt = np.linalg.svd(A - c, full_matrices=False)
+            e = Vector(vt[0])
+            if e.dot(J[3] - J[0]) < 0:
+                e = -e
+            cv = Vector(c)
+            NJ = [cv + e * (j - cv).dot(e) for j in J]
+            zs = [eb.z_axis.copy() for eb in chain]
+            for eb in chain:
+                eb.use_connect = False
+            for k, eb in enumerate(chain):
+                eb.head = Wi @ NJ[k]
+                eb.tail = Wi @ NJ[k + 1]
+                eb.align_roll(zs[k])
+            moved = max((NJ[k] - J[k]).length for k in range(len(J)))
+            turn = math.degrees((J[3] - J[0]).angle(NJ[3] - NJ[0])) if (J[3] - J[0]).length > 1e-6 else 0.0
+            finger_fit["%s_%s" % (finger, side)] = {"moved_cm": round(moved * 100, 1), "turn_deg": round(turn, 1)}
+        bpy.ops.object.mode_set(mode="OBJECT")
+
     body.parent = arm
     body.matrix_parent_inverse = arm.matrix_world.inverted()
     am = body.modifiers.new("Armature", "ARMATURE")
@@ -668,7 +718,7 @@ def main():
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
-        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
+        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),
         "actions": len(bpy.data.actions), "kept_base": keep_base, "out": out_path,
