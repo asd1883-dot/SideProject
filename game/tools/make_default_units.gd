@@ -38,7 +38,7 @@ func _init() -> void:
 		# 세트 stand · crouch · prone 에 구울 동작(뼈대_구조.md "세트별 구울 동작"). 아직 안 구운 동작은 건너뛰고
 		# 덜 구체적인 것으로 내려가므로 미리 적어 둬도 된다(상태 이름은 MotionTable.all_keys())
 		var m: Dictionary[String, String] = {
-			"서기": "Idle", "걷기": "Walk", "달리기": "Sprint",
+			"서기": "Idle", "걷기": "Walk_With_Rifle","달리기": "Sprint",
 			"서기+조준": "Rifle_Aiming_Idle", "서기+사격": "Firing_Rifle", "서기+장전": "Stand_Reloading",
 			"서기+투척": "Toss_Grenade", "피격": "Idle_Hit", "사망": "Stand_Rifle_Hit_To_Back",
 			"앉기": "Crouch_Idle", "앉아걷기": "Crouch_Fwd",

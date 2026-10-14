@@ -6,7 +6,7 @@
 script = ExtResource("1_x1ky6")
 motions = Dictionary[String, String]({
 "서기": "Idle",
-"걷기": "Walk",
+"걷기": "Walk_With_Rifle",
 "달리기": "Sprint",
 "서기+조준": "Rifle_Aiming_Idle",
 "서기+사격": "Firing_Rifle",
