@@ -312,18 +312,26 @@ func _on_died(s: BattleSoldier) -> void:
 		return
 	e.dead_t = 0.0
 	e.label = ""
-	e.cands = PackedStringArray(["사망"])
+	e.cands = _death_keys(s.stance)
 	e.motion = ""
 	var p := e.puppet
 	if p == null:
 		return
-	# "사망" 동작이 표에 있고 퍼펫에도 있으면 그걸 재생(기본 동작으로 내려가면 안 되므로 find 를 쓰지 않는다)
+	# 죽을 때의 자세에 맞는 사망 동작을 찾는다(기본 동작으로 내려가면 안 되므로 find 를 쓰지 않는다)
 	var mt: MotionTable = s.type.motions if s.type != null else null
-	var m := String(mt.motions.get("사망", "")) if mt != null else ""
-	if m != "" and e.avail.has(m):
+	var m := ""
+	if mt != null:
+		for key in e.cands:
+			var cand := String(mt.motions.get(key, ""))
+			if cand != "" and e.avail.has(cand):
+				m = cand
+				break
+	if m != "":
 		p.speed_scale = 1.0
 		p.play(m, 0.1)
 		e.motion = m
+	elif s.stance == BattleBody.Stance.PRONE:
+		pass    # 이미 엎드려 있다 — 그 자세로 멈춘 채 둔다(눕히기나 서서 쓰러지는 동작을 쓰면 벌떡 일어났다 쓰러진다)
 	else:
 		# 임시 표현: 뒤로 넘어져 누운 모습(90° 눕힘) + 어둡게. 몸 두께의 절반이 땅 밑으로 들어가므로 조금 올린다
 		var face := float(s.facing if s.facing != 0 else 1)
@@ -431,7 +439,7 @@ func _candidates(s: BattleSoldier) -> PackedStringArray:
 	var st: String = BattleBody.STANCE_NAMES[s.stance]
 	match s.override:
 		BattleBody.Ovr.DEAD:
-			return PackedStringArray(["사망"])
+			return _death_keys(s.stance)
 		BattleBody.Ovr.PANIC:
 			return PackedStringArray(["패닉", "앉기"])
 		BattleBody.Ovr.SUPPRESSED:
@@ -448,7 +456,10 @@ func _candidates(s: BattleSoldier) -> PackedStringArray:
 		_:
 			moving = false
 	if s.override == BattleBody.Ovr.HIT:
-		return PackedStringArray(["피격", base])
+		# 서 있을 때만 서서 움찔하는 동작을 쓴다. 앉기 · 엎드림은 그 자세용 피격이 없으면 그 자세 그대로(서기용을 쓰면 0.25초 동안 벌떡 일어선다)
+		if s.stance == BattleBody.Stance.STAND:
+			return PackedStringArray(["피격", base])
+		return PackedStringArray(["피격+" + st, st])
 	if s.act_state == BattleBody.Act.NONE:
 		return PackedStringArray([base])
 	var act: String = BattleBody.ACT_NAMES[s.act_state]
@@ -457,6 +468,16 @@ func _candidates(s: BattleSoldier) -> PackedStringArray:
 		out.append(st + "+" + act)
 	out.append(base)
 	return out
+
+
+## 죽을 때의 자세별 사망 동작 이름. 엎드림은 서기용 "사망"으로 내려가지 않는다(벌떡 일어났다 쓰러지므로)
+func _death_keys(stance: int) -> PackedStringArray:
+	match stance:
+		BattleBody.Stance.CROUCH:
+			return PackedStringArray(["사망+앉기", "사망"])
+		BattleBody.Stance.PRONE:
+			return PackedStringArray(["사망+엎드림"])
+	return PackedStringArray(["사망"])
 
 
 func _pick_motion(e: Entry) -> void:
