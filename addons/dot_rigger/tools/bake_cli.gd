@@ -75,6 +75,7 @@ func _run() -> void:
 	opts.color_levels = int(_arg("levels", "0"))
 	opts.alpha_threshold = float(_arg("alpha", "0.5"))
 	opts.extra_anim_dir = _arg("extra_anims", "")
+	opts.in_place = PackedStringArray(_arg("in_place", "").split(",", false))   # --in_place=Walk_With_Rifle,Running_Hit
 	# --composites="이름=하체+상체;이름2=하체2+상체2"  (이름= 은 생략 가능)
 	for spec in _arg("composites", "").split(";", false):
 		var s := String(spec)

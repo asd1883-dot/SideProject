@@ -1062,6 +1062,7 @@ func _on_load() -> void:
 		opts.bleed_rings = p.bleed_rings
 		opts.composites = p.composites.duplicate(true)
 		opts.composite_upper_parts = p.composite_upper_parts
+		opts.in_place = p.in_place
 	if model_path == "":
 		_fail("캐릭터 프리셋에 모델 경로가 없습니다(메인 창에서 모델을 불러온 뒤 프리셋을 저장할 것)")
 		return

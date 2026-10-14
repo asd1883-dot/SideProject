@@ -1245,6 +1245,7 @@ func _opts_from_preset() -> Dictionary:
 		opts.bleed_rings = p.bleed_rings
 		opts.composites = p.composites.duplicate(true)
 		opts.composite_upper_parts = p.composite_upper_parts
+		opts.in_place = p.in_place
 	return {"opts": opts, "base_model": base_model}
 
 

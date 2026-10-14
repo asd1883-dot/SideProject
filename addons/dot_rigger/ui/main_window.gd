@@ -25,6 +25,10 @@ var _aim_min: SpinBox
 var _aim_max: SpinBox
 var _aim_info: Label
 var _aim_limits: Dictionary = {}   # 동작 -> [아래, 위] 도
+var _in_place: Dictionary = {}     # 제자리로 만들 동작 -> true
+var _in_place_chk: CheckBox
+var _in_place_info: Label
+const IN_PLACE_HINT_M := 0.3       # 이보다 멀리 가는 동작은 "제자리 권함"을 띄운다
 const AIM_DEFAULT := 16.0
 const COMPOSITE_COLOR := Color(0.55, 0.85, 1.0)
 var _preview: TextureRect
@@ -428,6 +432,20 @@ func _build_ui() -> void:
 	_aim_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_aim_info.custom_minimum_size = Vector2(200, 0)
 	left.add_child(_aim_info)
+	# 제자리 — 동작마다(고른 동작에 적용). Mixamo 에서 In Place 없이 받아 앞으로 걸어 나가는 동작을 그 자리에서 돌게
+	_in_place_chk = CheckBox.new()
+	_in_place_chk.text = "제자리 (앞으로 가는 이동 지우기)"
+	_in_place_chk.toggled.connect(_on_in_place_toggled)
+	left.add_child(_in_place_chk)
+	_tip(_in_place_chk, "위 목록에서 고른 동작들에 켜고 끕니다. **동작마다 따로**.\n" \
+		+ "켜면 힙이 처음 → 끝 사이에 수평으로 간 거리를 지워, 걷기 · 달리기가 제자리걸음이 됩니다(Mixamo 의 In Place 와 같은 효과).\n" \
+		+ "걸음마다 들썩임 · 좌우 흔들림은 남습니다. 원본 파일은 안 바뀌고, 프리셋에 저장되어 ② 장비 · ③ 복장 굽기에도 똑같이 쓰입니다.\n" \
+		+ "쓰러지며 뒤로 밀려나는 사망 동작처럼 이동이 자연스러운 것은 끈 채 두세요.")
+	_in_place_info = Label.new()
+	_in_place_info.add_theme_font_size_override("font_size", 11)
+	_in_place_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_in_place_info.custom_minimum_size = Vector2(200, 0)
+	left.add_child(_in_place_info)
 	# 상하체 합성 — 설정은 팝업에서, 만든 동작은 위 목록에 다른 애니와 똑같이 나타난다(하늘색)
 	_composite_btn = Button.new()
 	_composite_btn.text = "상하체 합성…"
@@ -1112,6 +1130,7 @@ func _collect_preset() -> DRPreset:
 		sets_copy.append((s as Dictionary).duplicate(true))
 	p.sets = sets_copy
 	p.aim_limits = _aim_limits.duplicate(true)
+	p.in_place = _in_place_names()
 	return p
 
 
@@ -1130,13 +1149,19 @@ func _apply_preset(p: DRPreset) -> void:
 	for k in p.aim_limits.keys():
 		var v: Array = p.aim_limits[k]
 		_aim_limits[String(k)] = [float(v[0]), float(v[1])]
+	var ip_before := _in_place_names()
+	_in_place = {}
+	for a in p.in_place:
+		_in_place[String(a)] = true
+	var ip_changed := _in_place_names() != ip_before
 	if p.model_path != "" and (p.model_path != _model_edit.text.strip_edges() or extra_changed):
 		_model_edit.text = p.model_path
 		_on_load()
 	elif baker == null and p.model_path != "":
 		_model_edit.text = p.model_path
 		_on_load()
-	elif baker != null and comp_changed:
+	elif baker != null and (comp_changed or ip_changed):
+		baker.apply_in_place(_in_place_names())   # 합성보다 먼저(하체가 제자리 동작이면 합성에도 반영)
 		baker.opts.composites = _composites
 		baker.opts.composite_upper_parts = _composite_upper
 		baker.build_composites(_composites, _composite_upper)
@@ -1285,6 +1310,7 @@ func _current_opts() -> DRBaker.Options:
 	o.extra_anim_dir = _extra_edit.text.strip_edges()
 	o.composites = _composites
 	o.composite_upper_parts = _composite_upper
+	o.in_place = _in_place_names()
 	# 0번 = "(바인드 포즈)" → rest_anim 은 빈 값(02 C12: 예전엔 그 글자가 그대로 애니 이름으로 넘어갔다)
 	if _rest_anim.selected > 0:
 		o.rest_anim = _rest_anim.get_item_text(_rest_anim.selected)
@@ -1967,6 +1993,9 @@ func _fill_anim_list() -> void:
 			if baker != null and baker.composite_anims.has(a):     # 상하체 합성으로 만든 동작
 				_anim_list.set_item_custom_fg_color(idx, COMPOSITE_COLOR)
 				_anim_list.set_item_tooltip(idx, _composite_tooltip(a))
+			if _in_place.has(a):
+				var tt := _anim_list.get_item_tooltip(idx)
+				_anim_list.set_item_tooltip(idx, (tt + "\n" if tt != "" else "") + "제자리 — 앞으로 가는 이동을 지움")
 			if _picked_anims.has(a):
 				_anim_list.select(idx, false)
 	_update_anim_count()
@@ -2143,6 +2172,77 @@ func _show_aim_range() -> void:
 		+ ("정해 둔 조준 범위: " + ", ".join(parts) if parts.size() > 0 else "조준 범위: 전부 기본(±16°)")
 
 
+## 제자리로 고른 동작(원래 목록 순서 · 목록에 없는 이름은 뒤에)
+func _in_place_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	for a in _all_anims:
+		if _in_place.has(a):
+			out.append(a)
+	for a in _in_place.keys():
+		if not out.has(String(a)):
+			out.append(String(a))      # 지금 모델에 없는 동작도 프리셋에는 남긴다(추가 동작 폴더를 잠깐 비웠을 때 등)
+	return out
+
+
+## 제자리 칸 — 고른 동작이 전부 켜져 있으면 체크. 고른 동작의 이동 거리와 켜 둔 목록을 아래 글자에
+func _show_in_place() -> void:
+	if _in_place_chk == null:
+		return
+	var names := _picked_anim_names()
+	var on := 0
+	var moving := PackedStringArray()
+	for a in names:
+		if _in_place.has(a):
+			on += 1
+		var m := baker.root_travel(a) if baker != null else 0.0
+		if m >= IN_PLACE_HINT_M:
+			moving.append("%s %.1f m%s" % [a, m, " → 제자리" if _in_place.has(a) else ""])
+	_in_place_chk.disabled = names.is_empty()
+	_in_place_chk.set_pressed_no_signal(names.size() > 0 and on == names.size())
+	_in_place_chk.text = "제자리 (앞으로 가는 이동 지우기)" + (" — 고른 것 중 %d개만 켜짐" % on if on > 0 and on < names.size() else "")
+	var lines := PackedStringArray()
+	if moving.size() > 0:
+		lines.append("앞으로 가는 동작: " + ", ".join(moving))
+	var all_on := _in_place_names()
+	lines.append(("제자리 켬: " + ", ".join(all_on)) if all_on.size() > 0 else "제자리: 켠 동작 없음")
+	_in_place_info.text = "\n".join(lines)
+
+
+func _on_in_place_toggled(on: bool) -> void:
+	if _loading:
+		return
+	var names := _picked_anim_names()
+	if names.is_empty():
+		return
+	for a in names:
+		if on:
+			_in_place[a] = true
+		else:
+			_in_place.erase(a)
+	await _apply_in_place_now()
+
+
+## 제자리 목록을 베이커에 반영한다. 하체로 쓰인 동작이 바뀌었을 수 있으니 합성도 다시 만들고,
+## 이동이 사라지면 화면 맞춤(자동 맞춤은 모든 프레임을 담는다) · 레스트 · 파트 그림이 달라지므로 다시 찾는다.
+func _apply_in_place_now() -> void:
+	if baker == null:
+		_show_in_place()
+		return
+	while _busy:                       # 렌더가 도는 중에 애니를 갈아 끼우지 않는다
+		await get_tree().process_frame
+	var changed := baker.apply_in_place(_in_place_names())
+	var msg := "제자리 %d개 — 바꾼 것: %s" % [_in_place.size(), ", ".join(changed) if changed.size() > 0 else "없음(이미 제자리인 동작)"]
+	_fit_sig = ""
+	_part_sig = ""
+	_auto_rest_key = ""
+	if _composites.size() > 0:
+		await _rebuild_composites(false)
+	else:
+		_fill_anim_list()
+		await _refresh_preview()
+	_status.text = msg
+
+
 func _on_aim_range_changed() -> void:
 	if _loading:
 		return
@@ -2160,6 +2260,7 @@ func _update_anim_count() -> void:
 	if _anim_count == null:
 		return
 	_show_aim_range()
+	_show_in_place()
 	var names := _picked_anim_names()
 	_anim_count.text = "선택 %d개%s" % [names.size(), (": " + ", ".join(names)) if names.size() > 0 else ""]
 	_anim_count.tooltip_text = _anim_count.text

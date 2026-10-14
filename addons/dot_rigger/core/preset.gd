@@ -15,6 +15,8 @@ class_name DRPreset
 @export var composites: Array[Dictionary] = []
 ## 상체로 칠 파트. 비면 기본(몸통·머리·두 팔)
 @export var composite_upper_parts: PackedStringArray = PackedStringArray()
+## 제자리로 만들 동작(창의 `제자리` 체크). 앞으로 걸어 나가는 이동을 지운다 — Mixamo 에서 `In Place` 없이 받은 동작용
+@export var in_place: PackedStringArray = PackedStringArray()
 ## 사람이 알아보기 위한 메모. 동작에는 영향 없음.
 @export_multiline var note: String = ""
 

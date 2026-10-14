@@ -1760,6 +1760,66 @@ func _run() -> void:
 		printerr("추가 동작 폴더를 비운 프리셋을 적용했는데 안 빠짐"); quit(1); return
 	print("30) 추가 동작 폴더 OK — 애니 %d → %d(Test_Extra, 공백→_), 경고 2건(없는 뼈 트랙 · 뼈 이름 전부 틀린 파일은 뺌), 자세 = 원본 Walk, 가져온 라이브러리 안 건드림, 프리셋 왕복 · 다시 불러와도 수동 그리기 순서·고른 동작 2개·레스트 Walk 25%% 유지" % [xa_before, xa_before + 1])
 
+	# ---- 36) 제자리 — 10-14 사용자: "애니메이션이 제자리걸음이었으면 좋겠는데 로컬로 움직이네 … 토글 온오프로" ----
+	# UAL Death02 는 쓰러지며 힙이 뒤로 간다 → 고른 동작에 `제자리` 를 켜면 처음 = 끝 자리, 끄면 원래대로, 프리셋 왕복 · 다시 불러와도 유지
+	var ip_anim := "Death02"
+	var ip_hips: int = (win.baker.rig.parts["Hips"] as DRRigModel.Part).root_bone
+	var ip_move := func() -> float:
+		var ipb: DRBaker = win.baker
+		var ip_len := ipb.anim_player.get_animation(ipb.resolve_anim(ip_anim)).length
+		ipb.set_pose(ip_anim, 0.0)
+		var ip_a := ipb.skeleton.get_bone_global_pose(ip_hips).origin
+		ipb.set_pose(ip_anim, ip_len)
+		var ip_b := ipb.skeleton.get_bone_global_pose(ip_hips).origin
+		ipb.set_rest_pose()
+		return Vector2(ip_b.x - ip_a.x, ip_b.z - ip_a.z).length()
+	var ip_wait := func() -> void:
+		for _i in 3:
+			await process_frame
+		while win._busy:
+			await process_frame
+	var ip_m0: float = ip_move.call()
+	var ip_travel: float = win.baker.root_travel(ip_anim)
+	if ip_m0 < 0.2 or ip_travel < 0.2:
+		printerr("시험 동작 %s 가 움직이지 않음(%.2f · %.2f) — 다른 동작으로 시험할 것" % [ip_anim, ip_m0, ip_travel]); quit(1); return
+	win._picked_anims.clear()
+	win._picked_anims[ip_anim] = true
+	win._fill_anim_list()
+	if win._in_place_chk.disabled or win._in_place_chk.button_pressed or not win._in_place_info.text.contains(ip_anim):
+		printerr("제자리 칸 처음 상태 이상: 꺼짐 %s · 체크 %s · %s" % [win._in_place_chk.disabled, win._in_place_chk.button_pressed, win._in_place_info.text]); quit(1); return
+	win._in_place_chk.button_pressed = true          # 사용자가 누른 것처럼(toggled 신호)
+	await ip_wait.call()
+	var ip_m1: float = ip_move.call()
+	if ip_m1 > 0.02 or not win._in_place_info.text.contains("제자리 켬: " + ip_anim) or absf(win.baker.root_travel(ip_anim) - ip_travel) > 0.001:
+		printerr("제자리를 켰는데 힙이 %.3f m 감(켜기 전 %.2f m) · %s" % [ip_m1, ip_m0, win._in_place_info.text]); quit(1); return
+	var ip_fresh := (load("res://models/UAL1.glb") as PackedScene).instantiate()
+	var ip_same: bool = (ip_fresh.get_node("AnimationPlayer") as AnimationPlayer).get_animation(ip_anim) == win.baker.anim_player.get_animation(ip_anim)
+	ip_fresh.free()
+	if ip_same:
+		printerr("제자리가 가져온 모델의 동작(캐시)을 직접 고침"); quit(1); return
+	var ip_preset: DRPreset = win._collect_preset()
+	if Array(ip_preset.in_place) != [ip_anim] or Array(win._current_opts().in_place) != [ip_anim]:
+		printerr("제자리가 프리셋/옵션에 안 담김: %s" % str(ip_preset.in_place)); quit(1); return
+	win._on_load()                                   # 모델을 다시 불러도 유지(setup 이 옵션대로 다시 건다)
+	await ip_wait.call()
+	if ip_move.call() > 0.02 or not win._in_place_chk.button_pressed:
+		printerr("다시 불러오니 제자리가 풀림"); quit(1); return
+	win._in_place_chk.button_pressed = false
+	await ip_wait.call()
+	var ip_m2: float = ip_move.call()
+	if absf(ip_m2 - ip_m0) > 0.001:
+		printerr("제자리를 껐는데 원래대로 안 돌아옴: %.3f → %.3f" % [ip_m0, ip_m2]); quit(1); return
+	win._apply_preset(ip_preset)                     # 켠 프리셋을 적용하면 다시 켜짐(모델은 그대로 — 합성 · 제자리만 다시)
+	await ip_wait.call()
+	if ip_move.call() > 0.02:
+		printerr("제자리를 켠 프리셋을 적용했는데 안 켜짐"); quit(1); return
+	ip_preset.in_place = PackedStringArray()
+	win._apply_preset(ip_preset)
+	await ip_wait.call()
+	if absf(ip_move.call() - ip_m0) > 0.001:
+		printerr("제자리를 뺀 프리셋을 적용했는데 안 풀림"); quit(1); return
+	print("36) 제자리 OK —%s 힙 %.2f m → 켜면 %.3f m(원래 이동 %.2f m 표시) · 끄면 %.2f m · 캐시 안 건드림 · 프리셋 왕복 · 다시 불러와도 유지" % [ip_anim, ip_m0, ip_m1, ip_travel, ip_m2])
+
 	# ---- 창 자체를 캡처해서 배치 검사 ----
 	win._show_composite()
 	while win._busy:

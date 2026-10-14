@@ -42,6 +42,9 @@ class Options:
 	var composites: Array = []
 	## 상체로 칠 파트(이 파트들의 뼈는 upper 애니에서). 비면 DEFAULT_UPPER_PARTS.
 	var composite_upper_parts: PackedStringArray = PackedStringArray()
+	## 제자리로 만들 동작 이름 — 뿌리 뼈(힙)가 처음 → 끝 사이에 수평으로 간 거리를 지운다(Mixamo `In Place` 와 같은 효과).
+	## 걸음마다 들썩임 · 좌우 흔들림은 남는다. 원본 파일은 안 바뀐다(메모리에서만).
+	var in_place: PackedStringArray = PackedStringArray()
 
 
 const EXTRA_ANIM_EXT := ["fbx", "glb", "gltf", "tscn", "scn", "res", "tres"]
@@ -92,6 +95,8 @@ var extra_anim_warnings: PackedStringArray = PackedStringArray()
 var composite_anims: PackedStringArray = PackedStringArray()
 var composite_warnings: PackedStringArray = PackedStringArray()
 var composite_info: Array = []
+## 제자리로 바꿔 끼운 동작의 원래 것 {이름: Animation} — 끄면 되돌린다
+var _in_place_orig: Dictionary = {}
 var _owns_library := false
 
 var _host: Node
@@ -117,6 +122,9 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 	extra_anim_warnings = PackedStringArray()
 	if opts.extra_anim_dir.strip_edges() != "":
 		_load_extra_anims(opts.extra_anim_dir.strip_edges())
+	_in_place_orig = {}
+	if anim_player != null and opts.in_place.size() > 0:
+		apply_in_place(opts.in_place)     # 합성보다 먼저 — 합성의 하체가 제자리가 된 동작을 쓰게
 	if anim_player != null:
 		# 시간이 저절로 흐르지 않게 한다. 안 그러면 파트 15장을 한 장씩 찍는 동안
 		# 자세가 계속 움직여서 서로 어긋난 스프라이트가 나온다.
@@ -276,6 +284,7 @@ func build_composites(defs: Array, upper_parts: PackedStringArray = PackedString
 	for old in composite_anims:
 		if lib.has_animation(old):
 			lib.remove_animation(old)
+		_in_place_orig.erase(old)          # 합성의 제자리는 _make_composite 가 만들 때 건다
 	composite_anims = PackedStringArray()
 	composite_warnings = PackedStringArray()
 	composite_info = []
@@ -301,6 +310,119 @@ func build_composites(defs: Array, upper_parts: PackedStringArray = PackedString
 		composite_info.append(info)
 	for w in composite_warnings:
 		push_warning("[DotRigger] 상하체 합성: " + w)
+
+
+## 제자리 동작을 정한다. names 에 든 동작은 뿌리 뼈의 수평 이동을 지운 사본으로 바꿔 끼우고, 빠진 동작은 원래 것으로 되돌린다.
+## 합성은 여기서 바꾸지 않는다 — build_composites 가 만들 때 반영하므로, 합성이 있으면 이것을 부른 뒤 합성을 다시 만든다(창이 그렇게 한다).
+## 돌려주는 값 = 실제로 바꾼(지우거나 되돌린) 동작 이름
+func apply_in_place(names: PackedStringArray) -> PackedStringArray:
+	opts.in_place = names
+	var changed := PackedStringArray()
+	if anim_player == null:
+		return changed
+	var lib := _own_library()
+	for n in _in_place_orig.keys():
+		if names.has(n):
+			continue
+		if lib.has_animation(n):
+			lib.remove_animation(n)
+			lib.add_animation(n, _in_place_orig[n])
+			changed.append(n)
+		_in_place_orig.erase(n)
+	for n in names:
+		if _in_place_orig.has(n) or not lib.has_animation(n) or composite_anims.has(n):
+			continue
+		var orig := lib.get_animation(n)
+		var a := orig.duplicate(true) as Animation   # 모델 자신의 동작은 가져온(캐시된) 것과 같은 객체라 사본을 고친다
+		if not _strip_root_travel(a):
+			continue                                  # 뿌리 뼈가 움직이지 않는다 — 이미 제자리
+		lib.remove_animation(n)
+		lib.add_animation(n, a)
+		_in_place_orig[n] = orig
+		changed.append(n)
+	return changed
+
+
+## 그 동작이 처음 → 끝 사이에 수평으로 간 거리(m, 제자리로 바꾸기 전 기준). 뿌리 뼈가 안 움직이면 0
+## 합성은 끝 프레임이 반복 지점이라 직접 못 잰다 → 하체 동작 한 주기의 이동(하체를 이미 제자리로 했으면 0).
+## 하체를 여러 번 돌리는 합성도 주기마다 힙이 처음 자리로 돌아오므로 한 주기 거리가 화면에서 걸어 나가는 거리다
+func root_travel(anim_name: String) -> float:
+	for info in composite_info:
+		var ci: Dictionary = info
+		if String(ci.get("name", "")) == anim_name:
+			var lower := String(ci.get("lower", ""))
+			if _in_place_orig.has(lower):
+				return 0.0
+			return root_travel(lower)
+	var a: Animation = _in_place_orig.get(anim_name, null)
+	if a == null:
+		if anim_player == null or not anim_player.has_animation(anim_name):
+			return 0.0
+		a = anim_player.get_animation(anim_name)
+	var info := _root_travel_info(a)
+	if info.is_empty():
+		return 0.0
+	return (info["d"] as Vector3).length() * skeleton.motion_scale   # 리타깃이 위치 트랙을 힙 높이로 나눠 두었으면 되돌려 m 로
+
+
+## 뿌리 뼈 = 수평으로 움직이는 위치 트랙이 있는 뼈 중 가장 위(보통 힙). { track, d(처음 → 끝 수평 이동, 트랙 공간), t0, t1 } — 없으면 {}
+func _root_travel_info(a: Animation) -> Dictionary:
+	var best := {}
+	var best_depth := 1 << 30
+	for ti in a.get_track_count():
+		if a.track_get_type(ti) != Animation.TYPE_POSITION_3D or a.track_get_key_count(ti) < 2:
+			continue
+		var bi := skeleton.find_bone(a.track_get_path(ti).get_concatenated_subnames())
+		if bi < 0:
+			continue
+		var depth := 0
+		var w := skeleton.get_bone_parent(bi)
+		while w >= 0:
+			depth += 1
+			w = skeleton.get_bone_parent(w)
+		if depth >= best_depth:
+			continue
+		var up := _up_axis_in_bone_parent(bi)
+		var last := a.track_get_key_count(ti) - 1
+		var d: Vector3 = (a.track_get_key_value(ti, last) as Vector3) - (a.track_get_key_value(ti, 0) as Vector3)
+		d -= up * d.dot(up)
+		if d.length() < 0.0001:
+			continue                       # 이 뼈는 수평으로 안 간다(위아래만 들썩임) — 더 아래 뼈를 본다
+		best_depth = depth
+		best = {"track": ti, "d": d, "t0": a.track_get_key_time(ti, 0), "t1": a.track_get_key_time(ti, last)}
+	return best
+
+
+## 수평 이동을 지운다 — 처음 → 끝 이동을 시간에 비례해 빼므로 끝 = 처음(반복 지점이 이어진다), 걸음 사이의 들썩임 · 흔들림은 남는다
+func _strip_root_travel(a: Animation) -> bool:
+	var info := _root_travel_info(a)
+	if info.is_empty():
+		return false
+	var ti: int = info["track"]
+	var d: Vector3 = info["d"]
+	var t0: float = info["t0"]
+	var span := maxf(float(info["t1"]) - t0, 0.0001)
+	for k in a.track_get_key_count(ti):
+		var f := clampf((a.track_get_key_time(ti, k) - t0) / span, 0.0, 1.0)
+		a.track_set_key_value(ti, k, (a.track_get_key_value(ti, k) as Vector3) - d * f)
+	return true
+
+
+## 화면의 위쪽(세상 +Y)이 뼈 bi 의 부모 공간에서 어느 쪽인가 — 위치 트랙 값은 부모 뼈 기준이다
+func _up_axis_in_bone_parent(bi: int) -> Vector3:
+	var b := Basis.IDENTITY
+	var n: Node = skeleton
+	while n != null:
+		if n is Node3D:
+			b = (n as Node3D).transform.basis.orthonormalized() * b
+		if n == model_root:
+			break
+		n = n.get_parent()
+	var up := (b.inverse() * Vector3.UP).normalized()
+	var par := skeleton.get_bone_parent(bi)
+	if par >= 0:
+		up = (skeleton.get_bone_global_rest(par).basis.orthonormalized().inverse() * up).normalized()
+	return up
 
 
 ## 합성 정의의 동작 이름(비면 `하체+상체` — 팝업의 auto_name 과 같은 규칙)
@@ -357,6 +479,11 @@ func _make_composite(def: Dictionary, upper_parts: PackedStringArray) -> Diction
 			upper_bone[skeleton.get_bone_name(int(bi))] = true
 	var lo := lib.get_animation(lower_name)
 	var up := lib.get_animation(upper_name)
+	# 합성 자체를 제자리로 골랐으면 하체의 이동을 지운 사본으로 합친다. 합성은 끝 프레임을 반복 지점(처음 자세)으로 다시 찍으므로
+	# 다 만든 뒤에는 처음 = 끝이라 이동을 잴 수 없다 — 그래서 만들기 전에 지운다
+	if opts != null and opts.in_place.has(composite_name(def)):
+		lo = lo.duplicate(true) as Animation
+		_strip_root_travel(lo)
 	var lo_len := maxf(lo.length, 0.0001)
 	var up_len := maxf(up.length, 0.0001)
 	var mode := int(def.get("length_mode", LEN_LOWER_SPEED))

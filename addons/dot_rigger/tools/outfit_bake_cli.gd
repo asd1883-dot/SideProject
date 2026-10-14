@@ -50,6 +50,7 @@ func _run() -> void:
 		opts.bleed_rings = p.bleed_rings
 		opts.composites = p.composites.duplicate(true)
 		opts.composite_upper_parts = p.composite_upper_parts
+		opts.in_place = p.in_place
 	if _args.has("extra_anims"):
 		opts.extra_anim_dir = _arg("extra_anims")
 	var model_path := _arg("model", "")
