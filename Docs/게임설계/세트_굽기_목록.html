@@ -89,7 +89,7 @@ td.n { white-space: nowrap; font-family: Consolas, monospace; font-size: 9pt; }
 <ol>
 <li>맞으면 0.25초 멈칫하는데 <code>Idle_Hit</code> 은 0.9초, <code>Crouch_Hit</code> 은 0.8초에 가장 크게 움직인다 → 지금은 거의 안 보인다. 짧은 동작(UAL <code>Hit_Chest</code> 0.33초)으로 바꾸거나 멈칫 시간을 늘리는 것 중 미정. 엎드려 맞음은 0.3초라 괜찮다.</li>
 <li><code>Crouch_Reload</code> 는 6.9초인데 장전 시간은 3초 → 앞 44% 만 나온다.</li>
-<li><code>Rifle_Idle</code> 의 손 모양은 원본 그대로다(손목 꺾임 · 손바닥 방향 · 손가락 굽힘이 Mixamo 원본과 몇 도 차이). 보이지 않는 소총을 쥔 자세라 총 없이 보면 손목이 꺾여 보인다. ② 에서 소총을 얹어야 자연스럽다(얹은 모습은 아직 확인 안 함).</li>
+<li><code>Rifle_Idle</code> 손목: ① <b>3D 미리보기</b>를 위에서 내려다보면(Pitch 39°) 손목 살이 접히고 배 앞 손이 반바지와 겹쳐 이상해 보인다. 게임에 들어가는 2D(yaw −55° · Pitch 0° · 평면화 · 지금 그리기 순서)로 구우면 깨끗하다 — ① 에서 <b>Pitch 0 · 2D 순서 켜기</b>로 확인. 뼈 각도는 Mixamo 원본과 몇 도 차이(옮겨 얹기 문제 아님). 비교 그림 <code>pipeline/check/rifle_idle_게임화면비교.png</code>.</li>
 <li><code>Rifle Idle.fbx</code> 는 54 MB(With Skin)라 이 PC 에만 있다. 다른 PC 에서 쓰려면 Mixamo 에서 Without Skin 으로 다시 받아 같은 이름으로 덮어쓴다.</li>
 </ol>
 
