@@ -40,6 +40,12 @@ const IMPACT_SEC := 0.1            # 도착 뒤 점이 남는 시간
 const CORPSE_FADE_SEC := 1.5       # 사라지기 직전 흐려지는 시간
 const LABEL_W := 140.0
 const OFFSCREEN_MARGIN_PX := 150.0 # 화면 밖으로 이만큼까지는 애니를 계속 돌린다(들어올 때 튀지 않게)
+## 이동 동작을 아직 안 구웠을 때 대신 쓸 것(앞에서부터). 앉아걷기가 없으면 앉은 채 미끄러지고, 그것도 없으면 서서 걷는다
+const MOVE_FALLBACK := {
+	"걷기": ["달리기"],
+	"앉아걷기": ["앉기", "걷기", "달리기"],
+	"포복": ["엎드림"],
+}
 const TEAM_FILL := [Color(0.25, 0.5, 1.0, 0.2), Color(1.0, 0.3, 0.25, 0.2)]
 const TEAM_LINE := [Color(0.42, 0.66, 1.0, 0.95), Color(1.0, 0.46, 0.4, 0.95)]
 
@@ -450,23 +456,25 @@ func _candidates(s: BattleSoldier) -> PackedStringArray:
 		BattleBody.Move.RUN:
 			base = "달리기"
 		BattleBody.Move.WALK:
-			base = "걷기"
+			base = "앉아걷기" if s.stance == BattleBody.Stance.CROUCH else "걷기"
 		BattleBody.Move.CRAWL:
 			base = "포복"
 		_:
 			moving = false
+	var fallback: Array = MOVE_FALLBACK.get(base, [])
 	if s.override == BattleBody.Ovr.HIT:
 		# 서 있을 때만 서서 움찔하는 동작을 쓴다. 앉기 · 엎드림은 그 자세용 피격이 없으면 그 자세 그대로(서기용을 쓰면 0.25초 동안 벌떡 일어선다)
 		if s.stance == BattleBody.Stance.STAND:
-			return PackedStringArray(["피격", base])
+			return PackedStringArray(["피격", base] + fallback)
 		return PackedStringArray(["피격+" + st, st])
 	if s.act_state == BattleBody.Act.NONE:
-		return PackedStringArray([base])
+		return PackedStringArray([base] + fallback)
 	var act: String = BattleBody.ACT_NAMES[s.act_state]
 	var out := PackedStringArray([base + "+" + act])
 	if moving:
 		out.append(st + "+" + act)
 	out.append(base)
+	out.append_array(fallback)
 	return out
 
 

@@ -35,8 +35,20 @@ func _init() -> void:
 	var motions: MotionTable
 	if force or not ResourceLoader.exists(motions_path):
 		motions = MotionTable.new()
-		# 지금 구워 둔 동작은 Sprint 하나뿐이다. 동작을 더 구우면 여기에 줄을 더한다(상태 이름은 MotionTable.all_keys())
-		var m: Dictionary[String, String] = {"달리기": "Sprint", "걷기": "Sprint"}
+		# 세트 stand · crouch · prone 에 구울 동작(뼈대_구조.md "세트별 구울 동작"). 아직 안 구운 동작은 건너뛰고
+		# 덜 구체적인 것으로 내려가므로 미리 적어 둬도 된다(상태 이름은 MotionTable.all_keys())
+		var m: Dictionary[String, String] = {
+			"서기": "Idle", "걷기": "Walk", "달리기": "Sprint",
+			"서기+조준": "Rifle_Aiming_Idle", "서기+사격": "Firing_Rifle", "서기+장전": "Stand_Reloading",
+			"서기+투척": "Toss_Grenade", "피격": "Idle_Hit", "사망": "Stand_Rifle_Hit_To_Back",
+			"앉기": "Crouch_Idle", "앉아걷기": "Crouch_Fwd",
+			"앉기+조준": "Crouch_Idle+Rifle_Aiming_Idle", "앉기+사격": "Crouch_Idle+Firing_Rifle",
+			"앉기+장전": "Crouch_Reload", "앉기+투척": "Crouch_Idle+Toss_Grenade",
+			"피격+앉기": "Crouch_Hit", "사망+앉기": "Crouch_Rifle_Kneel_Hit_To_Back",
+			"엎드림": "Crawl_Idle", "포복": "Crawl_Fwd",
+			"엎드림+조준": "Prone_Firing_Rifle", "엎드림+사격": "Prone_Firing_Rifle", "엎드림+투척": "Prone_Throw_Grenade",
+			"피격+엎드림": "Rifle_Prone_Hit_Reaction", "사망+엎드림": "Prone_Death",
+		}
 		motions.motions = m
 		_save(motions, motions_path)
 	motions = load(motions_path) as MotionTable
