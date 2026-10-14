@@ -40,6 +40,11 @@ materials/extract=0
 materials/extract_format=0
 materials/extract_path=""
 _subresources={
+"animations": {
+"mixamo_com": {
+"settings/loop_mode": 1
+}
+},
 "nodes": {
 "PATH:Skeleton3D": {
 "retarget/bone_map": Resource("res://source3d/bonemap_mixamo.tres")

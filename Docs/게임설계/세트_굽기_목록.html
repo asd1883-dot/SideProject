@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>세트 굽기 목록 — 소총수</title>
+<style>
+@page { size: A4; margin: 13mm 12mm; }
+body { font-family: "Malgun Gothic", sans-serif; font-size: 9.5pt; color: #111; line-height: 1.45; }
+h1 { font-size: 14pt; margin: 0 0 4px; }
+h2 { font-size: 11pt; margin: 14px 0 4px; }
+p, ul, ol { margin: 3px 0; }
+ul, ol { padding-left: 18px; }
+table { border-collapse: collapse; width: 100%; margin: 3px 0 2px; }
+th, td { border: 1px solid #999; padding: 2px 6px; text-align: left; vertical-align: top; }
+th { background: #eee; font-weight: normal; }
+td.n { white-space: nowrap; font-family: Consolas, monospace; font-size: 9pt; }
+.s { color: #555; }
+</style>
+</head>
+<body>
+
+<h1>세트 굽기 목록 — 소총수 (2026-10-14)</h1>
+<p>모델 <code>human_base</code> (프리셋 <code>res://human.tres</code>) · 추가 동작 폴더 <code>res://source3d/mixamo</code><br>
+세트 3개: <b>stand</b> · <b>crouch</b> · <b>prone</b>. ① 6번에서 세트 이름을 넣고, 아래 동작을 골라 추가한다.<br>
+동작 이름 = ① 목록에 보이는 이름(파일 이름의 공백은 _). 게임 동작 표(<code>rifleman_motions.tres</code>)에 이 이름이 이미 들어 있어 구우면 바로 나온다.</p>
+
+<h2>stand</h2>
+<table>
+<tr><th>동작</th><th>게임에서</th><th>출처 · 길이</th><th>할 일</th></tr>
+<tr><td class="n">Rifle_Idle</td><td>서서 대기</td><td>Mixamo 8.6초</td><td>반복 켜 둠</td></tr>
+<tr><td class="n">Walk_With_Rifle</td><td>걷기</td><td>Mixamo 1.4초</td><td>반복 켜 둠 · <b>① 에서 제자리 체크</b></td></tr>
+<tr><td class="n">Sprint</td><td>달리기</td><td>UAL</td><td>지금 구운 것</td></tr>
+<tr><td class="n">Rifle_Aiming_Idle</td><td>서서 조준</td><td>Mixamo 3.1초</td><td>반복 켜 둠</td></tr>
+<tr><td class="n">Firing_Rifle</td><td>서서 사격</td><td>Mixamo 1.2초</td><td></td></tr>
+<tr><td class="n">Stand_Reloading</td><td>서서 장전</td><td>Mixamo 3.3초</td><td></td></tr>
+<tr><td class="n">Toss_Grenade</td><td>서서 투척</td><td>Mixamo 3.2초</td><td>투척 기능은 아직 없음(나중에 넣어도 됨)</td></tr>
+<tr><td class="n">Idle_Hit</td><td>서서 맞음</td><td>Mixamo 2.3초</td><td>아래 문제 1</td></tr>
+<tr><td class="n">Stand_Rifle_Hit_To_Back</td><td>서서 사망</td><td>Mixamo 1.8초</td><td>제자리 끈 채(뒤로 쓰러짐)</td></tr>
+</table>
+
+<h2>crouch</h2>
+<table>
+<tr><th>동작</th><th>게임에서</th><th>출처 · 길이</th><th>할 일</th></tr>
+<tr><td class="n">Crouch_Idle</td><td>앉아 대기 · 패닉 · 앉은 채 제압</td><td>UAL</td><td></td></tr>
+<tr><td class="n">Crouch_Fwd</td><td>앉아 걷기</td><td>UAL</td><td></td></tr>
+<tr><td class="n">Crouch_Idle+Rifle_Aiming_Idle</td><td>앉아 조준</td><td>합성</td><td>아래 합성 1</td></tr>
+<tr><td class="n">Crouch_Idle+Firing_Rifle</td><td>앉아 사격</td><td>합성</td><td>아래 합성 2</td></tr>
+<tr><td class="n">Crouch_Reload</td><td>앉아 장전</td><td>Mixamo 6.9초</td><td>아래 문제 2</td></tr>
+<tr><td class="n">Crouch_Hit</td><td>앉아 맞음</td><td>Mixamo 1.8초</td><td>아래 문제 1</td></tr>
+<tr><td class="n">Crouch_Rifle_Kneel_Hit_To_Back</td><td>앉아 사망</td><td>Mixamo 1.9초</td><td>제자리 끈 채</td></tr>
+<tr><td class="n s">Crouch_Idle+Toss_Grenade</td><td class="s">앉아 투척</td><td class="s">합성(선택)</td><td class="s">투척 생기면</td></tr>
+</table>
+
+<h2>prone</h2>
+<table>
+<tr><th>동작</th><th>게임에서</th><th>출처 · 길이</th><th>할 일</th></tr>
+<tr><td class="n">Crawl_Idle</td><td>엎드려 대기 · 엎드린 채 제압 · 엎드려 장전(대신)</td><td>UAL</td><td></td></tr>
+<tr><td class="n">Crawl_Fwd</td><td>포복</td><td>UAL</td><td></td></tr>
+<tr><td class="n">Prone_Firing_Rifle</td><td>엎드려 조준 · 사격</td><td>Mixamo 0.8초</td><td>반복 켜 둠</td></tr>
+<tr><td class="n">Prone_Throw_Grenade</td><td>엎드려 투척</td><td>Mixamo 3.5초</td><td>투척 생기면</td></tr>
+<tr><td class="n">Rifle_Prone_Hit_Reaction</td><td>엎드려 맞음</td><td>Mixamo 1.2초</td><td></td></tr>
+<tr><td class="n">Prone_Death</td><td>엎드려 사망</td><td>Mixamo 1.9초</td><td></td></tr>
+</table>
+<p class="s">엎드려 장전 동작은 없음 — 장전하는 동안 엎드려 대기 자세.</p>
+
+<h2>합성 (① 상하체 합성… 단추, 이름 칸을 비우면 아래 이름이 붙음)</h2>
+<table>
+<tr><th></th><th>하체</th><th>상체</th><th>만들어지는 이름</th></tr>
+<tr><td>1</td><td class="n">Crouch_Idle</td><td class="n">Rifle_Aiming_Idle</td><td class="n">Crouch_Idle+Rifle_Aiming_Idle</td></tr>
+<tr><td>2</td><td class="n">Crouch_Idle</td><td class="n">Firing_Rifle</td><td class="n">Crouch_Idle+Firing_Rifle</td></tr>
+<tr><td class="s">3</td><td class="n s">Crouch_Idle</td><td class="n s">Toss_Grenade</td><td class="n s">Crouch_Idle+Toss_Grenade (선택)</td></tr>
+</table>
+
+<h2>순서</h2>
+<ol>
+<li>에디터 창으로 돌아가면 반복을 켠 4개 파일이 다시 가져와진다(따로 할 일 없음). 새 FBX 를 넣을 때 BoneMap 은 자동.</li>
+<li>① 모델 불러오기 → 합성 1 · 2 만들기 → 목록에서 <code>Walk_With_Rifle</code> 고르고 <b>제자리</b> 체크 → 프리셋 저장.</li>
+<li>세트 3개 추가 → 베이크.</li>
+<li>② 장비(소총) · ③ 복장을 다시 굽는다(세트가 바뀌면 둘 다 다시).</li>
+<li><code>game/battle_test.tscn</code> F6 으로 확인.</li>
+</ol>
+<ul>
+<li>같은 동작을 두 세트에 넣지 않는다 — 앞 세트 것만 재생된다.</li>
+<li>합성의 재료(<code>Crouch_Idle</code> 등)는 세트에 안 넣어도 합성은 된다.</li>
+<li>사망 동작은 제자리를 켜지 않는다 — 쓰러지며 뒤로 1.2~1.3 m 밀려나는 것이 자연스럽다.</li>
+</ul>
+
+<h2>알려진 문제</h2>
+<ol>
+<li>맞으면 0.25초 멈칫하는데 <code>Idle_Hit</code> 은 0.9초, <code>Crouch_Hit</code> 은 0.8초에 가장 크게 움직인다 → 지금은 거의 안 보인다. 짧은 동작(UAL <code>Hit_Chest</code> 0.33초)으로 바꾸거나 멈칫 시간을 늘리는 것 중 미정. 엎드려 맞음은 0.3초라 괜찮다.</li>
+<li><code>Crouch_Reload</code> 는 6.9초인데 장전 시간은 3초 → 앞 44% 만 나온다.</li>
+<li><code>Rifle_Idle</code> 의 손 모양은 원본 그대로다(손목 꺾임 · 손바닥 방향 · 손가락 굽힘이 Mixamo 원본과 몇 도 차이). 보이지 않는 소총을 쥔 자세라 총 없이 보면 손목이 꺾여 보인다. ② 에서 소총을 얹어야 자연스럽다(얹은 모습은 아직 확인 안 함).</li>
+<li><code>Rifle Idle.fbx</code> 는 54 MB(With Skin)라 이 PC 에만 있다. 다른 PC 에서 쓰려면 Mixamo 에서 Without Skin 으로 다시 받아 같은 이름으로 덮어쓴다.</li>
+</ol>
+
+<h2>안 쓰는 파일</h2>
+<p><code>Running_Hit</code>(달리며 맞음 상태가 없음) · <code>Shoot_Rifle</code> · <code>Firing_Rifle_2</code> · <code>Gunplay</code> · <code>Double_Dagger_Stab</code> · UAL <code>Idle</code> · <code>Walk</code>(Rifle_Idle · Walk_With_Rifle 로 바뀜)</p>
+
+</body>
+</html>
