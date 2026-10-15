@@ -46,6 +46,11 @@ class Options:
 	## 비튼 각도 × 그 뼈의 자리 비율(팔꿈치 0 → 손목 1)만큼 돌리는 트랙을 넣는다. Mixamo 동작은 손목에서 100 ~ 130° 를 비틀어
 	## 손목 살이 꼬였다(10-14). 비틀림 뼈가 없는 모델은 아무 일도 안 한다.
 	var forearm_twist: bool = true
+	## 손 자리 맞춤(10-15) — 추가 동작(Mixamo 등)의 뼈대가 이 모델과 팔 · 몸통 비율이 다르면(Mixamo 아래팔 = 윗팔의 0.78, 이 몸 0.99 ·
+	## 몸통 10 % 큼) 같은 관절 각도로도 손이 다른 자리에 간다 — Rifle Idle 에서 두 손이 원본보다 10 cm 앞이라 옆에서 보면 앞손이
+	## 뒷팔을 붙잡은 것처럼 겹쳤다. 출처 뼈대에서 손목이 가슴(UpperChest) 기준 어디 있었는지(몸통 비율만큼 키워)를 이 모델에 옮기고
+	## 윗팔 · 아래팔을 두 마디 IK 로 다시 돌린다(손의 방향은 원래 동작 그대로). 출처 팔이 거의 펴진 자세는 원래 관절 각도 쪽으로 섞는다.
+	var hand_ik: bool = true
 	## 제자리로 만들 동작 이름 — 뿌리 뼈(힙)가 처음 → 끝 사이에 수평으로 간 거리를 지운다(Mixamo `In Place` 와 같은 효과).
 	## 걸음마다 들썩임 · 좌우 흔들림은 남는다. 원본 파일은 안 바뀐다(메모리에서만).
 	var in_place: PackedStringArray = PackedStringArray()
@@ -103,6 +108,9 @@ var composite_info: Array = []
 var _in_place_orig: Dictionary = {}
 ## 아래팔 비틀림 트랙을 넣은 동작 수(0 = 비틀림 뼈가 없거나 비튼 동작이 없음)
 var twist_anims: int = 0
+## 손 자리 맞춤(IK)을 건 추가 동작 수 / 마지막으로 쓴 몸통 비율(이 모델 ÷ 출처)
+var ik_anims: int = 0
+var ik_scale: float = 1.0
 var _owns_library := false
 
 var _host: Node
@@ -126,6 +134,7 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 	anim_player = _find_node(model_root, "AnimationPlayer") as AnimationPlayer
 	extra_anims = PackedStringArray()
 	extra_anim_warnings = PackedStringArray()
+	ik_anims = 0
 	if opts.extra_anim_dir.strip_edges() != "":
 		_load_extra_anims(opts.extra_anim_dir.strip_edges())
 	twist_anims = 0
@@ -217,6 +226,8 @@ func _load_extra_anims(dir_path: String) -> void:
 			continue
 		var res := ResourceLoader.load(path)
 		var found := {}   # 원래 이름 -> Animation
+		var src_inst: Node = null          # 출처 씬(뼈대가 있으면 손 자리 맞춤이 그 뼈대로 원래 손 자리를 잰다) — 이 파일을 다 처리한 뒤 푼다
+		var src_skel: Skeleton3D = null
 		if res is PackedScene:
 			var inst := (res as PackedScene).instantiate()
 			var ap := _find_node(inst, "AnimationPlayer") as AnimationPlayer
@@ -224,7 +235,12 @@ func _load_extra_anims(dir_path: String) -> void:
 				for an in ap.get_animation_list():
 					if String(an) != "RESET":
 						found[String(an)] = ap.get_animation(an).duplicate(true)
-			inst.free()
+			src_skel = _find_node(inst, "Skeleton3D") as Skeleton3D
+			if src_skel != null and opts.hand_ik:
+				src_inst = inst
+			else:
+				src_skel = null
+				inst.free()
 		elif res is AnimationLibrary:
 			for an in (res as AnimationLibrary).get_animation_list():
 				if String(an) != "RESET":
@@ -233,6 +249,8 @@ func _load_extra_anims(dir_path: String) -> void:
 			found[fname.get_basename()] = (res as Animation).duplicate(true)
 		if found.is_empty():
 			extra_anim_warnings.append("%s — 동작이 없음" % fname)
+			if src_inst != null:
+				src_inst.free()
 			continue
 		# Mixamo 를 With Skin 으로 받으면 진짜 동작(mixamo.com) 옆에 키가 하나뿐인 멈춘 자세(Take 001)가 같이 온다.
 		# 그대로 두면 동작이 둘이라 파일 이름 대신 "mixamo_com" · "Take_001" 로 들어간다(10-14 Rifle Idle) → 멈춘 것은 뺀다
@@ -264,11 +282,15 @@ func _load_extra_anims(dir_path: String) -> void:
 				continue
 			if missing > 0:
 				extra_anim_warnings.append("%s — 모델에 없는 뼈 트랙 %d/%d개(그 트랙은 무시됨)" % [new_name, missing, bone_tracks])
+			if src_skel != null and _hand_ik(anim, src_skel, src_inst, skel_path):
+				ik_anims += 1
 			if lib.has_animation(new_name):
 				extra_anim_warnings.append("%s — 모델에 같은 이름의 동작이 있어 추가 동작으로 바꿈" % new_name)
 				lib.remove_animation(new_name)
 			lib.add_animation(new_name, anim)
 			extra_anims.append(new_name)
+		if src_inst != null:
+			src_inst.free()
 	for w in extra_anim_warnings:
 		push_warning("[DotRigger] 추가 동작: " + w)
 
@@ -454,6 +476,189 @@ static func _twist_about(q: Quaternion, ax: Vector3) -> float:
 	var tw := Quaternion(ax.x * p, ax.y * p, ax.z * p, q.w).normalized()
 	var ang := 2.0 * acos(clampf(absf(tw.w), 0.0, 1.0))
 	return ang if (p * tw.w) >= 0.0 else -ang
+
+
+## 손 자리 맞춤에 쓰는 뼈(BoneMap 리타깃 이름) — [어깨, 윗팔, 아래팔, 손, 바깥쪽 부호(모델 +X = 캐릭터 왼쪽)]
+const IK_ARMS := [["LeftShoulder", "LeftUpperArm", "LeftLowerArm", "LeftHand", 1.0],
+	["RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand", -1.0]]
+const IK_CHEST := ["UpperChest", "Chest", "Spine"]
+const IK_FPS := 30.0
+## 출처 팔 펴짐(어깨 → 손목 거리 ÷ 팔 길이)이 이 사이면 가슴 기준 자리 → 원래 관절 각도로 서서히 넘긴다(팔을 쭉 편 자세는 그대로 편 채로)
+const IK_STRAIGHT := Vector2(0.88, 0.98)
+
+
+## 추가 동작 하나에 손 자리 맞춤을 건다(트랙 경로는 이미 이 모델 뼈대로 고쳐 쓴 뒤). src_sk = 그 파일의 뼈대(출처 비율). 바꿨으면 true.
+## 손목 목표 = 이 모델 가슴 + (출처 손목 − 출처 가슴) × 몸통 비율(골반 → 목, 이 모델 ÷ 출처) — 모델 공간(두 뼈대 모두 +Z 를 본다).
+## 두 마디 IK: 어깨는 그대로, 팔꿈치는 원래 굽은 쪽으로. 윗팔 · 아래팔은 가장 짧은 회전으로 돌려 비틀림을 지키고, 손은 원래 세상 방향 그대로.
+func _hand_ik(anim: Animation, src_sk: Skeleton3D, src_root: Node, skel_path: String) -> bool:
+	var chest := ""
+	for n in IK_CHEST:
+		if skeleton.find_bone(n) >= 0 and src_sk.find_bone(n) >= 0:
+			chest = n
+			break
+	var hips_o := skeleton.find_bone("Hips")
+	var hips_s := src_sk.find_bone("Hips")
+	var neck_o := skeleton.find_bone("Neck")
+	var neck_s := src_sk.find_bone("Neck")
+	if chest == "" or hips_o < 0 or hips_s < 0 or neck_o < 0 or neck_s < 0 or anim.length <= 0.0:
+		return false
+	var m_o := _xform_to(model_root, skeleton)
+	var m_s := _xform_to(src_root, src_sk)
+	var torso_o := (m_o * skeleton.get_bone_global_rest(neck_o).origin).distance_to(m_o * skeleton.get_bone_global_rest(hips_o).origin)
+	var torso_s := (m_s * src_sk.get_bone_global_rest(neck_s).origin).distance_to(m_s * src_sk.get_bone_global_rest(hips_s).origin)
+	if torso_o < 1e-5 or torso_s < 1e-5:
+		return false
+	var k := clampf(torso_o / torso_s, 0.5, 2.0)
+	var rot_tr := _bone_tracks(anim, Animation.TYPE_ROTATION_3D)
+	var pos_tr := _bone_tracks(anim, Animation.TYPE_POSITION_3D)
+	var scl_tr := _bone_tracks(anim, Animation.TYPE_SCALE_3D)
+	var arms: Array = []
+	for d in IK_ARMS:
+		var o: Array = []
+		var s: Array = []
+		for i in 4:
+			o.append(skeleton.find_bone(String(d[i])))
+			s.append(src_sk.find_bone(String(d[i])))
+		if o.has(-1) or s.has(-1):
+			continue
+		if skeleton.get_bone_parent(o[1]) != o[0] or skeleton.get_bone_parent(o[2]) != o[1] or skeleton.get_bone_parent(o[3]) != o[2]:
+			continue
+		if not rot_tr.has(String(d[1])) and not rot_tr.has(String(d[2])):
+			continue                                       # 이 동작은 그 팔을 안 움직인다
+		var ua_s := m_s * src_sk.get_bone_global_rest(s[1]).origin
+		var la_s := m_s * src_sk.get_bone_global_rest(s[2]).origin
+		var hd_s := m_s * src_sk.get_bone_global_rest(s[3]).origin
+		arms.append({"d": d, "o": o, "s": s, "len_s": ua_s.distance_to(la_s) + la_s.distance_to(hd_s)})
+	if arms.is_empty():
+		return false
+	var ch_o := skeleton.find_bone(chest)
+	var ch_s := src_sk.find_bone(chest)
+	var mi := m_o.affine_inverse()
+	var down := (mi.basis * Vector3.DOWN).normalized()
+	var back := (mi.basis * Vector3(0, 0, -1)).normalized()     # 캐릭터는 +Z 를 본다 → 등 = −Z
+	var side := (mi.basis * Vector3.RIGHT).normalized()          # 캐릭터 왼쪽 = +X
+	var steps := maxi(1, int(ceil(anim.length * IK_FPS)))
+	var times := PackedFloat32Array()
+	for i in steps + 1:
+		times.append(minf(anim.length, float(i) / IK_FPS))
+	var out := {}            # 뼈 번호 -> Array[Quaternion]
+	for arm in arms:
+		var d: Array = arm["d"]
+		var o: Array = arm["o"]
+		var s: Array = arm["s"]
+		for i in 3:
+			out[o[i + 1]] = []
+		for t in times:
+			var g_sh := _anim_global(skeleton, anim, rot_tr, pos_tr, scl_tr, o[0], t)
+			var g_ua := g_sh * _anim_local(skeleton, anim, rot_tr, pos_tr, scl_tr, o[1], t)
+			var g_la := g_ua * _anim_local(skeleton, anim, rot_tr, pos_tr, scl_tr, o[2], t)
+			var g_hd := g_la * _anim_local(skeleton, anim, rot_tr, pos_tr, scl_tr, o[3], t)
+			var g_ch := _anim_global(skeleton, anim, rot_tr, pos_tr, scl_tr, ch_o, t)
+			var sg_ch := m_s * _anim_global(src_sk, anim, rot_tr, pos_tr, scl_tr, ch_s, t)
+			var sg_ua := m_s * _anim_global(src_sk, anim, rot_tr, pos_tr, scl_tr, s[1], t)
+			var sg_hd := m_s * _anim_global(src_sk, anim, rot_tr, pos_tr, scl_tr, s[3], t)
+			var sh := g_ua.origin
+			var el := g_la.origin
+			var wr := g_hd.origin
+			var a := sh.distance_to(el)
+			var b := el.distance_to(wr)
+			if a < 1e-5 or b < 1e-5:
+				for i in 3:
+					(out[o[i + 1]] as Array).append(_anim_local(skeleton, anim, rot_tr, pos_tr, scl_tr, o[i + 1], t).basis.get_rotation_quaternion())
+				continue
+			var tgt := mi * ((m_o * g_ch).origin + (sg_hd.origin - sg_ch.origin) * k)
+			var ext := sg_hd.origin.distance_to(sg_ua.origin) / maxf(float(arm["len_s"]), 1e-5)
+			var al := smoothstep(IK_STRAIGHT.x, IK_STRAIGHT.y, ext)
+			if al > 0.0:
+				tgt = tgt.lerp(sh + (wr - sh).normalized() * minf(ext, 1.0) * (a + b), al)
+			var st := tgt - sh
+			var dist := clampf(st.length(), absf(a - b) + 1e-4, a + b - 1e-4)
+			var u := st.normalized() if st.length() > 1e-6 else (wr - sh).normalized()
+			var pole := (el - sh) + (down * 0.1 + back * 0.07 + side * float(d[4]) * 0.07) * a
+			pole -= u * pole.dot(u)
+			if pole.length() < 1e-6:
+				pole = down - u * down.dot(u)
+			var v := pole.normalized()
+			var ca := clampf((a * a + dist * dist - b * b) / (2.0 * a * dist), -1.0, 1.0)
+			var el2 := sh + (u * ca + v * sqrt(maxf(0.0, 1.0 - ca * ca))) * a
+			var wr2 := sh + u * dist
+			var b_sh := g_sh.basis.orthonormalized()
+			var b_ua := g_ua.basis.orthonormalized()
+			var b_la := g_la.basis.orthonormalized()
+			var b_hd := g_hd.basis.orthonormalized()
+			var q1 := Quaternion((el - sh).normalized(), (el2 - sh).normalized())
+			var b_ua2 := Basis(q1) * b_ua
+			var b_la1 := Basis(q1) * b_la
+			var q2 := Quaternion((q1 * (wr - el)).normalized(), (wr2 - el2).normalized())
+			var b_la2 := Basis(q2) * b_la1
+			(out[o[1]] as Array).append((b_sh.inverse() * b_ua2).get_rotation_quaternion().normalized())
+			(out[o[2]] as Array).append((b_ua2.inverse() * b_la2).get_rotation_quaternion().normalized())
+			(out[o[3]] as Array).append((b_la2.inverse() * b_hd).get_rotation_quaternion().normalized())
+	for bi in out.keys():
+		var path := NodePath("%s:%s" % [skel_path, skeleton.get_bone_name(int(bi))])
+		var ti := anim.find_track(path, Animation.TYPE_ROTATION_3D)
+		if ti < 0:
+			ti = anim.add_track(Animation.TYPE_ROTATION_3D)
+			anim.track_set_path(ti, path)
+		while anim.track_get_key_count(ti) > 0:
+			anim.track_remove_key(ti, 0)
+		anim.track_set_interpolation_type(ti, Animation.INTERPOLATION_LINEAR)
+		var qs: Array = out[bi]
+		for i in times.size():
+			anim.rotation_track_insert_key(ti, times[i], qs[i])
+	ik_scale = k
+	return true
+
+
+## 노드 root 에서 node 까지의 Node3D 변환을 곱한 것(root 포함 · 트리 밖이어도 된다) — 뼈대 공간 → 모델 공간
+static func _xform_to(root: Node, node: Node) -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var n := node
+	while n != null:
+		if n is Node3D:
+			t = (n as Node3D).transform * t
+		if n == root:
+			break
+		n = n.get_parent()
+	return t
+
+
+## 뼈 이름 -> 그 종류(회전 · 위치 · 크기) 트랙 번호
+static func _bone_tracks(anim: Animation, type: int) -> Dictionary:
+	var m := {}
+	for ti in anim.get_track_count():
+		if anim.track_get_type(ti) == type and anim.track_get_key_count(ti) > 0:
+			m[anim.track_get_path(ti).get_concatenated_subnames()] = ti
+	return m
+
+
+## 동작의 시각 t 에서 뼈 bi 의 부모 기준 자세(트랙이 없으면 레스트 · 위치 트랙은 motion_scale 을 곱한다 — AnimationPlayer 와 같게)
+static func _anim_local(sk: Skeleton3D, anim: Animation, rot_tr: Dictionary, pos_tr: Dictionary, scl_tr: Dictionary, bi: int, t: float) -> Transform3D:
+	var rest := sk.get_bone_rest(bi)
+	var nm := sk.get_bone_name(bi)
+	var o := rest.origin
+	if pos_tr.has(nm):
+		o = anim.position_track_interpolate(int(pos_tr[nm]), t) * sk.motion_scale
+	var q := rest.basis.get_rotation_quaternion()
+	if rot_tr.has(nm):
+		q = anim.rotation_track_interpolate(int(rot_tr[nm]), t)
+	var sc := rest.basis.get_scale()
+	if scl_tr.has(nm):
+		sc = anim.scale_track_interpolate(int(scl_tr[nm]), t)
+	return Transform3D(Basis(q) * Basis.from_scale(sc), o)
+
+
+## 동작의 시각 t 에서 뼈 bi 의 뼈대 기준 자세(뿌리부터 부모 기준 자세를 차례로 곱한 것)
+static func _anim_global(sk: Skeleton3D, anim: Animation, rot_tr: Dictionary, pos_tr: Dictionary, scl_tr: Dictionary, bi: int, t: float) -> Transform3D:
+	var chain: Array[int] = []
+	var w := bi
+	while w >= 0:
+		chain.push_front(w)
+		w = sk.get_bone_parent(w)
+	var g := Transform3D.IDENTITY
+	for b in chain:
+		g = g * _anim_local(sk, anim, rot_tr, pos_tr, scl_tr, b, t)
+	return g
 
 
 ## 그 동작이 처음 → 끝 사이에 수평으로 간 거리(m, 제자리로 바꾸기 전 기준). 뿌리 뼈가 안 움직이면 0
