@@ -114,7 +114,7 @@ $P = "C:\<경로>\SideProject"
 | ⑰ `outfit_keys_check_cli` | 시작 → O → P → O → P = 기본 몸 → 상의만 → 상하의 → 하의만 → 기본 몸, 화면 위 `복장 상의 [..] 하의·신발 [..]` | ✓ (10-02, 샌드박스) |
 | ⑲ `hub_smoke_cli` | `Dot Rigger 창(탭) 검사 전부 통과` — 탭 3 · 공통 설정 자동(프리셋 · sets.json) · ① 탭이 프리셋을 바로 적용 · ③ 탭 칸 숨김/공통 값 · 숨은 탭 뷰포트 멈춤 · Ctrl+1/2/3 · 세트 다시 구움 알림 → 다른 탭이 보일 때 다시 불러옴 | ✓ (10-06, 샌드박스) |
 | ⑳ `check_editor.py` | `EDITOR CHECK OK` — 넣기만 해서는 안 뜸 · 제목줄을 잡을 수 있는 자리 · 모델 올리는 중 탭 전환 · 닫고 다시 열면 같은 자리/탭 · 화면 밖 창 구해 옴 · 에디터 오류 0. **명령줄 검사가 못 보는 에디터 전용 길**(02 U18) | ✓ (10-06) |
-| ⑱ `check_character.py` | `CHECK OK` + `pipeline/check/<이름>_sheet.png` 를 **눈으로** 본다(마네킹과 나란히, 동작마다) | ✓ (10-02 human_base · uniform_m36) |
+| ⑱ `check_character.py` | `CHECK OK` + `pipeline/check/<이름>_sheet.png` 를 **눈으로** 본다(동작마다 · `--before <이전 glb>` 면 전 · 후 나란히). ★10-15 부터 **사람 몸으로만 시험**(UAL 마네킹 = 레거시 — 마네킹 줄 없앰, `ui_smoke_cli` 시험 모델도 human_base, `retarget_check_cli` 는 UAL 변환 검사라 돌리지 않음) | ✓ (10-15 human_base) |
 | `bake_cli` → `preview_cli` | `결과: { "ok": true ... }` → 구운 씬이 트랙 60개로 재생 | ✓ |
 | `compare_cli` | 3D 렌더 대비 2D 순서 합성 불일치 %. 합격선 없음, **각도 비교용** | 192px·Idle·자동 순서, **09-15 셰이더 수정(02 C9) 후**: 정측면 9.4% · −45° **3.9%** · −55° 7.8% · −65° 11.4% (09-14 의 4.3~5.9% 는 3D 기준이 틀린 값) |
 

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""캐릭터 검수 — 붙인 몸(bind_to_skeleton.py 결과)을 실제 Godot 굽기로 돌려 기준 몸과 나란히 비교한 그림을 만든다.
+"""캐릭터 검수 — 사람 몸(human_base 등)을 실제 Godot 굽기로 돌려 동작마다 그림을 만든다. --before 를 주면 그 몸과 전 · 후로 나란히.
 
     python pipeline/check_character.py source3d/characters/human_base/human_base.glb
+    python pipeline/check_character.py <새 glb> --before <이전 glb>      (위 = BEFORE, 아래 = TEST — 같은 조건으로 굽는다)
     python pipeline/check_character.py <glb> --anims Idle_Loop,Sprint_Loop,Rifle_Aiming_Idle --yaw -55
     python pipeline/check_character.py <glb> --anims Sprint_Loop --rest_time 0.42      (레스트 = 0.42초 프레임)
     python pipeline/check_character.py <샌드박스 안 glb> --sandbox C:/Users/Dev/Documents/<다른 샌드박스>   (다른 샌드박스 — glb 가 그 안에 있으면 복사 없이 그대로)
@@ -13,7 +14,8 @@
     사용자 화면에 가기 전에 같은 조건(동작마다 그 동작 프레임을 레스트로 · 동작 평면화)으로 굽고 눈으로 본다.
 
 - 실제 프로젝트가 아니라 샌드박스(Documents/1941)에 복사해서 굽는다 — 에디터가 열려 있어도 안전(인수인계 규칙).
-- 결과: pipeline/check/<이름>_sheet.png (동작마다 한 줄: 위 = 기준 몸, 아래 = 검사할 몸)
+- ★ UAL 마네킹은 굽지 않는다(10-15 사용자: "UAL 모델은 레거시, 휴먼 군인(내복)으로만 테스트"). 예전 BASE 줄(마네킹) 대신 --before(이전 사람 몸).
+- 결과: pipeline/check/<이름>_sheet.png (동작마다 한 줄 — --before 가 있으면 위 = BEFORE, 아래 = TEST)
   + 추가 동작(Mixamo) 뼈 매칭 경고를 출력. 마지막 줄 CHECK OK / CHECK FAIL <이유>.
 """
 import os, sys, shutil, subprocess, time
@@ -22,7 +24,6 @@ GODOT = r"C:\Users\Dev\Desktop\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stabl
 SANDBOX = r"C:\Users\Dev\Documents\1941"
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
-BASE_RES = "res://source3d/UAL1_humanoid.glb"
 DEFAULT_ANIMS = ["Idle_Loop", "Sprint_Loop", "Crouch_Idle_Loop", "Rifle_Aiming_Idle", "Firing_Rifle"]
 EXTRA = "res://source3d/mixamo"
 
@@ -70,16 +71,47 @@ def main():
         print("경고: %s.import 에 뼈 이름표(BoneMap)가 없습니다 — 추가 동작(라이플 등)이 T-포즈로 멈춥니다" % name)
     model_res = "res://" + rel.replace("\\", "/") + "/" + name + ".glb"
     print("검사: %s (샌드박스 %s)" % (model_res, SANDBOX))
+    # --before: 비교할 이전 사람 몸 — 샌드박스 source3d/characters/_before/ 에 새 이름으로(가져오기 설정은 뼈 이름표만, uid 는 새로)
+    models = []
+    before = arg("before", "")
+    if before:
+        before = os.path.abspath(before)
+        bdir = os.path.join(SANDBOX, "source3d", "characters", "_before")
+        os.makedirs(bdir, exist_ok=True)
+        bname = "before_" + os.path.splitext(os.path.basename(before))[0]
+        shutil.copy2(before, os.path.join(bdir, bname + ".glb"))
+        for f in os.listdir(os.path.dirname(before)):
+            if f.lower().endswith((".jpg", ".png")) and not f.endswith(".import"):
+                shutil.copy2(os.path.join(os.path.dirname(before), f), os.path.join(bdir, f))
+        imp = open(src + ".import", encoding="utf-8").read() if os.path.exists(src + ".import") else ""
+        k0 = imp.find("_subresources=")
+        block = ""
+        if k0 >= 0:
+            depth, k1 = 0, k0 + len("_subresources=")
+            for j in range(k1, len(imp)):
+                if imp[j] == "{":
+                    depth += 1
+                elif imp[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        k1 = j + 1
+                        break
+            block = imp[k0:k1]
+        with open(os.path.join(bdir, bname + ".glb.import"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("[remap]\n\nimporter=\"scene\"\nimporter_version=1\n\n[params]\n\n" + block + "\n")
+        models.append(("before", "res://source3d/characters/_before/" + bname + ".glb"))
+        print("비교(BEFORE): " + before)
+    models.append(("test", model_res))
     godot(["--headless", "--import"], timeout=900)
 
-    # 2) 동작마다 그 동작 첫 프레임을 레스트로 굽고 엔진으로 재생해 캡처 — 기준 몸 · 검사할 몸
+    # 2) 동작마다 그 동작 첫 프레임을 레스트로 굽고 엔진으로 재생해 캡처 — (이전 몸) · 검사할 몸
     rows = []
     problems = []
     # 매번 새 폴더 — 같은 폴더에 다시 구우면 Godot 가 조각 그림을 예전 가져오기 캐시로 읽어
     # 엉뚱한 몸 · 흩어진 팔다리가 찍힌다(10-02). 샌드박스 res://_check/ 아래는 지워도 된다.
     run_id = time.strftime("%m%d_%H%M%S")
     for an in anims:
-        for tag, model in (("base", BASE_RES), ("test", model_res)):
+        for tag, model in models:
             out = "res://_check/%s/%s_%s" % (run_id, tag, an)
             log = godot(["--resolution", "900x700", "--script", "res://addons/dot_rigger/tools/bake_cli.gd", "--",
                          "--model=" + model, "--extra_anims=" + EXTRA, "--anims=" + an, "--rest=" + an, "--rest_time=" + rest_time,
@@ -115,7 +147,7 @@ def main():
                 sheet.paste(im, (150, y))
                 d.text((6, y + 6), an, fill=(230, 230, 230))
                 # 글꼴 없이 그리므로 영문으로(한글은 네모로 깨짐)
-                d.text((6, y + 22), "BASE" if tag == "base" else "TEST", fill=(255, 200, 80) if tag == "test" else (150, 150, 150))
+                d.text((6, y + 22), "BEFORE" if tag == "before" else "TEST", fill=(255, 200, 80) if tag == "test" else (150, 150, 150))
                 y += im.height
             path = os.path.join(out_dir, name + "_sheet.png")
             sheet.save(path)

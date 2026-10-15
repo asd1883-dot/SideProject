@@ -4,8 +4,21 @@ extends SceneTree
 ## 창을 실제로 띄우진 않고, 위젯 구성 -> 모델 로드 -> 프리뷰 갱신까지
 ## 크래시 없이 도는지 확인한다. (EditorInterface 를 쓰는 베이크 버튼은 제외)
 
+## 시험 모델 = 사람 몸(내복 군인). 10-15 사용자: "UAL 마네킹 모델은 레거시, 휴먼 군인(내복)으로만 테스트" — 동작 이름은 UAL 과 같고
+## 뼈 이름은 BoneMap 리타깃 이름(RightUpperArm …)이라 뼈를 찾을 때는 _bone_any 로 두 이름을 다 본다.
+const TEST_MODEL := "res://source3d/characters/human_base/human_base.glb"
+
 func _initialize() -> void:
 	_run.call_deferred()
+
+
+## 이름 후보 중 처음 찾은 뼈 번호(UAL 이름 · 리타깃 이름 둘 다 받으려고)
+func _bone_any(sk: Skeleton3D, names: Array) -> int:
+	for n in names:
+		var bi := sk.find_bone(String(n))
+		if bi >= 0:
+			return bi
+	return -1
 
 
 ## 거의 검은 불투명 픽셀 수
@@ -95,7 +108,7 @@ func _run() -> void:
 		printerr("베이크 버튼이 스크롤 안에 있거나 안 보임"); quit(1); return
 	print("1-2) 왼쪽 열 OK — 접히는 섹션 %d개(3·4 접힘), 베이크 버튼은 스크롤 밖" % win._sections.size())
 
-	win._model_edit.text = "res://models/UAL1.glb"
+	win._model_edit.text = TEST_MODEL
 	win._on_load()
 	if win.baker == null:
 		printerr("모델 로드 실패"); quit(1); return
@@ -1353,7 +1366,12 @@ func _run() -> void:
 	var bp_sk: Skeleton3D = win.baker.skeleton
 	var bp_off := 0
 	for bi in bp_sk.get_bone_count():
-		if not bp_sk.get_bone_pose(bi).is_equal_approx(bp_sk.get_bone_rest(bi)):
+		# 위치 · 회전 · 크기를 따로 본다 — 사람 몸(UAL1_humanoid 뼈대)의 thumb_04_leaf 는 레스트에 아주 작은 기울임(shear)이 있어
+		# TRS 로 다시 만든 자세가 레스트 Transform 과 비트까지 같을 수 없다(10-15). 남은 프레임이 있으면 회전이 달라 여기서 걸린다
+		var bp_rest := bp_sk.get_bone_rest(bi)
+		if not (bp_sk.get_bone_pose_position(bi).is_equal_approx(bp_rest.origin)
+				and bp_sk.get_bone_pose_rotation(bi).is_equal_approx(bp_rest.basis.get_rotation_quaternion())
+				and bp_sk.get_bone_pose_scale(bi).is_equal_approx(bp_rest.basis.get_scale())):
 			bp_off += 1
 	if bp_off > 0:
 		printerr("(바인드 포즈)로 세웠는데 본 %d개가 레스트와 다름 — 보던 프레임이 남음" % bp_off); quit(1); return
@@ -1439,13 +1457,16 @@ func _run() -> void:
 			var cp := ls_img_p.get_pixel(x, y)
 			if cc.r < 0.1 and cc.g < 0.1 and cc.b < 0.1:
 				ls_c_black += 1
-			if cp.r < 0.06 and cp.g < 0.06 and cp.b < 0.06:
-				ls_p_black += 1
+			var ls_ok := false
 			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var nb := ls_img0.get_pixel(x + d.x, y + d.y)
 				if nb.a > 0.5 and absf(cp.r - nb.r * 0.55) < 0.08 and absf(cp.g - nb.g * 0.55) < 0.08 and absf(cp.b - nb.b * 0.55) < 0.08:
 					ls_match += 1
+					ls_ok = true
 					break
+			# 옆 도트 × 0.55 로 설명 안 되는 검정만 잘못 — 사람 몸은 머리카락이 거의 검정이라 그 옆 선은 맞게 검다(10-15)
+			if cp.r < 0.06 and cp.g < 0.06 and cp.b < 0.06 and not ls_ok:
+				ls_p_black += 1
 	var ls_ratio := 100.0 * float(ls_match) / float(maxi(ls_ring, 1))
 	if ls_ring < 200 or ls_c_black != ls_ring or ls_p_black > 0 or ls_ratio < 80.0 or _inner_changed(ls_img0, ls_img_p) > 0:
 		printerr("픽셀 퍼펙트 선 색 이상: 선 도트 %d개 — 카툰 검정 %d, 픽셀 퍼펙트 검정 %d, 옆 도트 × 0.55 와 맞는 비율 %.0f%%, 안쪽 바뀜 %d" % [
@@ -1552,7 +1573,7 @@ func _run() -> void:
 		printerr("팝업 프리뷰가 재생되지 않음 (t %.3f → %.3f, 지금 애니 '%s')" % [cp_t0, cp_dlg._pv_t, cp_ap.current_animation]); quit(1); return
 	cp_dlg._pv_play.button_pressed = false
 	cp_dlg._pv_scrub.value = 0.5                      # 슬라이더 → 그 시점의 자세
-	var cp_arm_mid: Transform3D = win.baker.skeleton.get_bone_pose(win.baker.skeleton.find_bone("upperarm_r"))
+	var cp_arm_mid: Transform3D = win.baker.skeleton.get_bone_pose(_bone_any(win.baker.skeleton, ["upperarm_r", "RightUpperArm"]))
 	if absf(cp_dlg._pv_t - 1.0) > 0.01 or absf(cp_ap.current_animation_position - 1.0) > 0.02:
 		printerr("팝업 프리뷰 슬라이더가 안 먹힘 (t %.3f, 엔진 %.3f)" % [cp_dlg._pv_t, cp_ap.current_animation_position]); quit(1); return
 	# 상체 동작을 바꾸면 프리뷰가 바로 다시 만들어진다(같은 시점의 팔 자세가 달라짐)
@@ -1560,7 +1581,7 @@ func _run() -> void:
 	cp_dlg._on_select(0)
 	cp_dlg._pv_play.button_pressed = false
 	cp_dlg._pv_scrub.value = 0.5
-	var cp_arm_new: Transform3D = win.baker.skeleton.get_bone_pose(win.baker.skeleton.find_bone("upperarm_r"))
+	var cp_arm_new: Transform3D = win.baker.skeleton.get_bone_pose(_bone_any(win.baker.skeleton, ["upperarm_r", "RightUpperArm"]))
 	if cp_arm_mid.is_equal_approx(cp_arm_new):
 		printerr("상체 동작을 바꿨는데 팝업 프리뷰의 팔 자세가 그대로"); quit(1); return
 	# 길이 맞춤 4종이 다 있고, `상체 시간에 하체를 맞춤 (하체 1번)` 을 고르면 프리뷰 길이가 상체 길이가 된다
@@ -1577,7 +1598,7 @@ func _run() -> void:
 	cp_dlg._on_select(0)
 	cp_dlg._pv_play.button_pressed = false
 	cp_dlg._pv_scrub.value = 0.5
-	var cp_chest: int = win.baker.skeleton.find_bone("spine_03")
+	var cp_chest: int = _bone_any(win.baker.skeleton, ["spine_03", "UpperChest"])
 	var cp_q0: Quaternion = win.baker.skeleton.get_bone_global_pose(cp_chest).basis.get_rotation_quaternion()
 	if int(cp_dlg._keep.value) != 0:
 		printerr("칸이 없던 예전 정의인데 방향 유지가 0%% 가 아님 (%d)" % int(cp_dlg._keep.value)); quit(1); return
@@ -1739,7 +1760,7 @@ func _run() -> void:
 	if not xa_p0.is_equal_approx(xa_p1):
 		printerr("추가 동작의 자세가 원본(Walk)과 다름 — 트랙 경로를 못 고쳐 씀"); quit(1); return
 	# 가져온 모델의 라이브러리는 그대로여야 한다(메모리에서 사본에만 얹음)
-	var xa_fresh := (load("res://models/UAL1.glb") as PackedScene).instantiate()
+	var xa_fresh := (load(TEST_MODEL) as PackedScene).instantiate()
 	var xa_fresh_ap := xa_fresh.get_node("AnimationPlayer") as AnimationPlayer
 	var xa_leaked := xa_fresh_ap.has_animation("Test_Extra")
 	xa_fresh.free()
@@ -1792,7 +1813,7 @@ func _run() -> void:
 	var ip_m1: float = ip_move.call()
 	if ip_m1 > 0.02 or not win._in_place_info.text.contains("제자리 켬: " + ip_anim) or absf(win.baker.root_travel(ip_anim) - ip_travel) > 0.001:
 		printerr("제자리를 켰는데 힙이 %.3f m 감(켜기 전 %.2f m) · %s" % [ip_m1, ip_m0, win._in_place_info.text]); quit(1); return
-	var ip_fresh := (load("res://models/UAL1.glb") as PackedScene).instantiate()
+	var ip_fresh := (load(TEST_MODEL) as PackedScene).instantiate()
 	var ip_same: bool = (ip_fresh.get_node("AnimationPlayer") as AnimationPlayer).get_animation(ip_anim) == win.baker.anim_player.get_animation(ip_anim)
 	ip_fresh.free()
 	if ip_same:
