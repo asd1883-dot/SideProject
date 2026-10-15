@@ -3,7 +3,7 @@
 
     blender -b --factory-startup -P pipeline/blender/bind_to_skeleton.py -- \
         --base <기준 몸.glb(뼈대 · 동작 · 스킨 메시)> --src <생성한 모델.glb> --out <결과.glb> [--keep_base 0|1] [--fit height|span]
-        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--finger_fit 1] [--forearm_twist 1] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
+        [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--finger_fit 1] [--forearm_twist 1] [--hand_scale 0.86] [--thumb_len 0.80] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
      맨몸(human_base) · 옷(uniform_m36) 모두 기본값(다리 정리 켬 — 10-08 옷도 되돌림). 원본 = pipeline/comfy/human_8581eb8d.glb · uniform_m36_80eaf512.glb, 기준 = source3d/UAL1_humanoid.glb
 
 1. 기준 몸(UAL1_humanoid.glb)을 바인드 포즈(T-포즈)로 연다. 뼈대 · 동작은 그대로 쓴다.
@@ -720,6 +720,81 @@ def main():
         bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
         bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
 
+    # 손 크기 · 엄지 길이(hand_scale · thumb_len, 10-15) — AI 몸은 마네킹 치수 안내 그림(SPEC.md)을 따라 만들어 손이 마네킹만큼 크다
+    # (손목 → 손끝 상자 23.4 cm, 마네킹 22.9 · 키 1.83 m 사람 ~20 cm): 손바닥(손목 → 중지 뿌리) 12.0 cm(Mixamo 원본 10.1),
+    # 엄지(뿌리 관절 → 끝) 8.8 cm = 검지의 83 %(Mixamo · 사람 64 % 안팎). 사용자: "엄지 김" — Rifle Idle 에서 왼손 엄지를 펴면 막대처럼 튀어나옴.
+    # → 손(손목 너머 전부)을 손목 기준으로 hand_scale 만큼 줄이고, 엄지 바깥 마디(thumb_02 머리 = 뿌리 관절 너머)는 엄지 축으로 thumb_len 만큼 더 줄인다.
+    #   살은 뼈마다의 변환을 그 웨이트로 섞어(스키닝과 같은 식) 옮기고, 손 · 손가락 · 엄지 뼈도 같은 변환으로 옮긴다(방향 · 롤 그대로 → 동작은 같은 각도).
+    #   손목은 아래팔(그대로) ↔ 손(줄임) 웨이트가 섞인 띠라 이음매 없이 좁아진다. 정점 수 · 순서 그대로. 1 = 끔.
+    hand_reshape = {}
+    hs = float(a.get("hand_scale", "0.86"))
+    tl = float(a.get("thumb_len", "0.80"))
+    if abs(hs - 1.0) > 1e-3 or abs(tl - 1.0) > 1e-3:
+        Wm = arm.matrix_world
+        Wi = Wm.inverted()
+        xf = {}                                   # 뼈 이름 -> 그 뼈 살 · 마디를 옮기는 함수(세상 좌표)
+
+        def make_hand(W):
+            return lambda p: W + (p - W) * hs
+
+        def make_thumb(Mj, MjT, t):
+            def f(p):
+                q = (p - Mj) * hs
+                return MjT + q - t * ((1.0 - tl) * q.dot(t))
+            return f
+
+        for side in ("l", "r"):
+            hb = arm.data.bones.get("hand_" + side)
+            if hb is None:
+                continue
+            W = Wm @ hb.head_local
+            T_hand = make_hand(W)
+            for b in [hb] + list(hb.children_recursive):
+                xf[b.name] = T_hand
+            t2, t3 = arm.data.bones.get("thumb_02_" + side), arm.data.bones.get("thumb_03_" + side)
+            if t2 is not None and t3 is not None:
+                Mj = Wm @ t2.head_local
+                t = ((Wm @ t3.tail_local) - Mj).normalized()
+                T_thumb = make_thumb(Mj, T_hand(Mj), t)
+                for b in [t2] + list(t2.children_recursive):
+                    xf[b.name] = T_thumb
+            hand_reshape[side] = {"wrist": [round(x, 3) for x in W]}
+        gname = {g.index: g.name for g in body.vertex_groups}
+        mw = body.matrix_world
+        mwi = mw.inverted()
+        moved, far = 0, 0.0
+        for v in body.data.vertices:
+            ws = [(gname.get(g.group, ""), g.weight) for g in v.groups if g.weight > 0.0]
+            if not any(n in xf for n, _ in ws):
+                continue
+            tot = sum(w for _, w in ws)
+            p = mw @ v.co
+            q = Vector()
+            for n, w in ws:
+                q += (xf[n](p) if n in xf else p) * (w / tot)
+            far = max(far, (q - p).length)
+            v.co = mwi @ q
+            moved += 1
+        body.data.update()
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = arm
+        arm.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        ebs = arm.data.edit_bones
+        new_ht = {}
+        for n, f in xf.items():
+            eb = ebs.get(n)
+            if eb is not None:
+                new_ht[n] = (Wi @ f(Wm @ eb.head), Wi @ f(Wm @ eb.tail), eb.z_axis.copy())
+        for n, (h, tl_, z) in new_ht.items():      # 모두 구한 뒤에 한꺼번에(이어진 뼈가 서로 끌지 않게)
+            eb = ebs[n]
+            eb.use_connect = False
+            eb.head = h
+            eb.tail = tl_
+            eb.align_roll(z)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        hand_reshape.update({"scale": hs, "thumb_len": tl, "vertices": moved, "max_move_cm": round(far * 100, 1), "bones": len(new_ht)})
+
     body.parent = arm
     body.matrix_parent_inverse = arm.matrix_world.inverted()
     am = body.modifiers.new("Armature", "ARMATURE")
@@ -794,7 +869,7 @@ def main():
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
-        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "forearm_twist": forearm_twist, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
+        "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "forearm_twist": forearm_twist, "hand_reshape": hand_reshape, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),
         "actions": len(bpy.data.actions), "kept_base": keep_base, "out": out_path,
