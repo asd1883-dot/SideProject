@@ -51,6 +51,11 @@ class Options:
 	## 뒷팔을 붙잡은 것처럼 겹쳤다. 출처 뼈대에서 손목이 가슴(UpperChest) 기준 어디 있었는지(몸통 비율만큼 키워)를 이 모델에 옮기고
 	## 윗팔 · 아래팔을 두 마디 IK 로 다시 돌린다(손의 방향은 원래 동작 그대로). 출처 팔이 거의 펴진 자세는 원래 관절 각도 쪽으로 섞는다.
 	var hand_ik: bool = true
+	## 손 레스트 방향 맞춤(10-15) — 리타깃은 뼈의 틀(축)을 맞춰 회전을 옮기지만, T-포즈에서 손이 팔에 대해 기운 정도(레스트 모양)는
+	## 뼈대마다 다르다(Mixamo 손: 손바닥 쪽 4.5° · 엄지 쪽 7.9°, 이 몸: 손바닥 쪽 8.1° → 10.6° 차이). 같은 회전을 얹으면 손이 늘 그만큼
+	## 다른 쪽을 봐서 Rifle_Idle 오른손 손목이 원본 30.8° 대신 38.9° 로 꺾였다. 추가 동작마다 출처 손(손목 → 중지 뿌리 · 엄지 쪽)과
+	## 이 모델 손의 레스트 차이를 고정 회전으로 손 회전 뒤에 곱해 손이 원본과 같은 쪽을 보게 한다(손가락은 손을 따라감).
+	var hand_rest_fix: bool = true
 	## 제자리로 만들 동작 이름 — 뿌리 뼈(힙)가 처음 → 끝 사이에 수평으로 간 거리를 지운다(Mixamo `In Place` 와 같은 효과).
 	## 걸음마다 들썩임 · 좌우 흔들림은 남는다. 원본 파일은 안 바뀐다(메모리에서만).
 	var in_place: PackedStringArray = PackedStringArray()
@@ -111,6 +116,9 @@ var twist_anims: int = 0
 ## 손 자리 맞춤(IK)을 건 추가 동작 수 / 마지막으로 쓴 몸통 비율(이 모델 ÷ 출처)
 var ik_anims: int = 0
 var ik_scale: float = 1.0
+## 손 레스트 방향 맞춤을 건 추가 동작 수 / 마지막으로 쓴 보정 각(도, [왼손, 오른손])
+var rest_fix_anims: int = 0
+var rest_fix_deg: Vector2 = Vector2.ZERO
 var _owns_library := false
 
 var _host: Node
@@ -135,6 +143,7 @@ func setup(host: Node, scene: PackedScene, p_profile: DRPartProfile, p_opts: Opt
 	extra_anims = PackedStringArray()
 	extra_anim_warnings = PackedStringArray()
 	ik_anims = 0
+	rest_fix_anims = 0
 	if opts.extra_anim_dir.strip_edges() != "":
 		_load_extra_anims(opts.extra_anim_dir.strip_edges())
 	twist_anims = 0
@@ -236,7 +245,7 @@ func _load_extra_anims(dir_path: String) -> void:
 					if String(an) != "RESET":
 						found[String(an)] = ap.get_animation(an).duplicate(true)
 			src_skel = _find_node(inst, "Skeleton3D") as Skeleton3D
-			if src_skel != null and opts.hand_ik:
+			if src_skel != null and (opts.hand_ik or opts.hand_rest_fix):
 				src_inst = inst
 			else:
 				src_skel = null
@@ -282,7 +291,9 @@ func _load_extra_anims(dir_path: String) -> void:
 				continue
 			if missing > 0:
 				extra_anim_warnings.append("%s — 모델에 없는 뼈 트랙 %d/%d개(그 트랙은 무시됨)" % [new_name, missing, bone_tracks])
-			if src_skel != null and _hand_ik(anim, src_skel, src_inst, skel_path):
+			if src_skel != null and opts.hand_rest_fix and _hand_rest_fix(anim, src_skel, src_inst):
+				rest_fix_anims += 1               # 손 레스트 맞춤이 먼저 — IK 는 맞춘 손 방향을 지킨다
+			if src_skel != null and opts.hand_ik and _hand_ik(anim, src_skel, src_inst, skel_path):
 				ik_anims += 1
 			if lib.has_animation(new_name):
 				extra_anim_warnings.append("%s — 모델에 같은 이름의 동작이 있어 추가 동작으로 바꿈" % new_name)
@@ -485,11 +496,65 @@ const IK_CHEST := ["UpperChest", "Chest", "Spine"]
 const IK_FPS := 30.0
 ## 출처 팔 펴짐(어깨 → 손목 거리 ÷ 팔 길이)이 이 사이면 가슴 기준 자리 → 원래 관절 각도로 서서히 넘긴다(팔을 쭉 편 자세는 그대로 편 채로)
 const IK_STRAIGHT := Vector2(0.88, 0.98)
+## IK 가 손목 각(아래팔 기준 손 회전)을 원래보다 바꿔도 되는 한도(라디안, 10°). 넘으면 손의 세상 방향을 그만큼 양보한다
+const IK_WRIST_MAX := 0.1745329
+
+
+## 손 레스트 방향 맞춤(Options.hand_rest_fix) — 출처 뼈대와 이 모델의 레스트 손 틀(손목 → 중지 뿌리, 엄지 쪽 = 검지 뿌리 − 새끼 뿌리,
+## 그 법선)을 맞추는 고정 회전 Q 를 손 회전 키마다 뒤에 곱한다. 리타깃 뒤 두 뼈대의 손 뼈 틀은 같은 쪽을 보지만, 손 살(손가락 뿌리)이
+## 그 틀에 대해 기운 정도가 뼈대마다 달라 손이 늘 그만큼 다른 쪽을 봤다. Q = 출처 레스트⁻¹ · 출처 손 틀 · 이 모델 손 틀⁻¹ · 이 모델 레스트
+## (모두 모델 공간). 손가락은 손의 자식이라 같이 따라간다. 바꿨으면 true
+func _hand_rest_fix(anim: Animation, src_sk: Skeleton3D, src_root: Node) -> bool:
+	var m_o := _xform_to(model_root, skeleton).basis.orthonormalized()
+	var m_s := _xform_to(src_root, src_sk).basis.orthonormalized()
+	var rot_tr := _bone_tracks(anim, Animation.TYPE_ROTATION_3D)
+	var changed := false
+	for d in IK_ARMS:
+		var hn := String(d[3])
+		var side := hn.trim_suffix("Hand")
+		var hb_o := skeleton.find_bone(hn)
+		var hb_s := src_sk.find_bone(hn)
+		if hb_o < 0 or hb_s < 0 or not rot_tr.has(hn):
+			continue
+		var fo := _hand_frame(skeleton, side, m_o)
+		var fs := _hand_frame(src_sk, side, m_s)
+		if absf(fo.determinant()) < 0.5 or absf(fs.determinant()) < 0.5:
+			continue                                       # 손가락 뼈가 없는 뼈대
+		var ro := (m_o * skeleton.get_bone_global_rest(hb_o).basis).orthonormalized()
+		var rs := (m_s * src_sk.get_bone_global_rest(hb_s).basis).orthonormalized()
+		var q := (rs.inverse() * fs * fo.inverse() * ro).get_rotation_quaternion().normalized()
+		if q.get_angle() < deg_to_rad(0.5):
+			continue
+		var ti := int(rot_tr[hn])
+		for k in anim.track_get_key_count(ti):
+			anim.track_set_key_value(ti, k, ((anim.track_get_key_value(ti, k) as Quaternion) * q).normalized())
+		changed = true
+		if float(d[4]) > 0.0:
+			rest_fix_deg.x = rad_to_deg(q.get_angle())
+		else:
+			rest_fix_deg.y = rad_to_deg(q.get_angle())
+	return changed
+
+
+## 레스트 손 해부 틀(모델 공간 방향): 열 = 손 방향(손목 → 중지 뿌리), 엄지 쪽(검지 뿌리 − 새끼 뿌리, 손 방향에 수직), 그 둘의 법선.
+## 손가락 뼈가 없으면 0 행렬
+static func _hand_frame(sk: Skeleton3D, side: String, m: Basis) -> Basis:
+	var ids := [sk.find_bone(side + "Hand"), sk.find_bone(side + "MiddleProximal"), sk.find_bone(side + "IndexProximal"), sk.find_bone(side + "LittleProximal")]
+	if ids.has(-1):
+		return Basis(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO)
+	var p: Array[Vector3] = []
+	for i in ids:
+		p.append(sk.get_bone_global_rest(int(i)).origin)
+	var h := (m * (p[1] - p[0])).normalized()
+	var l := m * (p[2] - p[3])
+	l = (l - h * l.dot(h)).normalized()
+	return Basis(h, l, h.cross(l))
 
 
 ## 추가 동작 하나에 손 자리 맞춤을 건다(트랙 경로는 이미 이 모델 뼈대로 고쳐 쓴 뒤). src_sk = 그 파일의 뼈대(출처 비율). 바꿨으면 true.
 ## 손목 목표 = 이 모델 가슴 + (출처 손목 − 출처 가슴) × 몸통 비율(골반 → 목, 이 모델 ÷ 출처) — 모델 공간(두 뼈대 모두 +Z 를 본다).
-## 두 마디 IK: 어깨는 그대로, 팔꿈치는 원래 굽은 쪽으로. 윗팔 · 아래팔은 가장 짧은 회전으로 돌려 비틀림을 지키고, 손은 원래 세상 방향 그대로.
+## 두 마디 IK: 어깨는 그대로, 팔꿈치는 원래 아래팔 방향을 가장 잘 지키는 자리(원래 굽은 쪽 반원 안). 윗팔 · 아래팔은 가장 짧은 회전으로
+## 돌려 비틀림을 지키고, 손은 원래 세상 방향 그대로 — 단 손목 각이 IK_WRIST_MAX 넘게 바뀌면 그만큼만(손목이 꺾여 매달린 듯 안 보이게).
 func _hand_ik(anim: Animation, src_sk: Skeleton3D, src_root: Node, skel_path: String) -> bool:
 	var chest := ""
 	for n in IK_CHEST:
@@ -580,8 +645,16 @@ func _hand_ik(anim: Animation, src_sk: Skeleton3D, src_root: Node, skel_path: St
 				pole = down - u * down.dot(u)
 			var v := pole.normalized()
 			var ca := clampf((a * a + dist * dist - b * b) / (2.0 * a * dist), -1.0, 1.0)
-			var el2 := sh + (u * ca + v * sqrt(maxf(0.0, 1.0 - ca * ca))) * a
 			var wr2 := sh + u * dist
+			# 팔꿈치 = 어깨 · 손목 목표를 잇는 축 둘레 원 위의 한 점. 원래 아래팔 방향을 가장 잘 지키는 점을 고른다(그만큼 손목이 덜 꺾임 —
+			# 처음엔 원래 팔꿈치 쪽을 골랐더니 Walk · Shoot 손목이 원본보다 16 ~ 20° 펴짐, 진단 10-15). 원래 굽은 쪽에서 90° 넘게 돌면 원래 쪽.
+			var cc := sh + u * (a * ca)
+			var rr := a * sqrt(maxf(0.0, 1.0 - ca * ca))
+			var el2 := cc + v * rr
+			var want := (wr2 - (wr - el).normalized() * b) - cc
+			want -= u * want.dot(u)
+			if want.length() > 1e-6 and want.normalized().dot(v) > 0.0:
+				el2 = cc + want.normalized() * rr
 			var b_sh := g_sh.basis.orthonormalized()
 			var b_ua := g_ua.basis.orthonormalized()
 			var b_la := g_la.basis.orthonormalized()
@@ -591,9 +664,15 @@ func _hand_ik(anim: Animation, src_sk: Skeleton3D, src_root: Node, skel_path: St
 			var b_la1 := Basis(q1) * b_la
 			var q2 := Quaternion((q1 * (wr - el)).normalized(), (wr2 - el2).normalized())
 			var b_la2 := Basis(q2) * b_la1
+			# 손: 세상 방향(총 방향)을 지키되, 손목 각이 원래(아래팔 기준)보다 IK_WRIST_MAX 넘게 바뀌면 그만큼만 — 손목이 부러진 듯 꺾이지 않게
+			var l_fk := (b_la.inverse() * b_hd).get_rotation_quaternion().normalized()
+			var l_hd := (b_la2.inverse() * b_hd).get_rotation_quaternion().normalized()
+			var dev := l_fk.angle_to(l_hd)
+			if dev > IK_WRIST_MAX:
+				l_hd = l_fk.slerp(l_hd, IK_WRIST_MAX / dev).normalized()
 			(out[o[1]] as Array).append((b_sh.inverse() * b_ua2).get_rotation_quaternion().normalized())
 			(out[o[2]] as Array).append((b_ua2.inverse() * b_la2).get_rotation_quaternion().normalized())
-			(out[o[3]] as Array).append((b_la2.inverse() * b_hd).get_rotation_quaternion().normalized())
+			(out[o[3]] as Array).append(l_hd)
 	for bi in out.keys():
 		var path := NodePath("%s:%s" % [skel_path, skeleton.get_bone_name(int(bi))])
 		var ti := anim.find_track(path, Animation.TYPE_ROTATION_3D)
