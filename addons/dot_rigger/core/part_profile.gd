@@ -42,8 +42,11 @@ static func humanoid(split_toes: bool = false) -> DRPartProfile:
 		{"pattern": "(spine|chest|torso)", "part": "Torso", "sided": false},
 		{"pattern": "(clavicle|shoulder)", "part": "Torso", "sided": false},
 		{"pattern": "(neck|head|jaw|eye)", "part": "Head", "sided": false},
-		{"pattern": "(upperarm|upper_arm)", "part": "UpperArm", "sided": true},
-		{"pattern": "(lowerarm|forearm|fore_arm)", "part": "Forearm", "sided": true},
+		# 윗팔 · 아래팔도 각도 잡음 막이(10-15, 0.3 — 손 · 발보다 낮게: 긴 파트라 웬만한 기울기에선 각도가 믿을 만함).
+		# Stand_Reloading 37 % 에서 왼쪽 윗팔이 평면화 측면 카메라를 정면으로 향해(단축률 0.02) 2D 각도가 잡음 → 팔 전체가 한 바퀴 돌아
+		# 가슴 위에 조각으로 흩어졌다(사용자: "팔이 완전 돌아가고").
+		{"pattern": "(upperarm|upper_arm)", "part": "UpperArm", "sided": true, "angle_fade": 0.3},
+		{"pattern": "(lowerarm|forearm|fore_arm)", "part": "Forearm", "sided": true, "angle_fade": 0.3},
 		# 손·발처럼 짧은 끝 파트는 카메라를 향하면(단축률 낮음) 2D 각도가 잡음처럼 튄다 → angle_fade 아래에서는
 		# 부모 기준 회전을 레스트 쪽으로 눌러 둔다(단축률 0 이면 회전 0, 0.45 이상이면 그대로).
 		# little = Godot 표준 휴머노이드(SkeletonProfileHumanoid)의 새끼손가락 이름. 리타깃한 모델은 본 이름이 이 표준으로 바뀐다
@@ -54,7 +57,7 @@ static func humanoid(split_toes: bool = false) -> DRPartProfile:
 		# 발은 늘이기를 ±15% 로 묶는다 — 팔다리처럼 1.6배까지 두면 50px 발이 걸음마다 부풀었다 줄어 지렁이처럼 보인다(09-16).
 		# 3D 실루엣과는 조금 더 벌어지지만(발끝 몇 px) 2D 게임 발은 원래 안 늘어난다.
 		{"pattern": "(foot|ankle)", "part": "Foot", "sided": true, "stretch_limit": 1.15, "angle_fade": 0.45},
-		{"pattern": "(arm)", "part": "UpperArm", "sided": true},
+		{"pattern": "(arm)", "part": "UpperArm", "sided": true, "angle_fade": 0.3},
 	]
 	p.default_order = PackedStringArray([
 		"Hips", "Torso", "Head",

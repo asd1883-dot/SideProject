@@ -2670,30 +2670,49 @@ func _current_rest_anim() -> String:
 	return baker.resolve_anim(_rest_anim.get_item_text(_rest_anim.selected))
 
 
-## 레스트 자세 점수에서 빼는 파트 — 짧거나 작아서(힙 tail 16px, 머리 19px, 손) 단축률이 뜻이 없다.
-const REST_SCAN_SKIP := ["Hips", "Head", "L_Hand", "R_Hand"]
+## 레스트 자세 점수에서 빼는 파트 — 짧아서(힙 tail 16px, 머리 19px) 단축률이 뜻이 없다.
+## 손은 넣는다(10-15): 손이 카메라를 향한 프레임을 레스트로 고르면 손 그림이 작은 덩어리로 구워져 동작 내내 쓰였다(Stand_Reloading 64%, 왼손 0.24).
+const REST_SCAN_SKIP := ["Hips", "Head"]
+## 훑은 프레임 내내 단축률이 이만큼도 안 변하는 파트는 고르는 데 안 쓴다 — 어느 프레임을 골라도 그대로라
+## 그 파트가 최솟값을 차지하면 다른 파트(팔 · 손)가 아무리 짧아져도 점수가 같아졌다(10-15: 재장전 내내 오른발 0.36 → 64% 를 0.01 차이로 고름).
+const REST_SCAN_MIN_RANGE := 0.05
 
 
-## 한 자세의 점수 = 파트 중 가장 낮은 단축률(1 = 화면과 나란함, 0 = 카메라를 향함) 과 그 파트.
-func _rest_score() -> Array:
+## 한 자세의 파트별 단축률(1 = 화면과 나란함, 0 = 카메라를 향함, 점수에서 빼는 파트 제외)
+func _rest_ratios() -> Dictionary:
 	var f: Dictionary = baker.rig.foreshortening(baker.skeleton, baker.camera, float(baker.opts.view_size.y))
+	var out := {}
+	for pn in f.keys():
+		if not (String(pn) in REST_SCAN_SKIP):
+			out[String(pn)] = float(f[pn])
+	return out
+
+
+## 한 자세의 점수 = 고르는 데 쓰는 파트(use, 비면 전부) 중 가장 낮은 단축률과 그 파트
+static func _rest_score_of(r: Dictionary, use: Dictionary) -> Array:
 	var mn := INF
 	var mp := ""
-	for pn in f.keys():
-		if String(pn) in REST_SCAN_SKIP:
+	for pn in r.keys():
+		if not use.is_empty() and not use.has(pn):
 			continue
-		if float(f[pn]) < mn:
-			mn = float(f[pn])
+		if float(r[pn]) < mn:
+			mn = float(r[pn])
 			mp = String(pn)
 	return [mn if mn != INF else 0.0, mp]
 
 
-## 후보 애니들을 1초당 12프레임씩 훑어 파트 최소 단축률(힙·머리·손 제외)이 가장 큰 프레임을 돌려준다.
-## { anim, t(0~1), score, part }. 스캔 중 자세를 바꾸므로 끝난 뒤 호출자가 레스트를 다시 세운다.
+## 한 자세의 점수(모든 파트) — 지금 자세의 점수만 볼 때
+func _rest_score() -> Array:
+	return _rest_score_of(_rest_ratios(), {})
+
+
+## 후보 애니들을 1초당 12프레임씩 훑어, 프레임마다 움직이는 파트(훑는 동안 단축률이 REST_SCAN_MIN_RANGE 넘게 변하는 것)의
+## 최소 단축률이 가장 큰 프레임을 돌려준다. { anim, t(0~1), score, part }. 스캔 중 자세를 바꾸므로 끝난 뒤 호출자가 레스트를 다시 세운다.
 func _scan_best_rest(cands: PackedStringArray) -> Dictionary:
 	var best := {"anim": "", "t": 0.0, "score": -1.0, "part": ""}
 	if baker == null or baker.anim_player == null:
 		return best
+	var samples: Array = []      # [[애니 이름(후보 표기), t, {파트: 단축률}] …]
 	var n := 0
 	for an0 in cands:
 		var an := baker.resolve_anim(String(an0))
@@ -2704,12 +2723,25 @@ func _scan_best_rest(cands: PackedStringArray) -> Dictionary:
 		for k in steps:
 			var frac := float(k) / float(steps)
 			baker.set_pose(an, anim.length * frac)
-			var sc := _rest_score()
-			if float(sc[0]) > float(best["score"]):
-				best = {"anim": String(an0), "t": frac, "score": float(sc[0]), "part": String(sc[1])}
+			samples.append([String(an0), frac, _rest_ratios()])
 			n += 1
 			if n % 24 == 0:
 				await get_tree().process_frame
+	var lo := {}
+	var hi := {}
+	for s in samples:
+		var r: Dictionary = s[2]
+		for pn in r.keys():
+			lo[pn] = minf(float(lo.get(pn, INF)), float(r[pn]))
+			hi[pn] = maxf(float(hi.get(pn, -INF)), float(r[pn]))
+	var use := {}
+	for pn in lo.keys():
+		if float(hi[pn]) - float(lo[pn]) >= REST_SCAN_MIN_RANGE:
+			use[pn] = true
+	for s in samples:
+		var sc := _rest_score_of(s[2], use)
+		if float(sc[0]) > float(best["score"]):
+			best = {"anim": String(s[0]), "t": float(s[1]), "score": float(sc[0]), "part": String(sc[1])}
 	return best
 
 
