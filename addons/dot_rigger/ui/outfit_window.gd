@@ -25,7 +25,11 @@ const BLENDER_DEFAULT := "C:/Program Files/Blender Foundation/Blender 5.2/blende
 const BLENDER_SETTING := "dot_rigger/blender_path"
 const META_SECTION := "dot_rigger_outfit"
 const BIND_SCRIPT := "res://pipeline/blender/bind_to_skeleton.py"
-const WEIGHT_BASE_DEFAULT := "res://source3d/UAL1_humanoid.glb"
+## 웨이트 원본 몸 기본 = 사람 몸(10-15 사용자: "UAL 마네킹은 레거시, 복장 창 웨이트 원본 몸도 사람 몸"). 사람 몸이면 붙이기가 그 뼈대
+## (팔꿈치 · 손목 · 비틀림 뼈)를 그대로 써서 옷 관절이 맨몸과 같아진다(bind_to_skeleton.py skeleton_from_base).
+const WEIGHT_BASE_DEFAULT := "res://source3d/characters/human_base/human_base.glb"
+## 예전 기본값 — 기억해 둔 값이 이것이면 새 기본값으로 바꿔 읽는다
+const WEIGHT_BASE_LEGACY := "res://source3d/UAL1_humanoid.glb"
 const PV_DEBOUNCE := 0.5
 const SLOT_KEYS := ["top", "bottom", ""]
 const ERASE := ""                  # 칠할 부위 "" = 지우개(웨이트대로)
@@ -277,6 +281,8 @@ func _restore_fields() -> void:
 			["raw", _raw_edit], ["wbase", _wbase_edit]]:
 		# 기본값을 꼭 준다 — null 을 주면 값이 없을 때 에디터가 오류를 낸다(10-06: ③ 탭을 열 때 빨간 오류 7줄)
 		var v := String(es.get_project_metadata(META_SECTION, String(pair[0]), ""))
+		if String(pair[0]) == "wbase" and v == WEIGHT_BASE_LEGACY:
+			v = WEIGHT_BASE_DEFAULT                     # 예전 기본값(UAL 마네킹) 그대로였으면 사람 몸으로
 		if v != "":
 			(pair[1] as LineEdit).text = v
 
@@ -438,7 +444,7 @@ func _build_section_bind(col: Control) -> void:
 	var s := _section(col, "2. 옷 모델 새로 만들기 (AI 원본 → 뼈대에 붙이기)", true)
 	_hint(s, "Tripo 등으로 뽑은 옷 입은 사람(.glb, 통짜)을 기본 뼈대에 붙인다 — 방향 · 키 · 웨이트 · 손가락/엄지 · 관절 경계. Blender 를 뒤에서 돌리며 수십 초 걸린다. 결과 res://source3d/characters/<복장 이름>/<복장 이름>.glb 가 1번 옷 모델로 들어가 바로 불러온다.")
 	_raw_edit = _path_row(s, "AI 원본", "AI 가 뽑은 .glb — 보통 pipeline/comfy/ 아래(이 폴더는 Godot 가 무시하므로 디스크 경로로 고른다).", _on_browse_raw)
-	_wbase_edit = _path_row(s, "웨이트 원본 몸", "웨이트(어느 살이 어느 뼈를 따라가나)를 가져올 몸 — 기본은 뼈대의 주인인 UAL1 마네킹.", _on_browse_wbase)
+	_wbase_edit = _path_row(s, "웨이트 원본 몸", "웨이트(어느 살이 어느 뼈를 따라가나)와 뼈대를 가져올 몸 — 기본은 사람 몸(human_base). 옷 관절이 맨몸과 같아진다.", _on_browse_wbase)
 	_wbase_edit.text = WEIGHT_BASE_DEFAULT
 	var row := HBoxContainer.new()
 	var l := Label.new()

@@ -65,6 +65,10 @@ def main():
         raise SystemExit("기준 몸에 스킨 메시가 없습니다")
     arm.data.pose_position = "REST"
     keep_action = arm.animation_data.action if arm.animation_data else None
+    # 기준 몸이 이미 이 공정으로 만든 사람 몸(human_base — 비틀림 뼈가 있음)이면 뼈대는 그 몸 것을 그대로 쓴다(10-15):
+    # 손가락 뼈 맞춤 · 비틀림 뼈 넣기 · 손 크기(손 뼈 옮김)를 건너뛴다. 옷(③ 복장)의 관절이 맨몸과 하나라도 다르면 2D 에서
+    # 옷 조각이 맨몸 뼈에 얹힐 때 그만큼 어긋난다(소매 ↔ 손 2 cm). 웨이트도 사람 몸에서 옮겨 와 비틀림 몫까지 이미 들어 있다.
+    skel_from_base = any(b.name.startswith("lowerarm_twist_") for b in arm.data.bones)
     if arm.animation_data:
         arm.animation_data.action = None
     bpy.context.view_layer.update()
@@ -601,7 +605,7 @@ def main():
     # 손가락마다 그 손가락 웨이트 > 0.5 정점들의 주축(PCA)을 구하고, 마디(01 · 02 · 03 머리, 03 꼬리, leaf 꼬리)를 그 선 위로
     # 투영(길이 방향 자리는 유지). 엄지는 thumb_fit 으로 이미 0.5 ~ 0.7 cm 라 건드리지 않는다. 롤은 원래 축을 따라 다시 맞춘다.
     finger_fit = {}
-    if a.get("finger_fit", "1") == "1":
+    if a.get("finger_fit", "1") == "1" and not skel_from_base:
         import numpy as np
         gname = {g.index: g.name for g in body.vertex_groups}
         pts_by = {}
@@ -652,7 +656,7 @@ def main():
     # 아래팔 · 비틀림1 · 비틀림2 · 손으로 나눈다(삼각 함수). 비틀림 뼈는 동작에 없으므로 Dot Rigger(DRBaker)가 손의 비틀림 × 자리 비율로 돌린다.
     # 같이: 웨이트 부드럽게(smooth)가 손목 손 웨이트를 아래팔 중간까지 번지게 해 두어(손을 비틀면 아래팔 중간이 가시처럼 튐) 그것도 걷힌다.
     forearm_twist = {}
-    if a.get("forearm_twist", "1") == "1":
+    if a.get("forearm_twist", "1") == "1" and not skel_from_base:
         TW1, TW2 = 0.45, 0.85
         bpy.ops.object.select_all(action="DESELECT")
         bpy.context.view_layer.objects.active = arm
@@ -730,7 +734,7 @@ def main():
     hand_reshape = {}
     hs = float(a.get("hand_scale", "0.86"))
     tl = float(a.get("thumb_len", "0.80"))
-    if abs(hs - 1.0) > 1e-3 or abs(tl - 1.0) > 1e-3:
+    if (abs(hs - 1.0) > 1e-3 or abs(tl - 1.0) > 1e-3) and not skel_from_base:
         Wm = arm.matrix_world
         Wi = Wm.inverted()
         xf = {}                                   # 뼈 이름 -> 그 뼈 살 · 마디를 옮기는 함수(세상 좌표)
@@ -870,6 +874,7 @@ def main():
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
+        "skeleton_from_base": skel_from_base,
         "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "forearm_twist": forearm_twist, "hand_reshape": hand_reshape, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),
