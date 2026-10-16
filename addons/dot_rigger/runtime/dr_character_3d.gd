@@ -1,0 +1,583 @@
+@tool
+extends Node3D
+class_name DRCharacter3D
+
+## 게임 병사 한 명의 3D 모습(10-15) — 2D 컷아웃 굽기의 리소스 관리가 너무 힘들어(세트 · 파트 그림 · 복장 그림 · 장비 그림을
+## 자세마다 굽고 맞춰야 했다) 3D 캐릭터를 게임에 바로 쓰는 노선으로 바꿨다. 도트 느낌은 셰이더(dot_char)와 저해상도 화면이 낸다.
+##
+## 노드 구조(setup 뒤):
+##   DRCharacter3D                        ← 게임이 위치 · 방향(rotation.y) · 크기(scale)를 준다. 모델은 +Z 를 본다
+##     └ <몸 glb 인스턴스>(human_base)       — 구조 그대로: AnimationPlayer(root_node "..") 의 트랙 `%GeneralSkeleton:<뼈>` 가 그대로 풀린다
+##         ├ Armature/GeneralSkeleton
+##         │    ├ SlotTop · SlotBottom · SlotBase (MeshInstance3D — 슬롯 메시. 원래 통메시 Body 는 뺐다)
+##         │    └ WeaponMount (BoneAttachment3D, 무기를 들 때만) └ Weapon (MeshInstance3D)
+##         └ AnimationPlayer
+##
+## 슬롯: top(몸통 · 윗팔 · 아래팔) · bottom(골반 · 허벅지 · 종아리 · 발) · base(머리 · 손 — 늘 기본 몸).
+## 기본 몸 = 세 덩어리(내복 차림). 복장을 입으면 그 슬롯 노드의 메시를 복장 것으로 바꿔 끼운다 — "기본 몸 메시를 숨기고 복장 메시를 보인다"
+## 와 같은 결과인데 노드가 늘지 않는다(병사 100 명 이상). 복장의 머리 · 손은 안 쓴다.
+## 나누기(DRSlotMesh) · 재질은 정적 캐시로 병사끼리 공유한다 — 같은 (glb · 슬롯 표 · parts.json) 이면 같은 ArrayMesh · Skin · ShaderMaterial.
+## 병사마다 다른 값(tint · fade)은 instance uniform 이라 재질을 복제하지 않는다.
+##
+## 쓰는 예:
+##   var ch := DRCharacter3D.new()
+##   add_child(ch)                          # 트리에 먼저 넣어도 되고 setup 뒤에 넣어도 된다
+##   ch.setup()                             # 기본 = 사람 몸(human_base)
+##   ch.set_motions(lib)                    # A 갈래의 AnimationLibrary(트랙 %GeneralSkeleton:<뼈>)
+##   ch.wear("res://outfits/uniform_m36/outfit.json")            # 군복 전체 · ["top"] 이면 상의만
+##   ch.attach_weapon("res://source3d/weapons/kar98k/asset.json")
+##   ch.get_animation_player().play("Rifle_Idle")
+##   DRGripFit.apply_anim(ch, "Rifle_Idle")  # 저장 그립은 지금 소총 동작에 안 맞는다 — 동작에 맞춘 그립(캐시)으로 바꿔 끼움
+##   ch.rotation.y = atan2(dir.x, dir.z)    # dir 쪽을 보게(+X = PI/2)
+##   ch.scale = Vector3.ONE * (1.75 / ch.model_height())
+##   ch.set_tint(Color(0.45, 0.45, 0.45)) ; ch.set_fade(0.3)    # 죽은 병사 어둡게 · 도트식으로 사라지기
+
+const BODY_DEFAULT := "res://source3d/characters/human_base/human_base.glb"
+const SHADER_PATH := "res://addons/dot_rigger/shaders/dot_char.gdshader"
+const SLOTS := ["top", "bottom", "base"]
+## 복장으로 바꿔 끼울 수 있는 슬롯(base = 머리 · 손은 늘 기본 몸)
+const WEAR_SLOTS := ["top", "bottom"]
+const SLOT_NODE := {"top": "SlotTop", "bottom": "SlotBottom", "base": "SlotBase"}
+
+## 셰이더 공통 값 — 모든 병사의 재질(_mats)에 같이 들어간다. 바꿀 때는 set_shading()
+static var _shading := {"bands": 3, "ambient": 0.45, "light_wrap": 0.25, "light_dir": Vector3(-0.4, 0.7, 0.6),
+	"rim": 0.0, "inside_shade": 0.35}
+static var _shader: Shader = null
+## 나눈 모델 캐시: 키(glb|슬롯 표|parts.json md5) -> {model, meshes{슬롯: ArrayMesh}, skin, split(DRSlotMesh.Result), rig(DRRigModel), aabb, height}
+static var _entries := {}
+## 원래 재질(Material, 없으면 null) -> 공유 ShaderMaterial(dot_char)
+static var _mats := {}
+## 무기 캐시: asset.json 경로 -> {asset, equip(DREquipBaker — 그립 계산만), mesh(ArrayMesh, 숨김 노드 뺀 합본), part, support, scale, grip_point}
+static var _weapons := {}
+## Skin 두 개의 바인드가 같은지(인스턴스 id 쌍 -> bool) — 같으면 복장 슬롯도 몸의 Skin 을 써서 뼈대 연결(SkinReference)이 하나로 준다
+static var _skin_same := {}
+## 파일 읽기 캐시(10-16) — 병사마다 · 옷을 입힐 때마다 outfit.json 을 다시 읽고 parts.json 의 md5 를 다시 재지 않게. clear_cache() 로 비운다
+static var _json_cache := {}         # 경로 -> Dictionary
+static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
+
+var _body_path := ""
+var _body: Dictionary = {}
+var _model: Node3D = null
+var _skel: Skeleton3D = null
+var _ap: AnimationPlayer = null
+var _slot_mi := {}            # 슬롯 -> MeshInstance3D
+var _worn := {}               # 슬롯 -> outfit.json 경로
+var _tint := Color.WHITE
+var _fade := 1.0
+var _cast_shadow := false
+var _mount: BoneAttachment3D = null
+var _weapon_mi: MeshInstance3D = null
+var _weapon: Dictionary = {}
+var _grip := Transform3D.IDENTITY   # 손 뼈 로컬 무기 변환(배율 전) — DREquipBaker.compose_grip 과 같은 뜻
+
+
+# ---------------------------------------------------------------- 만들기
+
+## 몸 glb 를 인스턴스해 구조를 그대로 두고, 원래 통메시를 빼고 슬롯 메시 셋(기본 몸 = 내복)을 붙인다. 다시 부르면 처음부터.
+func setup(body_model: String = BODY_DEFAULT) -> bool:
+	_clear()
+	var e := load_entry(body_model)
+	if e.is_empty():
+		return false
+	var ps := load(body_model) as PackedScene
+	_model = ps.instantiate() as Node3D if ps != null else null
+	if _model == null:
+		push_error("[DRCharacter3D] 몸 모델의 루트가 Node3D 가 아닙니다: %s" % body_model)
+		return false
+	add_child(_model)
+	_skel = DRBaker._find_node(_model, "Skeleton3D") as Skeleton3D
+	_ap = DRBaker._find_node(_model, "AnimationPlayer") as AnimationPlayer
+	if _skel == null:
+		push_error("[DRCharacter3D] Skeleton3D 가 없습니다: %s" % body_model)
+		_clear()
+		return false
+	if _ap == null:                        # 스킨만 받은 몸 — 동작은 set_motions 로 넣는다
+		_ap = AnimationPlayer.new()
+		_ap.name = "AnimationPlayer"
+		_model.add_child(_ap)              # root_node 기본값 ".." = 모델 루트
+	# 원래 통메시는 뺀다 — 슬롯 메시가 대신한다(숨기기만 하면 노드 · 스킨 연결이 병사마다 남는다)
+	var stack: Array[Node] = [_model]
+	var olds: Array[MeshInstance3D] = []
+	while stack.size() > 0:
+		var n: Node = stack.pop_back()
+		if n is MeshInstance3D and (n as MeshInstance3D).skin != null:
+			olds.append(n as MeshInstance3D)
+		stack.append_array(n.get_children())
+	for mi in olds:
+		mi.get_parent().remove_child(mi)
+		mi.free()
+	for s in SLOTS:
+		var mi := MeshInstance3D.new()
+		mi.name = String(SLOT_NODE[s])
+		_skel.add_child(mi)
+		mi.skeleton = NodePath("..")
+		_slot_mi[s] = mi
+	_body = e
+	_body_path = body_model
+	for s in SLOTS:
+		_put(String(s), e)
+	_apply_shadow()
+	return true
+
+
+func _clear() -> void:
+	detach_weapon()
+	if _model != null and is_instance_valid(_model):
+		if _model.get_parent() != null:
+			_model.get_parent().remove_child(_model)
+		_model.free()
+	_model = null
+	_skel = null
+	_ap = null
+	_slot_mi.clear()
+	_worn.clear()
+	_body = {}
+	_body_path = ""
+
+
+# ---------------------------------------------------------------- 복장
+
+## 복장을 입힌다. only_slots 가 비면 그 복장이 가진 top · bottom 다. 예: wear(A, ["top"]); wear(B, ["bottom"]) = 상의 A + 하의 B
+## 돌려주는 값 = 하나라도 입혔나
+func wear(outfit_json: String, only_slots: PackedStringArray = PackedStringArray()) -> bool:
+	if _model == null:
+		push_error("[DRCharacter3D] setup() 을 먼저 부르세요")
+		return false
+	var d := _read_json(outfit_json)
+	var glb := String(d.get("model", ""))
+	if glb == "":
+		push_warning("[DRCharacter3D] 복장 파일을 읽을 수 없거나 model 이 없습니다: %s" % outfit_json)
+		return false
+	var table: Dictionary = d.get("slots", {})
+	var e := load_entry(glb, table)
+	if e.is_empty():
+		return false
+	var want: Array = Array(only_slots) if not only_slots.is_empty() else WEAR_SLOTS
+	var done := false
+	for s in want:
+		var ss := String(s)
+		if not WEAR_SLOTS.has(ss):
+			push_warning("[DRCharacter3D] '%s' 슬롯은 입힐 수 없습니다(머리 · 손 = 늘 기본 몸)" % ss)
+			continue
+		if not (e["meshes"] as Dictionary).has(ss):
+			continue                       # 그 복장에 그 슬롯이 없다(예: 상의만 있는 복장)
+		_put(ss, e)
+		_worn[ss] = outfit_json
+		done = true
+	return done
+
+
+## 벗긴다. "" = 전부(내복)
+func take_off(slot: String = "") -> void:
+	if _model == null:
+		return
+	for s in (WEAR_SLOTS if slot == "" else [slot]):
+		var ss := String(s)
+		if not WEAR_SLOTS.has(ss):
+			continue
+		_put(ss, _body)
+		_worn.erase(ss)
+
+
+## 그 슬롯에 입은 복장(outfit.json 경로). 기본 몸이면 ""
+func worn(slot: String) -> String:
+	return String(_worn.get(slot, ""))
+
+
+## 슬롯 노드에 그 모델의 슬롯 메시를 끼운다
+func _put(slot: String, e: Dictionary) -> void:
+	var mi: MeshInstance3D = _slot_mi.get(slot, null)
+	if mi == null:
+		return
+	mi.mesh = (e["meshes"] as Dictionary).get(slot, null)
+	mi.skin = _skin_for(e)
+	_apply_params(mi)
+
+
+## 복장 Skin 의 바인드(뼈 이름 · 바인드 자세)가 몸 것과 같으면 몸 Skin 을 같이 쓴다 — 뼈대 연결(SkinReference)이 병사마다 하나
+func _skin_for(e: Dictionary) -> Skin:
+	var mine: Skin = _body.get("skin", null)
+	var theirs: Skin = e.get("skin", null)
+	if String(e.get("key", "")) == String(_body.get("key", "")) or mine == null or theirs == null or mine == theirs:
+		return theirs if theirs != null else mine
+	var key := "%d|%d" % [mine.get_instance_id(), theirs.get_instance_id()]
+	if not _skin_same.has(key):
+		_skin_same[key] = _skins_equal(mine, theirs)
+	return mine if bool(_skin_same[key]) else theirs
+
+
+static func _skins_equal(a: Skin, b: Skin) -> bool:
+	if a.get_bind_count() != b.get_bind_count():
+		return false
+	for i in a.get_bind_count():
+		if a.get_bind_bone(i) != b.get_bind_bone(i) or a.get_bind_name(i) != b.get_bind_name(i):
+			return false
+		var pa := a.get_bind_pose(i)
+		var pb := b.get_bind_pose(i)
+		if pa.origin.distance_to(pb.origin) > 1e-4:
+			return false
+		for k in 3:
+			if pa.basis[k].distance_to(pb.basis[k]) > 1e-4:
+				return false
+	return true
+
+
+# ---------------------------------------------------------------- 동작 · 노드
+
+## AnimationPlayer 의 기본("") 라이브러리를 바꿔 끼운다(A 갈래가 내보낸 동작 묶음 — 트랙 %GeneralSkeleton:<뼈>). 여러 병사가 같은 라이브러리를 같이 써도 된다
+func set_motions(lib: AnimationLibrary) -> void:
+	if _ap == null or lib == null:
+		return
+	if _ap.has_animation_library(""):
+		_ap.remove_animation_library("")
+	_ap.add_animation_library("", lib)
+
+
+func get_animation_player() -> AnimationPlayer:
+	return _ap
+
+
+func get_skeleton() -> Skeleton3D:
+	return _skel
+
+
+## 슬롯 노드(MeshInstance3D) — 시험 · 효과용
+func get_slot_node(slot: String) -> MeshInstance3D:
+	return _slot_mi.get(slot, null)
+
+
+## 몸 모델의 키(m) — 바인드(T-포즈) 자세의 높이. 게임 크기 맞추기: scale = 원하는 키 / model_height()
+func model_height() -> float:
+	return float(_body.get("height", 0.0))
+
+
+## 몸 모델의 바인드 자세 경계 상자(이 노드 공간, 배율 전)
+func model_aabb() -> AABB:
+	return _body.get("aabb", AABB())
+
+
+func body_model() -> String:
+	return _body_path
+
+
+## 몸 캐시 항목(DRGripFit · 시험용) — {model, meshes, skin, split, rig, aabb, height}
+func get_body_entry() -> Dictionary:
+	return _body
+
+
+# ---------------------------------------------------------------- 색 · 사라지기
+
+## 색 곱(기본 흰색). 죽은 병사 어둡게 등 — 재질은 그대로(공유), 이 병사의 instance uniform 만
+func set_tint(c: Color) -> void:
+	_tint = c
+	for mi in _geometry():
+		mi.set_instance_shader_parameter("tint", c)
+
+
+func get_tint() -> Color:
+	return _tint
+
+
+## 1 = 보임 → 0 = 사라짐(4x4 바이어 디더로 픽셀을 버린다). 0 이면 모델을 아예 안 그린다(visible = false)
+func set_fade(f: float) -> void:
+	_fade = clampf(f, 0.0, 1.0)
+	for mi in _geometry():
+		mi.set_instance_shader_parameter("fade", _fade)
+	if _model != null:
+		_model.visible = _fade > 0.0
+
+
+func get_fade() -> float:
+	return _fade
+
+
+## 그림자 드리우기(기본 끔 — 조명 없는 도트 셰이더라 받지는 않는다. 바닥에 그림자가 필요하면 켠다)
+func set_cast_shadow(on: bool) -> void:
+	_cast_shadow = on
+	_apply_shadow()
+
+
+func _apply_shadow() -> void:
+	var m := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if _cast_shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for mi in _geometry():
+		mi.cast_shadow = m
+
+
+func _apply_params(mi: MeshInstance3D) -> void:
+	mi.set_instance_shader_parameter("tint", _tint)
+	mi.set_instance_shader_parameter("fade", _fade)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if _cast_shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+func _geometry() -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for s in SLOTS:
+		var mi: MeshInstance3D = _slot_mi.get(s, null)
+		if mi != null:
+			out.append(mi)
+	if _weapon_mi != null and is_instance_valid(_weapon_mi):
+		out.append(_weapon_mi)
+	return out
+
+
+## 셰이더 공통 값(bands · ambient · light_wrap · light_dir · rim · inside_shade)을 모든 병사의 재질에 한꺼번에. 준 키만 바뀐다
+static func set_shading(values: Dictionary) -> void:
+	for k in values.keys():
+		_shading[String(k)] = values[k]
+	for sm in _mats.values():
+		_apply_shading(sm as ShaderMaterial)
+
+
+static func get_shading() -> Dictionary:
+	return _shading.duplicate()
+
+
+static func _apply_shading(sm: ShaderMaterial) -> void:
+	for k in _shading.keys():
+		sm.set_shader_parameter(String(k), _shading[k])
+
+
+## 원래 재질 → 공유 dot_char 재질(albedo 색 · 텍스처를 옮긴다). 같은 원래 재질이면 같은 객체
+static func char_material(src: Material) -> ShaderMaterial:
+	if _mats.has(src):
+		return _mats[src]
+	if _shader == null:
+		_shader = load(SHADER_PATH) as Shader
+	var sm := ShaderMaterial.new()
+	sm.shader = _shader
+	var col := Color(0.8, 0.8, 0.8, 1.0)
+	if src is BaseMaterial3D:
+		var bm := src as BaseMaterial3D
+		col = bm.albedo_color
+		if bm.albedo_texture != null:
+			sm.set_shader_parameter("albedo_tex", bm.albedo_texture)
+			sm.set_shader_parameter("use_tex", true)
+	sm.set_shader_parameter("albedo_color", col)
+	_apply_shading(sm)
+	_mats[src] = sm
+	return sm
+
+
+# ---------------------------------------------------------------- 나누기 캐시
+
+## 그 모델을 그 슬롯 표로 나눈 것(처음 한 번만 나누고 이후는 캐시). table 이 비면 기본 표(DRSlotMesh.DEFAULT_SLOTS)
+static func load_entry(glb: String, table: Dictionary = {}) -> Dictionary:
+	var tbl: Dictionary = table if not table.is_empty() else DRSlotMesh.DEFAULT_SLOTS
+	var key := _entry_key(glb, tbl)
+	if _entries.has(key):
+		return _entries[key]
+	var ps := load(glb) as PackedScene
+	if ps == null:
+		push_error("[DRCharacter3D] 모델을 열 수 없습니다: %s" % glb)
+		return {}
+	var inst := ps.instantiate()
+	var skel := DRBaker._find_node(inst, "Skeleton3D") as Skeleton3D
+	var mi := DRBaker._find_skinned_mesh(inst)
+	if skel == null or mi == null:
+		push_error("[DRCharacter3D] 스킨드 메시 · 뼈대가 없습니다: %s" % glb)
+		inst.free()
+		return {}
+	var res := DRSlotMesh.split(mi, skel, DRPartProfile.humanoid(), tbl, DRPartOverrides.load_for(glb))
+	if res.meshes.is_empty():
+		push_error("[DRCharacter3D] 슬롯 나누기 결과가 비었습니다: %s" % glb)
+		inst.free()
+		return {}
+	for s in res.meshes.keys():
+		var am: ArrayMesh = res.meshes[s]
+		for si in am.get_surface_count():
+			am.surface_set_material(si, char_material(am.surface_get_material(si)))
+	var aabb: AABB = DRBaker._xform_to(inst, mi) * mi.get_aabb()
+	var e := {
+		"key": key, "model": glb, "meshes": res.meshes, "skin": mi.skin, "split": res,
+		"rig": DRRigModel.build(skel, res.bone_part, res.part_bones, res.weighted_bones),
+		"aabb": aabb, "height": aabb.size.y,
+	}
+	inst.free()
+	if tbl != DRSlotMesh.DEFAULT_SLOTS and _table_sig(tbl) != _table_sig(DRSlotMesh.DEFAULT_SLOTS):
+		push_warning("[DRCharacter3D] %s 의 슬롯 표가 기본 몸과 다릅니다 — 경계가 기본 몸과 안 맞아 틈 · 겹침이 생길 수 있음" % glb)
+	_entries[key] = e
+	return e
+
+
+static func _entry_key(glb: String, tbl: Dictionary) -> String:
+	var pj := DRPartOverrides.path_for(glb)
+	if not _md5_cache.has(pj):
+		_md5_cache[pj] = FileAccess.get_md5(pj) if FileAccess.file_exists(pj) else ""
+	return "%s|%s|%s" % [glb, _table_sig(tbl), _md5_cache[pj]]
+
+
+static func _table_sig(tbl: Dictionary) -> String:
+	var keys := tbl.keys()
+	keys.sort()
+	var out := PackedStringArray()
+	for k in keys:
+		out.append("%s=%s" % [k, DRSlotMesh.slot_of(String(k), tbl)])
+	return ",".join(out)
+
+
+## 캐시를 비운다(모델 · parts.json 을 고친 뒤 다시 나누게). 이미 만든 병사는 옛 메시를 계속 쓴다
+static func clear_cache() -> void:
+	_entries.clear()
+	_weapons.clear()
+	_skin_same.clear()
+	_json_cache.clear()
+	_md5_cache.clear()
+
+
+## JSON 파일(outfit.json · asset.json)을 읽는다 — 경로마다 한 번(캐시). 고친 파일을 다시 읽으려면 clear_cache()
+static func _read_json(path: String) -> Dictionary:
+	if _json_cache.has(path):
+		return _json_cache[path]
+	var out := {}
+	if path != "" and FileAccess.file_exists(path):
+		var v: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if v is Dictionary:
+			out = v
+	_json_cache[path] = out
+	return out
+
+
+# ---------------------------------------------------------------- 무기
+
+## 무기를 든다 — asset.json 의 "equip"(장비 굽기 창이 저장한 그립)대로 2D 장비 굽기와 **같은 자리**:
+## 붙일 파트(R_Hand)의 맨 위 뼈에 BoneAttachment3D, 그 아래 무기 = compose_grip(set_name) × weapon_scale(DREquipBaker.place_weapon 과 같은 식).
+## set_name = 2D 세트 이름(그 세트의 조정 set_adjust 까지 더함, "" = 공통 조정만). hidden 노드(탄 클립 등)는 뺀다.
+## ⚠ kar98k 의 저장 그립은 달리기 자세(Sprint)에서 잡힌 것이라(10-15 확인) 소총 동작에서 왼손이 총에 안 닿는다 —
+##   DRGripFit.apply(ch) / apply_anim(ch, 동작) 으로 지금 몸 · 지금 동작에 다시 맞출 것.
+func attach_weapon(asset_json: String, set_name: String = "") -> bool:
+	detach_weapon()
+	if _model == null:
+		push_error("[DRCharacter3D] setup() 을 먼저 부르세요")
+		return false
+	var w := load_weapon_entry(asset_json)
+	if w.is_empty():
+		return false
+	var rig: DRRigModel = _body.get("rig", null)
+	var p: DRRigModel.Part = rig.parts.get(String(w["part"]), null) if rig != null else null
+	if p == null or p.root_bone < 0:
+		push_warning("[DRCharacter3D] 무기를 붙일 파트가 몸에 없습니다: %s" % String(w["part"]))
+		return false
+	_mount = BoneAttachment3D.new()
+	_mount.name = "WeaponMount"
+	_skel.add_child(_mount)
+	_mount.bone_name = _skel.get_bone_name(p.root_bone)
+	_weapon_mi = MeshInstance3D.new()
+	_weapon_mi.name = "Weapon"
+	_weapon_mi.mesh = w["mesh"]
+	_mount.add_child(_weapon_mi)
+	_weapon = w
+	set_weapon_grip((w["equip"] as DREquipBaker).compose_grip(set_name))
+	_apply_params(_weapon_mi)
+	return true
+
+
+func detach_weapon() -> void:
+	if _mount != null and is_instance_valid(_mount):
+		if _mount.get_parent() != null:
+			_mount.get_parent().remove_child(_mount)
+		_mount.free()
+	_mount = null
+	_weapon_mi = null
+	_weapon = {}
+
+
+## 손 뼈 로컬 무기 변환(배율 전 — DREquipBaker.compose_grip 과 같은 뜻)을 바꾼다. DRGripFit 이 다시 맞춘 그립을 줄 때
+func set_weapon_grip(g: Transform3D) -> void:
+	_grip = g
+	if _weapon_mi != null and is_instance_valid(_weapon_mi):
+		var xf := g
+		xf.basis = xf.basis * Basis.from_scale(Vector3.ONE * float(_weapon.get("scale", 1.0)))
+		_weapon_mi.transform = xf
+
+
+func get_weapon_grip() -> Transform3D:
+	return _grip
+
+
+func get_weapon_node() -> MeshInstance3D:
+	return _weapon_mi
+
+
+func get_weapon_mount() -> BoneAttachment3D:
+	return _mount
+
+
+## 든 무기의 캐시 항목(DRGripFit · 시험용). 안 들었으면 {}
+func get_weapon_entry() -> Dictionary:
+	return _weapon
+
+
+## 무기 캐시 항목 — 숨김 노드를 뺀 무기 메시를 재질별로 합친 ArrayMesh 하나(병사마다 MeshInstance3D 하나 · 그리기 = 재질 수)
+static func load_weapon_entry(asset_json: String) -> Dictionary:
+	if _weapons.has(asset_json):
+		return _weapons[asset_json]
+	var eq: Dictionary = _read_json(asset_json).get("equip", {})
+	if eq.is_empty():
+		push_warning("[DRCharacter3D] asset.json 에 equip 칸이 없습니다(장비 굽기 창에서 그립을 먼저 저장): %s" % asset_json)
+		return {}
+	var eb := DREquipBaker.new()
+	eb.from_dict(eq)                       # 그립 · 조정 · 숨김 · 무기 리소스(source) — 그립 계산은 이 객체의 compose_grip 을 그대로 쓴다
+	if eb.weapon_res == null:
+		push_warning("[DRCharacter3D] 무기 모델을 열 수 없습니다: %s" % String(eq.get("source", "")))
+		return {}
+	var root: Node3D = null
+	if eb.weapon_res is PackedScene:
+		root = (eb.weapon_res as PackedScene).instantiate() as Node3D
+	elif eb.weapon_res is Mesh:
+		root = Node3D.new()
+		var one := MeshInstance3D.new()
+		one.name = String(eq.get("source", "mesh")).get_file().get_basename()
+		one.mesh = eb.weapon_res as Mesh
+		root.add_child(one)
+	if root == null:
+		return {}
+	# 재질별로 합친다(SurfaceTool.append_from 이 노드 변환까지 굽는다). 경계 상자 · 그립 점 어림은 DREquipBaker.grip_point_guess 와 같은 식
+	var groups := {}        # 재질 -> SurfaceTool
+	var order: Array = []
+	var box := AABB()
+	var first := true
+	var node_boxes := {}
+	for mi in DREquipBaker._meshes(root):
+		if mi.mesh == null:
+			continue
+		var xf := DRBaker._xform_to(root, mi)
+		var b: AABB = xf * mi.get_aabb()
+		node_boxes[String(mi.name)] = b
+		if eb.hidden_nodes.has(String(mi.name)):
+			continue
+		box = b if first else box.merge(b)
+		first = false
+		for si in mi.mesh.get_surface_count():
+			if mi.mesh.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES:
+				continue
+			var mat := mi.get_active_material(si)
+			if not groups.has(mat):
+				var st := SurfaceTool.new()
+				st.begin(Mesh.PRIMITIVE_TRIANGLES)
+				groups[mat] = st
+				order.append(mat)
+			(groups[mat] as SurfaceTool).append_from(mi.mesh, si, xf)
+	root.free()
+	var am := ArrayMesh.new()
+	am.resource_name = "weapon_%s" % String(eq.get("id", "weapon"))
+	for mat in order:
+		var st: SurfaceTool = groups[mat]
+		st.set_material(char_material(mat))
+		st.commit(am)
+	if am.get_surface_count() == 0:
+		push_warning("[DRCharacter3D] 무기에 그릴 메시가 없습니다: %s" % asset_json)
+		return {}
+	var f := eb.forward.normalized()
+	var gp := Vector3.ZERO
+	if eb.grip_node != "" and node_boxes.has(eb.grip_node):
+		gp = (node_boxes[eb.grip_node] as AABB).get_center()
+	else:
+		var half := box.size * 0.5
+		gp = box.get_center() - f * (absf(f.dot(half)) * 0.3) - Vector3.UP * (half.y * 0.33)
+	var w := {
+		"asset": asset_json, "equip": eb, "eq": eq, "mesh": am, "aabb": box,
+		"part": eb.attach_part, "support": eb.support_part, "scale": eb.weapon_scale,
+		"forward": f, "grip_point": gp + eb.grip_offset,
+	}
+	_weapons[asset_json] = w
+	return w

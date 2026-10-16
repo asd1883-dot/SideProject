@@ -10,6 +10,8 @@
 | 프레임 베이크 (방향 x 애니 x 프레임) | 576장 |
 | **컷아웃 부착 (이 도구)** | **1장** |
 
+> **3D 노선(10-15 ~):** 게임은 이제 3D 캐릭터를 그대로 쓴다 — 아래 "3D 로 게임에서 쓰기". 2D 굽기 창 · 퍼펫은 그대로 남아 있다.
+
 ---
 
 ## 파이프라인
@@ -486,6 +488,20 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 - 두 캐릭터의 체형이 달라 **양손 간격이 원본과 다를 수 있다**(손 자리 맞춤 전 기록: UAL 마네킹은 Mixamo 원본보다 25% 좁음).
   손 자리 맞춤을 켜면 양손 자리가 원본 × 몸통 비율이 된다. 어느 쪽이든 동작 내내 일정하므로 소총이 손 사이에서 미끄러지지는 않는다.
 - 검사: `tools/retarget_check_cli.gd` (기존 동작 보존 · 파일 전부 경고 없이 얹힘 · 힙 높이 · 굽기).
+
+## 3D 로 게임에서 쓰기 (10-15 ~)
+
+2D 로 굽지 않고 3D 캐릭터를 게임에 바로 쓴다. 자세한 흐름 · 결정은 `Docs/게임설계/3D_전환.md`.
+
+| 무엇 | 클래스 · 도구 |
+|---|---|
+| 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 에디터 **도구 메뉴 "Dot Rigger — 3D 동작 내보내기"** 또는 `tools/export_motions_cli.gd [--check]` |
+| 병사 한 명 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 무기. `wear(outfit.json, ["top"])` 로 상의 · 하의를 따로 입힌다. 메시 · 재질 · Skin 은 병사끼리 공유 |
+| 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑 |
+| 무기 그립 | `DRGripFit` — 장비 창 그립을 지금 몸 · 지금 동작의 두 손에 다시 맞춘다(동작별 캐시) |
+| 도트 화면 | `DRDotView3D` — 2D 캔버스 안의 3D 창(저해상도 · nearest · 도트 격자 스냅 · 외곽선 `shaders/dot_edges.gdshader`) |
+| 셰이더 | `shaders/dot_char.gdshader` — 계단 명암 + 병사별 `tint` · `fade`(디더로 사라지기) |
+| 검사 | `tools/character3d_check_cli.gd`(차림 · 이음매 · 무기, 창 모드 `--screen 0`) · `test/dot_view_3d_demo.tscn` |
 
 ## 다른 리그 / 다른 종류
 
