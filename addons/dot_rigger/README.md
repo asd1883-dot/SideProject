@@ -299,10 +299,12 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
   왼손이 총을 놓는 동작(수류탄 · 장전 · 맨손 달리기 등)은 표지의 `motion_weights` 를 0 — 오른쪽 표에서 고친다.
 - 게임: 뼈대 수정자는 자세가 바뀔 때만(MANUAL — `step_motion` 초당 12번). 편집 중인 씬만 매 프레임(기즈모로 끌면 팔이 따라옴).
 - 사용법: ① 유닛을 고르면 그 씬이 열린다 → ② 뼈를 고르고 `+ 소켓` → 모델을 고르고 `넣기 · 바꾸기`(★기본 자리 = asset.json `socket_hold` 가 있으면 바로 맞게)
-  → 자리는 숫자 칸(cm · °) 또는 `에디터에서 고르기` 뒤 기즈모 → 새 무기는 조준 동작에서 `지금 동작으로 무기 맞추기` → `지금 자세로 왼손 표지`
+  → 자리는 **미리보기의 유니티식 기즈모**(10-16 — Q 보기 · W 이동 · E 회전 · R 크기 · Y 변환 · X 로컬/글로벌 · Z 피벗/중심 · F 고른 것 보기 · Ctrl 끌기 = 눈금 ·
+  놓으면 유닛 씬에 되돌리기 한 칸, 탭 창 Ctrl+Z · Ctrl+Y · Ctrl+S) 또는 숫자 칸(cm · ° · 크기) 또는 `에디터에서 고르기` 뒤 에디터 기즈모
+  → 새 무기는 조준 동작에서 `지금 동작으로 무기 맞추기` → `지금 자세로 왼손 표지`
   → 오른쪽 `모든 동작 재기`(동작마다 IK 전 · 뒤 cm) → `저장`(씬) · `무기 기본 자리로 저장`(asset.json — 다른 유닛 소켓에 넣을 때 처음 자리).
 - 자식 유닛(상속 씬)은 부모 장비를 지울 수 없어 **숨기고** 새 장비를 넣는다(게임에서는 숨긴 장비를 지운다). 헬멧 = `머리`(Head) 소켓 — 진짜 헬멧 모델 전에는 `대용 헬멧`.
-- 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd`.
+- 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd` · `ui/transform_gizmo.gd`(기즈모 — 화면 좌표로 그리고 고르며 끌기는 광선 ↔ 평면, 손잡이 크기는 화면 기준).
 - 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
 - ⚠ kar98k 는 라이선스 확인 전이라 `.gitignore` — 새로 받은 PC 에서는 기본형 군인의 무기가 빠진 채 열린다(오류 메시지는 뜸).
 - 옛 길(남음): 루트 칸 `weapon_asset` + `attach_weapon` + `DRGripFit`(동작마다 총을 두 손에 다시 맞추던 것) — 소켓 무기가 없을 때만 쓴다.
