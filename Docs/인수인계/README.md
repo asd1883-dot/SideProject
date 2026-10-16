@@ -77,10 +77,11 @@ P="C:/<경로>/SideProject"
 "$G" --path "$P" --resolution 400x300  --script res://addons/dot_rigger/tools/composite_check_cli.gd  # ⑪ 상하체 합성
 "$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/pixel_check_cli.gd      # ⑫ 도트 격자 고정 (창이 900x700 이상이어야 함)
 "$G" --path "$P" --resolution 900x700  --script res://addons/dot_rigger/tools/puppet_set_check_cli.gd # ⑬ 런타임 DRPuppetSet (세트 묶기 · 조준 · 장비)
-"$G" --path "$P" --resolution 1240x800 --script res://addons/dot_rigger/tools/equip_window_smoke_cli.gd # ⑭ 장비 굽기 창 (res://puppet 세트 3개 + kar98k 무기 필요)
+"$G" --headless --path "$P" --script res://addons/dot_rigger/tools/equip_page_smoke_cli.gd                   # ⑭ ② 장비 탭(3D 뼈 소켓, 10-16 — 예전 2D 장비 굽기 창 검사는 창과 함께 지움)
 "$G" --headless --path "$P" --script res://addons/dot_rigger/tools/outfit_page_smoke_cli.gd                  # ⑮ ③ 복장 탭(3D, 10-16 — 예전 2D 복장 굽기 창 검사 ⑮ ⑯ ⑰ 는 창과 함께 지움)
-"$G" --path "$P" --resolution 1500x920 --script res://addons/dot_rigger/tools/hub_smoke_cli.gd            # ⑲ Dot Rigger 창(탭 · 공통 설정)
-python pipeline/check_editor.py                                                                             # ⑳ 실제 에디터에서 Dot Rigger 창 띄워 보기(샌드박스, 에디터 창이 잠깐 뜸)
+"$G" --headless --path "$P" --script res://addons/dot_rigger/tools/hub_smoke_cli.gd                          # ⑲ Dot Rigger 창(탭 3 · Ctrl+숫자, 창 없이 — 창으로 돌리면 그림도)
+"$G" --headless --path "$P" --script res://game/tools/view3d_smoke.gd -- --seconds=60 --squads=2 --seed=1941  # ㉑ 3D 게임 화면(병사 · 동작 · 소켓 무기 · 왼손 IK)
+python pipeline/check_editor.py --headless --sandbox=<저장소 통째 사본>                                       # ⑳ 실제 에디터 안 검사(창 없이 — 사본 project.godot 에 탐침을 잠깐 넣음)
 python pipeline/check_character.py source3d/characters/uniform_m36/uniform_m36.glb [--rest_time 0.42]      # ⑱ 캐릭터 실제 굽기 비교(샌드박스 Documents/1941 에서 돌림)
 ```
 
@@ -106,10 +107,11 @@ $P = "C:\<경로>\SideProject"
 | ⑪ `composite_check_cli` | `상하체 합성 검사 전부 통과` — 길이·반복 규칙 3종 · 뼈 자세 72개(다리·힙 = 하체 애니 / 팔·몸통 = 상체 애니) 어긋남 0 · 경고 2종 · 다시 만들기 · 라이브러리 안 샘 · 굽기·rig.json | ✓ (09-21) |
 | ⑫ `pixel_check_cli` | `도트 격자 고정 검사 전부 통과` — `puppet_pixel.tscn` 구조 · 3배에서 3×3 칸 섞임 0/16,811(대조 1,106/1,703) · 전 프레임이 뷰포트 안 · extra_margin · 끄면 삭제 | ✓ (09-21) |
 | ⑬ `puppet_set_check_cli` | `퍼펫 세트 검사 전부 통과` — 세트 2개를 이름만으로 재생 · 발 자리(서기·앉기 모두 원점 y + 1px) · 조준 −16.7° 정확 · 한계 30° · 멈춘 애니 위 300프레임 각도 변화 0 · 끄면 복귀 · 좌우 반전 · [5] 장비(모든 세트 · z = 파트 + 5 · 교체 · reload) | ✓ (09-21) |
-| ⑭ `equip_window_smoke_cli` | `장비 창 스모크 전부 통과` — 불러오기(세트 3 · 무기 파트 6 · 자동 그립 = Rifle_Aiming_Idle · 방아쇠 그립) · 2D(세트 3 임시 굽기 · **앞 조각 L_Hand 126px·Torso 8px, 무기 z + 1, 파트 뼈에**) · 기즈모(오른쪽 10px → 그림 10px · 링 15° → 화면 총열 15°, 붙일 손 0.0000m 제자리 · 받치는 손 기준 −10° 제자리 · 리셋 · 드래그 흉내 위 20px) · 이 자세만(Idle 만 12px · Hips 앞) · 조준 −24.9° · 3D 보기(무기만 1699px · ×3) · 굽기(equip.json v2 · 앞 조각 파일 2) · 다시 열기 | ✓ (09-22, 옛 사본. ⚠ 사용자 세트(z 간격 1) 경고가 뜨는 게 정상) |
+| ⑭ `equip_page_smoke_cli` | 마지막 줄 `EQUIP PAGE SMOKE OK` — 소켓 나무(오른손 → kar98k → 왼손 표지) · 미리보기(도트 재질 · 왼팔 IK) · 무기 기본 자리 · 동작마다 왼 손바닥 ↔ 표지(소총 IK 뒤 1 cm 안) · 자식 유닛(mp40 · 머리 소켓 + 대용 헬멧 · 저장 · 다시 읽기) · 게임 길(숨긴 부모 무기 지움 · 소켓이 뼈를 따라감 · MANUAL) · [6] 뼈대 길이 든 사본도 소켓이 뼈를 따라감(02 U38). (예전 ⑭ `equip_window_smoke` = 2D 장비 굽기 창 검사, 10-16 지움) | ✓ (10-16) |
 | ⑮ `outfit_page_smoke_cli` | 마지막 줄 `OUTFIT PAGE SMOKE OK`(36항목) — 페이지 · 군복 불러오기 · 슬롯 바꾸고 저장/다시 읽기 · 칠하기 → 슬롯 메시 다시 자르기 · 미리보기 캐릭터. 건드린 파일은 끝에 원래대로(md5). (예전 ⑮ `outfit_window_smoke` · ⑯ `outfit_bind_check` · ⑰ `outfit_keys_check` = 2D 복장 굽기 창 검사, 10-16 지움) | ✓ (10-16) |
-| ⑲ `hub_smoke_cli` | `Dot Rigger 창(탭) 검사 전부 통과` — 탭 3 · 공통 설정 자동(프리셋 · sets.json) · ① 탭이 프리셋을 바로 적용 · ③ 탭 칸 숨김/공통 값 · 숨은 탭 뷰포트 멈춤 · Ctrl+1/2/3 · 세트 다시 구움 알림 → 다른 탭이 보일 때 다시 불러옴 | ✓ (10-06, 샌드박스) |
-| ⑳ `check_editor.py` | `EDITOR CHECK OK` — 넣기만 해서는 안 뜸 · 제목줄을 잡을 수 있는 자리 · 모델 올리는 중 탭 전환 · 닫고 다시 열면 같은 자리/탭 · 화면 밖 창 구해 옴 · 에디터 오류 0. **명령줄 검사가 못 보는 에디터 전용 길**(02 U18) | ✓ (10-06) |
+| ⑲ `hub_smoke_cli` | `Dot Rigger 창(탭) 검사 전부 통과` — 탭 3 · 처음 = ① 유닛 · 페이지는 누를 때 만듦 · ① 기본형 군인 미리보기 · ③ 군복 슬롯 메시 · 숨은 탭 뷰포트 멈춤 · Ctrl+1/2/3 · 탭을 바꿔도 작업 유지. (10-16 공통 설정 줄 뺌) | ✓ (10-16, 창 없이) |
+| ⑳ `check_editor.py` | `EDITOR CHECK OK`(22항목) — ① 고른 유닛 씬이 열리고 그 루트를 고침 · Ctrl+Z 따라옴 · ① ② 미리보기 소켓이 손뼈를 따라감 · ② 위치 칸 → 열린 씬 · 편집 중인 씬의 왼손 IK 목표가 따라감 · 소켓 더하기/되돌리기 · 저장 때 소켓의 뼈대 길이 씬 파일에 안 남음 · 닫고 다시 열면 같은 탭 · 에디터 오류 0(창 모드면 창 자리 검사도). **명령줄 검사가 못 보는 에디터 전용 길**(02 U18). ⚠ Documents/1941 샌드박스는 10-02 무렵 사본이라 `game/` 이 없다 — 저장소 통째 사본에 `--sandbox=` | ✓ (10-16, 창 없이 · 통째 사본) |
+| ㉑ `view3d_smoke` | 마지막 줄 `VIEW3D SMOKE OK` — 병사 24명 · 무기 = 오른손 소켓 · 왼팔 IK · 멈춘 병사 0 % · 동작 따라 왼손 IK 붙임 ↔ 놓음 · 풀 돌려쓰기 · 복장 보기 4가지 | ✓ (10-16) |
 | ⑱ `check_character.py` | `CHECK OK` + `pipeline/check/<이름>_sheet.png` 를 **눈으로** 본다(동작마다 · `--before <이전 glb>` 면 전 · 후 나란히). ★10-15 부터 **사람 몸으로만 시험**(UAL 마네킹 = 레거시 — 마네킹 줄 없앰, `ui_smoke_cli` 시험 모델도 human_base, `retarget_check_cli` 는 UAL 변환 검사라 돌리지 않음) | ✓ (10-15 human_base) |
 | `bake_cli` → `preview_cli` | `결과: { "ok": true ... }` → 구운 씬이 트랙 60개로 재생 | ✓ |
 | `compare_cli` | 3D 렌더 대비 2D 순서 합성 불일치 %. 합격선 없음, **각도 비교용** | 192px·Idle·자동 순서, **09-15 셰이더 수정(02 C9) 후**: 정측면 9.4% · −45° **3.9%** · −55° 7.8% · −65° 11.4% (09-14 의 4.3~5.9% 는 3D 기준이 틀린 값) |

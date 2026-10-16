@@ -40,14 +40,17 @@
 
 ## 사용법 — 에디터
 
-**미리보기 배경**(10-08): 공통 설정 줄 오른쪽 `미리보기 배경` 색 단추(+ `자홍` · `기본`) — ① ② ③ 미리보기 바탕을 한꺼번에 바꾼다(기억됨). 자홍이면 조각 사이 구멍 · 비침이 잘 보인다. 굽는 그림에는 안 들어간다. 배경은 퍼펫의 외곽선 밑깔개보다 아래에 깔린다(게임과 같은 그림 — 10-08 전엔 ② ③ 배경이 외곽선을 덮어 관절 틈마다 배경이 비쳤다).
+**창은 하나, 탭이 셋 — 10-16 부터 셋 다 3D**: `프로젝트 > 도구 > Dot Rigger` → `① 유닛` · `② 장비` · `③ 복장`(Ctrl+1 · 2 · 3).
+- `① 유닛` — 유닛 프리팹(루트 `DRCharacter3D` 씬, 부모 → 자식 상속) · 모습 칸 · 장비 요약(+ `② 탭` 단추) · 동작 표 · 3D 도트 미리보기 · 도트 느낌.
+- `② 장비` — 유닛 씬의 **뼈 소켓**(BoneAttachment3D)에 무기 · 헬멧 모델을 꽂고 자리를 맞춘다(씬 독 · 기즈모와 같은 노드). 아래 "② 장비 탭".
+- `③ 복장` — 옷 모델 붙이기 · 부위 경계 · 칠하기 · 상의/하의 슬롯 · 3D 도트 미리보기. 아래 "③ 복장 탭".
+- 탭 줄 아래는 **미리보기 배경**만(10-08 — ① ② ③ 미리보기 바탕, 자홍이면 이음매 구멍이 잘 보임). 예전 `공통 설정`(캐릭터 프리셋 · 세트 목록)은 2D 굽기용이라 10-16 뺐다.
+- 예전 2D 굽기 창(① 캐릭터 굽기 · ② 장비 굽기 · ③ 복장 굽기)은 10-16 사용자 지시로 지웠다. 아래 2D 설명(1번 이하 · 그리기 순서 · 도트 아웃라인)은
+  **2D 퍼펫 · CLI(`tools/bake_cli.gd` 등)에 아직 남은 기능의 기록**이다 — 게임은 3D(`Docs/게임설계/3D_전환.md`).
 
 **관절 받침**(10-08, 자동): 굽을 때 관절마다 그리기 순서상 **아래 조각**이 **위 조각의 관절 둘레**(관절점 중심, 몸 실루엣 안에 드는 원)를 자기 그림의 빈 곳에 품는다. 평소엔 위 조각에 가려 안 보이고, 달리기처럼 관절이 크게 돌아 조각 사이가 벌어질 때 그 틈을 채운다. ① 세트 굽기 · ③ 복장 굽기 · ① `2D 순서` 미리보기가 같이 쓴다(자동 그리기 순서는 모든 프레임에서 앞뒤가 안 바뀌는 관절만, 복장은 같은 슬롯끼리만). 예전에 구운 세트 · 복장은 **다시 구워야** 들어간다.
 
-**창은 하나, 탭이 셋**(10-06): `프로젝트 > 도구 > Dot Rigger` → 위쪽 탭 `① 캐릭터 굽기` · `② 장비 굽기` · `③ 복장 굽기`(Ctrl+1 · 2 · 3, Ctrl+Tab).
-탭을 바꿔도 각 탭에서 하던 작업은 그대로 남고, 마지막에 보던 탭으로 다시 열린다. 탭 줄 아래 **공통 설정**(캐릭터 프리셋 · 세트 목록)은 세 탭이 같이 쓴다 —
-한 번 고르면 ① 탭은 그 프리셋을 바로 적용해 모델을 올리고, ② · ③ 탭은 그 캐릭터 · 그 세트에 맞춰 굽는다(탭마다 다시 고르지 않는다).
-① 탭에서 프리셋을 저장/불러오거나 세트를 구우면 공통 설정과 다른 탭에 바로 전해지고(다른 탭은 다음에 보일 때 알아서 다시 불러옴), **베이크하면 프리셋도 같이 저장**된다.
+*(아래 1번 ~ 는 10-16 에 지운 2D `① 캐릭터 굽기` 창의 기록 — 굽기 코어 · 옵션 이름은 `tools/bake_cli.gd` 에 그대로)*
 
 1. `① 캐릭터 굽기` 탭 (예전의 `Dot Rigger (3D → 2D 컷아웃)` 창)
    왼쪽 열의 섹션 제목을 누르면 **접었다 펼 수 있다**(도트화·파트 분리는 접힌 채 시작, 모델은 불러오면 접힘).
@@ -213,12 +216,11 @@ Godot.exe --path <프로젝트> --resolution 320x200 \
 | `tools/planar_check_cli.gd` | 동작 평면화로 구우면 늘이기 전부 1·자식 위치 고정·팔다리 회전 폭 유지·rig.json 에 planar/pose_yaw, 평면화 끈 애니는 같은 폴더에 못 섞이는지 |
 | `tools/composite_check_cli.gd` | 상하체 합성 — 길이·반복 규칙, 다리·힙 = 하체 애니 / 팔·몸통 = 상체 애니(뼈 자세 72개 비교), 경고, 다시 만들기, 가져온 라이브러리 안 샘, 굽기·rig.json |
 | `tools/pixel_check_cli.gd` | 도트 격자 고정 — `puppet_pixel.tscn` 구조(안쪽은 puppet.tscn 참조), 3배로 그렸을 때 3×3 칸이 전부 한 색(대조: 그냥 3배는 섞인 칸 1,000개+), 모든 프레임이 뷰포트 안, `extra_margin`, 끄면 래퍼 삭제. `--resolution 900x700` |
-| `tools/equip_bake_cli.gd` | **장비(무기) 굽기** — 3D 무기 모델을 `sets.json` 의 모든 세트에 맞춰(같은 카메라·같은 레스트) 굽고 `res://equip/<id>/`(세트별 PNG + `equip.json`)을 만든다. 그립은 소총을 든 세트의 레스트에서 자동(붙일 손 → 받치는 손 = 총열 방향). `--preset= --sets= --weapon= --id= --grip_node= --grip_offset= --hide= --z_after= --shots`. OBJ 는 가져오기 형식을 `Scene` 으로. 게임에서는 `soldier.equip(DREquipSet.load_json("res://equip/<id>/equip.json"))` |
-| `tools/equip_window_smoke_cli.gd` | **장비 굽기 창** 스모크 — 불러오기(세트 3 · 무기 파트 6 · 자동 그립 · 방아쇠 그립) · 2D 미리보기(앞 조각 L_Hand·Torso, 무기 z + 1) · 기즈모(10px 끌면 10px · 15° 돌리면 15° · 기준 손 제자리 · 받치는 손 기준 · 리셋 · 드래그 흉내) · 이 자세만 · 3D 보기 · 굽기(equip.json v2 + 앞 조각 파일) · 다시 열기(복원). `--resolution 1240x800` | 사용자의 실제 세트(`res://puppet`) + `source3d/weapons/kar98k` 필요 |
 | `tools/puppet_set_check_cli.gd` | 런타임 `DRPuppetSet` — 세트 2개를 굽고 sets.json 으로 불러와 이름만으로 재생 · 세트가 바뀌어도 발 자리 같음 · 조준(위/아래/한계/**각도가 안 쌓임**/끄면 복귀/세트 바꾸면 빼 놓음) · 좌우 반전. `--resolution 900x700` |
 | `tools/retarget_check_cli.gd` | Mixamo 접목 검사 — 표준 뼈대로 다시 가져온 모델의 기존 동작이 원본과 같은 자세인지 · `source3d/mixamo` 파일이 전부 경고 없이 얹히는지 · 구워지는지. `source3d` 가 없으면 건너뜀 |
 | `tools/make_bonemap_cli.gd` | 리타깃용 BoneMap(.tres) 생성(`--kind=mixamo --prefix=mixamorig9_` / `--kind=ual`). headless 가능 |
-| `tools/ui_smoke_cli.gd` | 에디터 창 UI 코드 경로 + 배치 스모크 테스트 |
+| `tools/unit_page_smoke_cli.gd` · `equip_page_smoke_cli.gd` · `outfit_page_smoke_cli.gd` · `hub_smoke_cli.gd` | ① ② ③ 탭 · 탭 창 검사(10-16, `--headless`). 에디터 안 길(열린 씬 · 되돌리기 · 저장)은 `pipeline/check_editor.py --headless` |
+| `tools/equip3d_shots_cli.gd` | ② 장비 — 무기 · 동작별 손 그림 · 왼손 거리 표 · 옛 그립 방식과 비교(창 모드 `--screen 0`) |
 
 ## 그리기 순서 (어느 파트를 앞에 그릴지)
 
@@ -281,9 +283,33 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
 파트를 눌러 격리해서 본 뒤에는 **◀ 전체 보기** 버튼이나 트리 맨 위의
 `＊ 전체 합성` 행으로 돌아온다.
 
-## 장비(무기·헬멧) 굽기 창
+## ② 장비 탭 — 뼈 소켓 (10-16, 3D 게임 정석)
 
-Dot Rigger 창의 `② 장비 굽기` 탭. 3D 무기 모델을 **퍼펫과 같은 카메라·같은 레스트 자세**로 자세(세트)마다 한 장씩 굽고,
+사용자: "장비 3D 모델 하이어라키에 접근하여 맞추는 방식, 즉 3D 게임 방식의 정석으로 · 나중에 헬멧도 모델링 head 에 꽂으면 되고".
+**유닛 씬 안의 노드가 곧 장비 설정**이다 — 이 탭 · 씬 독 · 인스펙터 · 3D 화면 기즈모가 같은 노드를 고친다(에디터 = 열린 씬 · Ctrl+Z).
+
+```
+기본형군인 (DRCharacter3D — 유닛 프리팹 루트)
+└ 오른손 (BoneAttachment3D, bone RightHand · use_external_skeleton — 조립 뒤 DRCharacter3D 가 안의 뼈대에 잇는다)
+   └ kar98k (source3d/weapons/kar98k/kar98k.tscn 인스턴스 — 자리 · 회전 = 손뼈 기준 고정)
+      └ 왼손 (DRHandTarget3D — 왼 손바닥 자리 · 손 회전, 동작마다 IK 비중)
+```
+
+- **왼손** = 무기 위 표지에 왼팔 두 마디 IK(Godot 내장 `TwoBoneIK3D` + 손 회전 `CopyTransformModifier3D`, 극 = 동작의 팔꿈치). 소총 동작 8개 왼 손바닥 ↔ 표지 0.0 cm(IK 없이는 최대 20 cm).
+  왼손이 총을 놓는 동작(수류탄 · 장전 · 맨손 달리기 등)은 표지의 `motion_weights` 를 0 — 오른쪽 표에서 고친다.
+- 게임: 뼈대 수정자는 자세가 바뀔 때만(MANUAL — `step_motion` 초당 12번). 편집 중인 씬만 매 프레임(기즈모로 끌면 팔이 따라옴).
+- 사용법: ① 유닛을 고르면 그 씬이 열린다 → ② 뼈를 고르고 `+ 소켓` → 모델을 고르고 `넣기 · 바꾸기`(★기본 자리 = asset.json `socket_hold` 가 있으면 바로 맞게)
+  → 자리는 숫자 칸(cm · °) 또는 `에디터에서 고르기` 뒤 기즈모 → 새 무기는 조준 동작에서 `지금 동작으로 무기 맞추기` → `지금 자세로 왼손 표지`
+  → 오른쪽 `모든 동작 재기`(동작마다 IK 전 · 뒤 cm) → `저장`(씬) · `무기 기본 자리로 저장`(asset.json — 다른 유닛 소켓에 넣을 때 처음 자리).
+- 자식 유닛(상속 씬)은 부모 장비를 지울 수 없어 **숨기고** 새 장비를 넣는다(게임에서는 숨긴 장비를 지운다). 헬멧 = `머리`(Head) 소켓 — 진짜 헬멧 모델 전에는 `대용 헬멧`.
+- 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd`.
+- 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
+- ⚠ kar98k 는 라이선스 확인 전이라 `.gitignore` — 새로 받은 PC 에서는 기본형 군인의 무기가 빠진 채 열린다(오류 메시지는 뜸).
+- 옛 길(남음): 루트 칸 `weapon_asset` + `attach_weapon` + `DRGripFit`(동작마다 총을 두 손에 다시 맞추던 것) — 소켓 무기가 없을 때만 쓴다.
+
+## (10-16 지움) 장비(무기·헬멧) 굽기 창 — 예전 2D 기록
+
+Dot Rigger 창의 예전 `② 장비 굽기` 탭. 3D 무기 모델을 **퍼펫과 같은 카메라·같은 레스트 자세**로 자세(세트)마다 한 장씩 굽고,
 게임에서 `soldier.equip(DREquipSet.load_json("res://equip/<이름>/equip.json"))` 한 줄로 모든 자세에 들린다. 그림: `Docs/인수인계/img/equip_window.png`.
 
 1. **1. 캐릭터 · 세트 · 무기** — 캐릭터 프리셋(메인 창 `0. 프리셋` 으로 저장한 .tres) · `sets.json` · 무기 모델을 고르면 바로 불러온다.
@@ -316,9 +342,18 @@ Dot Rigger 창의 `② 장비 굽기` 탭. 3D 무기 모델을 **퍼펫과 같�
 
 CLI: `tools/equip_bake_cli.gd`(같은 코어, 조정은 `--adj_pos --adj_rot`, 앞 조각도 굽는다). 검사: `tools/equip_window_smoke_cli.gd`.
 
-## 복장 굽기 창 (옷 갈아입히기)
+## ③ 복장 탭 (10-16, 3D)
 
-Dot Rigger 창의 `③ 복장 굽기` 탭. 옷 입은 모델(기본 몸과 **같은 뼈대**)을 기본 몸 세트마다 **같은 카메라 · 같은 레스트 자세**로
+옷 모델(기본 몸과 같은 뼈대)을 게임이 입히는 그대로 본다 — 게임은 옷을 슬롯 메시(상의 · 하의 · 기본 몸)로 나눠 바로 입히므로 굽기가 없다.
+이 탭이 고치는 것 = 옷 모델(붙이기) · `<모델>.parts.json`(부위 경계 · 칠하기) · `outfit.json`(슬롯 표).
+- 왼쪽: 1 복장 · 옷 모델 · 기본 몸 → 불러오기 · 2 옷 모델 새로 만들기(Blender `bind_to_skeleton.py` — "팔 · 소매 끝 맞춤" 기본 켬, 10-16 손목 꺾임 처방) ·
+  3 부위 경계(관절 평면) · 4 직선 · 사각형 · 붓 · 5 슬롯 · 저장.
+- 가운데: 3D 부위 칠하기(T-포즈). 오른쪽: 3D 도트 미리보기(게임과 같은 처리 · 도트 느낌 `game/dot_style.tres`) — 차림 4가지 · 동작 · 이음매 확대(목 · 손목 · 허리) · 뚜껑 · 무기(기본형 군인의 소켓 장비를 빌려 꽂음).
+- 검사: `tools/outfit_page_smoke_cli.gd`. 손목 처방 기록: `Docs/인수인계/02_버그와_교훈.md` U36.
+
+## (10-16 지움) 복장 굽기 창 — 예전 2D 기록
+
+Dot Rigger 창의 예전 `③ 복장 굽기` 탭. 옷 입은 모델(기본 몸과 **같은 뼈대**)을 기본 몸 세트마다 **같은 카메라 · 같은 레스트 자세**로
 부위별 2D 그림으로 굽고, 게임에서 퍼펫의 그 부위 그림만 바꿔 끼운다(`soldier.wear(DROutfit.load_json("res://outfits/<이름>/outfit.json"))`).
 **3D 메시를 떼는 것이 아니다** — 어디까지가 몸통 조각이고 어디부터 골반 조각인지는 정점마다 웨이트가 가장 센 뼈로 정해지고, 3번 칠하기로 바꾼다.
 
@@ -497,13 +532,15 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 |---|---|
 | 동작 표 | `DRMotionTable` · `DRMotionClip` — 상태마다 동작 여러 개 · 비중 % · 상하체 합성. 인스펙터에서 열면 상태별 편집 화면(`ui/motion_table_editor.gd`) |
 | 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 동작 표 인스펙터의 `3D 동작 내보내기` · **도구 메뉴 "Dot Rigger — 3D 동작 내보내기"** · `tools/export_motions_cli.gd [--check]` |
-| 병사 한 명 · 유닛 프리팹 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 무기. 씬 루트로 두면 **유닛 프리팹**(인스펙터 칸: 몸 · 상의 · 하의 · 무기 · 동작 표 · 키 — 씬에 들어가면 칸대로 조립). 다른 유닛 = 상속 씬. `play_motion` · `step_motion`(무기 그립 섞기 포함) · `dress` · `wear(outfit.json, ["top"])`. 메시 · 재질 · Skin 은 병사끼리 공유 |
-| ① 유닛 탭 | `ui/unit_page.gd` — 유닛 목록(부모 → 자식) · 새 자식 유닛 · 모습 칸(부모 값 / 바꿈) · 3D 도트 미리보기 · 동작 표. 예전 ① 2D 캐릭터 굽기 창은 10-16 에 지움 |
+| 병사 한 명 · 유닛 프리팹 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 소켓 장비. 씬 루트로 두면 **유닛 프리팹**(인스펙터 칸: 몸 · 상의 · 하의 · 동작 표 · 키 — 씬에 들어가면 칸대로 조립, 장비는 자식 소켓 노드). 다른 유닛 = 상속 씬. `play_motion` · `step_motion`(왼손 IK 비중 섞기 포함) · `dress` · `wear(outfit.json, ["top"])`. 메시 · 재질 · Skin 은 병사끼리 공유 |
+| 소켓 · 장비 · 왼손 | BoneAttachment3D 소켓 → 모델 씬 인스턴스 → `DRHandTarget3D`(왼손 표지, 동작별 IK 비중). 왼팔 = 내장 `TwoBoneIK3D`. `core/equip_hold.gd`(`DREquipHold`) — 모델 목록 · 맞추기 · asset.json `socket_hold`. 위 "② 장비 탭" |
+| ① 유닛 탭 | `ui/unit_page.gd` — 유닛 목록(부모 → 자식) · 새 자식 유닛 · 모습 칸(부모 값 / 바꿈) · 장비 요약(+ ② 탭 단추) · 3D 도트 미리보기(유닛 사본 — 소켓 장비까지) · 동작 표 · 도트 느낌 |
+| ② 장비 탭 · ③ 복장 탭 | `ui/equip_page.gd` · `ui/outfit_page.gd` — 위 절 |
 | 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑 |
-| 무기 그립 | `DRGripFit` — 장비 창 그립을 지금 몸 · 지금 동작의 두 손에 다시 맞춘다(동작별 캐시) |
+| (옛) 무기 그립 | `DRGripFit` — 루트 칸 `weapon_asset` 로 든 무기(소켓이 없을 때만)를 동작마다 두 손에 다시 맞춘다. 소켓 방식이 갈음 |
 | 도트 화면 | `DRDotView3D` — 2D 캔버스 안의 3D 창(저해상도 · nearest · 도트 격자 스냅 · 외곽선 `shaders/dot_edges.gdshader`) |
 | 셰이더 | `shaders/dot_char.gdshader` — 계단 명암 + 병사별 `tint` · `fade`(디더로 사라지기) |
-| 검사 | `tools/character3d_check_cli.gd`(차림 · 이음매 · 무기, 창 모드 `--screen 0`) · `test/dot_view_3d_demo.tscn` |
+| 검사 | `tools/character3d_check_cli.gd`(차림 · 이음매 · 무기, 창 모드 `--screen 0`) · `test/dot_view_3d_demo.tscn` · 탭 검사(위 도구 표) · `game/tools/view3d_smoke.gd` |
 
 ## 다른 리그 / 다른 종류
 
