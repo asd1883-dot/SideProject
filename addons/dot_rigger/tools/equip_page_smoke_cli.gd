@@ -218,6 +218,150 @@ func _gizmo_checks(page: DREquipPage) -> void:
 	page._playing = true
 
 
+## 화면에 가장 길게 보이는 이동 축 손잡이(검사 끌기용)
+func _long_axis(giz: Control) -> int:
+	var bk := 0
+	var bl := -1.0
+	for k in 3:
+		var ln: float = (giz._p(giz.pivot_point() + giz._axes_now(false)[k] * 0.1) - giz._p(giz.pivot_point())).length()
+		if ln > bl:
+			bl = ln
+			bk = k
+	return Giz.H.AX + bk
+
+
+## 지금 두 손 IK 뒤 손바닥 ↔ 표지 중 큰 것(m) — IK 가 없는 손은 뺀다
+func _hands_ik(ch: DRCharacter3D) -> float:
+	var worst := 0.0
+	for side in 2:
+		if ch.get_arm_ik(side) != null:
+			worst = maxf(worst, float(ch.support_report(side).get("ik", 1.0)))
+	return worst
+
+
+## [8] 잡기(10-16 확장) — 무기를 고정할 곳: 오른손 · 왼손 · 양손(두 손 사이 받침대) · 고정(땅 받침대). 사용자: "오른손 · 왼손 · 양손 —
+## 어느 부분(소켓)을 고정할지 … 무기를 움직이면 오른손도 따라가거나 양손이거나". 에디터 밖 = 메모리 인스턴스만 고친다(파일 안 씀)
+func _grip_checks(page: DREquipPage) -> void:
+	print("[8] 잡기 — 고정할 곳(오른손 · 왼손 · 양손 · 고정)과 따라가는 손")
+	page.select_unit(BASE)
+	await _frames(3)
+	var giz = page._giz
+	var gw := page._weapon_equip()
+	page._select_node(page._root.get_path_to(gw))
+	page._playing = false
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	await _frames(2)
+	_check(DREquipPage.grip_kind(gw) == 0 and page._prev.get_arm_ik(0) != null and page._prev.get_arm_ik(1) == null,
+		"처음(기본형 군인): 오른손이 받침 · 왼손 IK · 오른손 IK 없음")
+	for step in [[1, "왼손"], [2, "양손"], [3, "고정"], [0, "오른손"]]:
+		var kind: int = step[0]
+		page.play_motion("Rifle_Aiming_Idle")
+		page._seek(0.3)
+		page._force_pose()
+		var w0 := (page._prev_node(gw) as Node3D).global_transform
+		page.set_grip(kind)
+		await _frames(2)
+		var pv := page._prev
+		var pw := page._prev_node(gw) as Node3D
+		var moved := pw.global_transform.origin.distance_to(w0.origin)
+		var turned := rad_to_deg(pw.global_transform.basis.get_rotation_quaternion().angle_to(w0.basis.get_rotation_quaternion()))
+		var follow: Array = [[0], [1], [0, 1], [0, 1]][kind]
+		var ok_ik := true
+		var iks := PackedStringArray()
+		for side in 2:
+			var has := pv.get_arm_ik(side) != null
+			if has != follow.has(side):
+				ok_ik = false
+			if has:
+				var r := pv.support_report(side)
+				iks.append("%s %.2f cm" % [DRCharacter3D.SIDE_NAMES[side], float(r.get("ik", 1.0)) * 100.0])
+				if r.is_empty() or float(r["ik"]) > 0.01:
+					ok_ik = false
+		_check(DREquipPage.grip_kind(gw) == kind and moved < 0.002 and turned < 0.5 and ok_ik,
+			"%s: 받침 %s · 무기 자리 그대로(%.1f mm · %.2f°) · 따라가는 손 IK(%s)" % [step[1], gw.get_parent().name, moved * 1000.0, turned, ", ".join(iks)])
+		if kind == 2:
+			var gm := gw.get_parent() as DRGripMount3D
+			var pm := page._prev_node(gm) as Node3D
+			page.play_motion("Walk_With_Rifle")
+			var pts: Array[Vector3] = []
+			var worst := 0.0
+			for t in [0.1, 0.4, 0.7]:
+				page._seek(t)
+				worst = maxf(worst, _hands_ik(pv))
+				pts.append(pm.global_position)
+			var spread := maxf(pts[0].distance_to(pts[1]), pts[1].distance_to(pts[2]))
+			_check(spread > 0.01 and worst < 0.01, "양손: 걷기에서 무기가 두 손을 따라 움직임(%.1f cm) · 두 손 IK 뒤 최대 %.2f cm" % [spread * 100.0, worst * 100.0])
+			page.set_blend(0.0)
+			await _frames(1)
+			pv = page._prev
+			pm = page._prev_node(gm) as Node3D
+			page._seek(0.4)
+			pv.support_report(1)                              # 받침대를 지금 자세로 다시 풀게
+			var sk := pv.get_skeleton()
+			var rpos := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightHand")) * (pm as DRGripMount3D).right_offset).origin
+			_check(absf(gm.blend) < 0.001 and pm.global_position.distance_to(rpos) < 0.001, "보간 오른손 100 %% → 받침대 = 오른손 쪽 자리(%.2f mm)" % (pm.global_position.distance_to(rpos) * 1000.0))
+			page.set_blend(0.5)
+			page.play_motion("Rifle_Aiming_Idle")
+			page._seek(0.3)
+			page.set_tool(Giz.Tool.MOVE)
+			page._select_node(page._root.get_path_to(gw))
+			await _frames(2)
+			var h: int = _long_axis(giz)
+			var p: Vector2 = giz.handle_point(h)
+			var sd: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[h - Giz.H.AX] * 0.1) - giz._p(giz.pivot_point())).normalized()
+			var before := gw.transform
+			_drag_on(giz, p, p + sd * 25.0)
+			_check(not gw.transform.is_equal_approx(before) and _hands_ik(page._prev) < 0.01, "양손: 기즈모로 무기를 옮기면 두 손이 다 따라감(IK 뒤 최대 %.2f cm)" % (_hands_ik(page._prev) * 100.0))
+		if kind == 3:
+			pw = page._prev_node(gw) as Node3D
+			var p0 := pw.global_position
+			page.play_motion("Walk_With_Rifle")
+			var drift := 0.0
+			for t in [0.1, 0.5, 0.9]:
+				page._seek(t)
+				page._force_pose()
+				drift = maxf(drift, pw.global_position.distance_to(p0))
+			_check(drift < 0.0005, "고정: 동작이 바뀌어도 무기는 유닛 기준 제자리(%.2f mm)" % (drift * 1000.0))
+			page.play_motion("Rifle_Aiming_Idle")
+			page._seek(0.3)
+			var gm := gw.get_parent() as DRGripMount3D
+			page._select_node(page._root.get_path_to(gm))
+			await _frames(2)
+			_check(giz.target == page._prev_node(gm), "고정 받침대는 기즈모로 옮길 수 있음(두 손 사이 받침대 · 소켓은 아님)")
+			var h: int = _long_axis(giz)
+			var p: Vector2 = giz.handle_point(h)
+			var sd: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[h - Giz.H.AX] * 0.1) - giz._p(giz.pivot_point())).normalized()
+			var mt0 := gm.transform
+			_drag_on(giz, p, p + sd * 20.0)
+			_check(not gm.transform.is_equal_approx(mt0) and _hands_ik(page._prev) < 0.01, "고정 받침대를 옮기면 무기와 두 손이 같이(IK 뒤 최대 %.2f cm)" % (_hands_ik(page._prev) * 100.0))
+			page._select_node(page._root.get_path_to(gw))
+	# 게임 길 — 양손으로 바꾼 유닛을 게임처럼 다시 만들어 동작을 돌린다(받침대 풀이 수정자 · 두 손 IK · MANUAL)
+	page.set_grip(2)
+	await _frames(1)
+	var pk := PackedScene.new()
+	pk.pack(page._root)
+	var g := pk.instantiate() as DRCharacter3D
+	root.add_child(g)
+	await _frames(2)
+	g.get_animation_player().callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	g.play_motion("Walk_With_Rifle", 0.0)
+	var gm2 := g.get_weapon_mount()
+	var mp: Array[Vector3] = []
+	var gworst := 0.0
+	for i in 6:
+		g.step_motion(1.0 / 12.0)
+		await process_frame
+		gworst = maxf(gworst, _hands_ik(g))
+		mp.append(gm2.global_position)
+	_check(gm2 is DRGripMount3D and g.get_arm_ik(0) != null and g.get_arm_ik(1) != null and gworst < 0.01 and mp[0].distance_to(mp[5]) > 0.005
+		and g.get_skeleton().modifier_callback_mode_process == Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL,
+		"게임 길(양손): 받침대가 두 손을 따라 움직이고(%.1f cm) 두 손 IK 뒤 최대 %.2f cm · 수정자 MANUAL" % [mp[0].distance_to(mp[5]) * 100.0, gworst * 100.0])
+	g.queue_free()
+	page.set_grip(0)
+	page._playing = true
+
+
 func _dot(mi: MeshInstance3D) -> bool:
 	if mi.mesh == null or mi.mesh.get_surface_count() == 0:
 		return false
@@ -252,8 +396,9 @@ func _run() -> void:
 	_check(pv != null and pv.get_skeleton().modifier_callback_mode_process == Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL, "미리보기 사본 수정자 = 자세가 바뀔 때만(MANUAL)")
 	page.play_motion("Firing_Rifle")
 	await _frames(12)
-	_check(page.current_motion() == "Firing_Rifle" and pv.get_ik_weight() > 0.99 and float(page._live.get("dist", 1.0)) < 0.01,
-		"Firing_Rifle 재생 · 왼손 IK 비중 %.2f · 미리보기 갱신 때 손바닥 ↔ 표지 %.2f cm" % [pv.get_ik_weight(), float(page._live.get("dist", 1.0)) * 100.0])
+	var live0: Dictionary = page._live[0] if page._live.size() > 0 else {}
+	_check(page.current_motion() == "Firing_Rifle" and pv.get_ik_weight() > 0.99 and float(live0.get("dist", 1.0)) < 0.01,
+		"Firing_Rifle 재생 · 왼손 IK 비중 %.2f · 미리보기 갱신 때 손바닥 ↔ 표지 %.2f cm" % [pv.get_ik_weight(), float(live0.get("dist", 1.0)) * 100.0])
 	page._update_info()
 	print("        정보 줄: ", page._info.text)
 
@@ -382,6 +527,7 @@ func _run() -> void:
 	g.queue_free()
 
 	await _gizmo_checks(page)
+	await _grip_checks(page)
 
 	# 치우기
 	page._drop_root()

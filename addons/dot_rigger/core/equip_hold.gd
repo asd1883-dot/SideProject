@@ -184,12 +184,12 @@ static func _frame_along(d: Vector3) -> Basis:
 	return Basis(side, d.cross(side).normalized(), d)
 
 
-## 동작마다 왼손 수치 — 동작을 틀고(섞기 없이, 그 동작의 IK 비중) samples 시점마다 DRCharacter3D.support_report.
+## 동작마다 그 손(side 0 = 왼손 · 1 = 오른손) 수치 — 동작을 틀고(섞기 없이, 그 동작의 IK 비중) samples 시점마다 DRCharacter3D.support_report.
 ## [{motion, weight, raw_avg, raw_max, ik_avg, ik_max, rot_max, reach_max}] (m · 도). 끝나면 원래 동작 · 시점으로 되돌린다
-static func motion_report(ch: DRCharacter3D, motions: PackedStringArray, samples: int = 8) -> Array:
+static func motion_report(ch: DRCharacter3D, motions: PackedStringArray, samples: int = 8, side: int = 0) -> Array:
 	var out: Array = []
 	var ap := ch.get_animation_player()
-	if ap == null or ch.get_left_arm_ik() == null:
+	if ap == null or ch.get_arm_ik(side) == null:
 		return out
 	var keep := ch.current_motion()
 	var keep_t := ap.current_animation_position if ap.current_animation != "" else 0.0
@@ -197,11 +197,11 @@ static func motion_report(ch: DRCharacter3D, motions: PackedStringArray, samples
 		if not ap.has_animation(mo):
 			continue
 		ch.play_motion(mo, 0.0)
-		var acc := {"motion": mo, "weight": ch.get_ik_weight(), "raw_avg": 0.0, "raw_max": 0.0, "ik_avg": 0.0, "ik_max": 0.0, "rot_max": 0.0, "reach_max": 0.0}
+		var acc := {"motion": mo, "weight": ch.get_ik_weight(side), "raw_avg": 0.0, "raw_max": 0.0, "ik_avg": 0.0, "ik_max": 0.0, "rot_max": 0.0, "reach_max": 0.0}
 		var n := maxi(samples, 1)
 		for i in n:
 			ap.seek(ap.get_animation(mo).length * float(i) / float(n), true)
-			var r := ch.support_report()
+			var r := ch.support_report(side)
 			if r.is_empty():
 				continue
 			acc["raw_avg"] = float(acc["raw_avg"]) + float(r["raw"]) / n

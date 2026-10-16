@@ -100,10 +100,11 @@ func _run() -> void:
 			elif String(last_motion.get(e.s.id, "")) != e.motion:
 				last_motion[e.s.id] = e.motion
 				played[e.motion] = int(played.get(e.motion, 0)) + 1
-			if e.ch._grip_t >= 0.0 and float(last_ik.get(e.s.id, -1.0)) != e.ch._ik_to:
+			var ikt: float = e.ch.ik_target_weight(0)
+			if e.ch._grip_t >= 0.0 and float(last_ik.get(e.s.id, -1.0)) != ikt:
 				if last_ik.has(e.s.id):
 					ik_moves += 1
-				last_ik[e.s.id] = e.ch._ik_to
+				last_ik[e.s.id] = ikt
 		for team in 2:
 			if bf.count_fighting(team) == 0:
 				bf.deploy_squad(team, type)

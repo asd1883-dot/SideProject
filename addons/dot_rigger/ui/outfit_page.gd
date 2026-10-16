@@ -2586,7 +2586,7 @@ func set_turn(deg: float) -> void:
 		_pv_ch.rotation = Vector3(0.0, deg_to_rad(_turn), 0.0)
 
 
-## 무기 = 기본형 군인 프리팹의 소켓 장비(오른손 소켓 → 무기 → 왼손 표지)를 빌려 미리보기 캐릭터에 꽂는다 — 게임 · ② 장비 탭과 같은 자리 · 같은 왼손 IK
+## 무기 = 기본형 군인 프리팹의 받침 장비(소켓 · 받침대 → 무기 → 손 표지)를 빌려 미리보기 캐릭터에 꽂는다 — 게임 · ② 장비 탭과 같은 자리 · 같은 손 IK
 func _set_weapon(on: bool) -> void:
 	if _pv_ch == null or not is_instance_valid(_pv_ch):
 		return
@@ -2597,8 +2597,8 @@ func _set_weapon(on: bool) -> void:
 	_weapon_socks.clear()
 	var ps := load(WEAPON_UNIT) as PackedScene if on and ResourceLoader.exists(WEAPON_UNIT) else null
 	if ps != null:
-		var unit := ps.instantiate()                 # 트리에 안 넣음 = 조립 안 함(소켓 노드만 빌린다)
-		for s in DRCharacter3D.find_sockets(unit):
+		var unit := ps.instantiate()                 # 트리에 안 넣음 = 조립 안 함(받침 노드만 빌린다)
+		for s in DRCharacter3D.find_anchors(unit):
 			s.get_parent().remove_child(s)
 			_pv_ch.add_child(s)
 			_weapon_socks.append(s)
