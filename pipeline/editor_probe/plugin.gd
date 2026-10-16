@@ -45,6 +45,42 @@ func _socket_drift(ch) -> float:
 	return worst
 
 
+func _key(code: Key) -> InputEventKey:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.pressed = true
+	return ev
+
+
+func _ctrl_key(code: Key, shift := false) -> InputEventKey:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.pressed = true
+	ev.ctrl_pressed = true
+	ev.shift_pressed = shift
+	return ev
+
+
+## 기즈모 층에 왼쪽 끌기(누름 → 움직임 6번 → 뗌)
+func _giz_drag(giz: Control, from: Vector2, to: Vector2) -> void:
+	var b := InputEventMouseButton.new()
+	b.button_index = MOUSE_BUTTON_LEFT
+	b.pressed = true
+	b.position = from
+	b.button_mask = MOUSE_BUTTON_MASK_LEFT
+	giz._gui_input(b)
+	for i in 6:
+		var m := InputEventMouseMotion.new()
+		m.position = from.lerp(to, float(i + 1) / 6.0)
+		m.button_mask = MOUSE_BUTTON_MASK_LEFT
+		giz._gui_input(m)
+	var r := InputEventMouseButton.new()
+	r.button_index = MOUSE_BUTTON_LEFT
+	r.pressed = false
+	r.position = to
+	giz._gui_input(r)
+
+
 ## Ctrl+Z 와 같은 것 — obj 가 속한 기록(씬)의 되돌리기. EditorUndoRedoManager 에는 스크립트용 undo() 가 없다(10-16: 부르면 스크립트 오류로 탐침이 멈춤)
 func _undo(obj: Object) -> void:
 	var m := EditorInterface.get_editor_undo_redo()
@@ -80,9 +116,9 @@ func _go() -> void:
 	var old_h: float = unit._root.height_m
 	unit._set_prop("height_m", 1.6)
 	_expect(absf(unit._root.height_m - 1.6) < 0.001, "① 유닛 탭: 키 바꾸기 → 열린 씬 루트")
-	_undo(er)
+	unit._unhandled_key_input(_ctrl_key(KEY_Z))             # 탭 창에서 누른 Ctrl+Z(10-16 — 전에는 에디터 창에서만 됐다)
 	await _frames(30)
-	_expect(absf(unit._root.height_m - old_h) < 0.001 and absf((unit._fields["height_m"]["ctl"] as SpinBox).value - old_h) < 0.001, "① 유닛 탭: Ctrl+Z 로 되돌리면 칸도 따라옴")
+	_expect(absf(unit._root.height_m - old_h) < 0.001 and absf((unit._fields["height_m"]["ctl"] as SpinBox).value - old_h) < 0.001, "① 유닛 탭: 탭 창 Ctrl+Z 로 되돌리면 칸도 따라옴")
 
 	# ② 장비 탭 — ① 의 [② 탭] 단추로(같은 유닛)
 	unit._on_open_equip()
@@ -108,6 +144,33 @@ func _go() -> void:
 		_undo(er)
 		await _frames(30)
 		_expect(ew.position.is_equal_approx(p0), "② 장비 탭: Ctrl+Z → 무기 자리 되돌아감")
+		# 유니티식 기즈모(10-16): 미리보기에서 X 화살표를 끌어 놓으면 열린 씬의 무기에 되돌리기 한 칸 → 탭 창 Ctrl+Z · Ctrl+Y
+		var giz = eqp._giz
+		eqp.set_dot_mode(false)
+		eqp.set_tool(1)                                        # 이동(W)
+		eqp._playing = false
+		await _frames(5)
+		var gp: Vector2 = giz.handle_point(1)                 # X 화살표
+		var gd: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[0] * 0.1) - giz._p(giz.pivot_point())).normalized()
+		var x0: Transform3D = ew.transform
+		_giz_drag(giz, gp, gp + gd * 40.0)
+		await _frames(5)
+		var moved: bool = not ew.transform.is_equal_approx(x0) and ew.transform.basis.is_equal_approx(x0.basis)
+		_expect(giz.target == eqp._prev_node(ew) and moved, "② 기즈모: X 화살표를 끌어 놓으면 열린 씬의 무기가 옮겨짐(%.1f cm)" % (ew.transform.origin.distance_to(x0.origin) * 100.0))
+		var x1: Transform3D = ew.transform
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var undone: bool = ew.transform.is_equal_approx(x0) and (eqp._prev_node(ew) as Node3D).transform.is_equal_approx(x0)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Y))
+		await _frames(30)
+		var redone: bool = ew.transform.is_equal_approx(x1)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		_expect(undone and redone and ew.transform.is_equal_approx(x0), "② 기즈모: 탭 창 Ctrl+Z → 되돌림(미리보기도) · Ctrl+Y → 다시 · 다시 Ctrl+Z")
+		eqp._unhandled_key_input(_key(KEY_E))
+		_expect(giz.tool_mode == 2, "② 단축키 E = 회전(유니티와 같음)")
+		eqp._unhandled_key_input(_key(KEY_W))
+		eqp._playing = true
 		# 머리 소켓 더하기 → 열린 씬에 붙고 캐릭터가 잇는다 → 되돌리기
 		var n0: int = eqp._sockets().size()
 		var hs = eqp.add_socket("", "Head")
@@ -128,8 +191,8 @@ func _go() -> void:
 				if st.get_node_property_name(i, j) == &"external_skeleton" and not (st.get_node_property_value(i, j) as NodePath).is_empty():
 					leaked.append(str(st.get_node_property_value(i, j)))
 		er.propagate_notification(Node.NOTIFICATION_EDITOR_POST_SAVE)
-		var rebound: bool = not er.get_sockets().is_empty()
-		for s in er.get_sockets():
+		var rebound: bool = not eqp._sockets().is_empty()
+		for s in eqp._sockets():                               # 지금 씬에 든 소켓(방금 되돌려 뺀 머리 소켓은 없음)
 			rebound = rebound and s.get_skeleton() == er.get_skeleton()
 		_expect(packed_ok and leaked.is_empty() and rebound, "저장: 소켓의 뼈대 길은 씬 파일에 안 남고(%s) 저장 뒤 다시 이음" % (", ".join(leaked) if not leaked.is_empty() else "빈 길"))
 
