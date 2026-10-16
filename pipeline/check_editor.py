@@ -24,12 +24,13 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def sync():
-    """애드온 코드(.gd · 셰이더)와 시험장 스크립트를 샌드박스로"""
+    """애드온 코드(.gd · 셰이더)와 시험장 스크립트를 샌드박스로. game/ 은 ① 유닛 탭(10-16)이 유닛 프리팹 · 동작 표 · 3D 동작 묶음을 읽어서 씬 · 리소스까지"""
     n = 0
-    for sub in ("addons/dot_rigger", "test"):
+    for sub, exts in (("addons/dot_rigger", (".gd", ".gdshader", ".cfg")), ("test", (".gd", ".gdshader", ".cfg")),
+                      ("game", (".gd", ".tscn", ".tres", ".res"))):
         for root, _dirs, files in os.walk(os.path.join(PROJECT, sub)):
             for f in files:
-                if not f.endswith((".gd", ".gdshader", ".cfg")):
+                if not f.endswith(exts):
                     continue
                 src = os.path.join(root, f)
                 dst = os.path.join(SANDBOX, os.path.relpath(src, PROJECT))

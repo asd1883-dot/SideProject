@@ -26,18 +26,30 @@ func _go() -> void:
 	var hub := DRHubWindow.new()
 	EditorInterface.get_base_control().add_child(hub)
 	_expect(not hub.visible, "넣기만 해서는 안 뜬다")
-	hub.open("rig")
+	hub.open("unit")
 	await get_tree().process_frame
 	_info(hub, "열림")
 	_expect(hub.visible and DRHubWindow._reachable(Rect2i(hub.position, hub.size)), "제목줄을 잡을 수 있는 자리에 뜸")
-	# ① 탭이 모델을 올리는 도중에 바로 ③ 탭으로(사용자가 흔히 하는 순서)
+	# ① 유닛 탭(10-16, 3D): 유닛을 고르면 그 씬이 에디터에 열리고 루트를 고친다 · 미리보기 캐릭터 조립
+	var unit = hub.page("unit")
+	for i in 120:
+		await get_tree().process_frame
+	_expect(unit._root != null and unit._root == EditorInterface.get_edited_scene_root(), "① 유닛 탭: 고른 유닛 씬이 에디터에 열리고 그 루트를 고침")
+	_expect(unit._prev_ch != null and unit._prev_ch.get_weapon_node() != null, "① 유닛 탭: 미리보기 캐릭터 조립(무기 포함)")
+	# 칸을 바꾸면 되돌리기에 남는다(씬에 *) → 되돌리면 탭도 따라온다
+	var old_h: float = unit._root.height_m
+	unit._set_prop("height_m", 1.6)
+	_expect(absf(unit._root.height_m - 1.6) < 0.001, "① 유닛 탭: 키 바꾸기 → 열린 씬 루트")
+	EditorInterface.get_editor_undo_redo().undo()
+	for i in 30:
+		await get_tree().process_frame
+	_expect(absf(unit._root.height_m - old_h) < 0.001 and absf((unit._fields["height_m"]["ctl"] as SpinBox).value - old_h) < 0.001, "① 유닛 탭: Ctrl+Z 로 되돌리면 칸도 따라옴")
+	# ③ 탭으로(사용자가 흔히 하는 순서)
 	(hub._buttons["outfit"] as Button).pressed.emit()
 	for i in 400:
 		await get_tree().process_frame
-	var rig = hub.page("rig")
 	var outfit = hub.page("outfit")
 	_expect(hub._current == "outfit" and outfit != null, "③ 복장 탭 열림")
-	_expect(rig.baker != null and not rig._busy, "① 탭은 뒤에서 모델을 다 올림(멈추지 않음)")
 	(hub._buttons["equip"] as Button).pressed.emit()
 	for i in 60:
 		await get_tree().process_frame
