@@ -170,6 +170,25 @@ func _go() -> void:
 		eqp._unhandled_key_input(_key(KEY_E))
 		_expect(giz.tool_mode == 2, "② 단축키 E = 회전(유니티와 같음)")
 		eqp._unhandled_key_input(_key(KEY_W))
+		# 잡기(10-16 확장): 양손(두 손 사이 받침대)으로 바꿨다가 탭 창 Ctrl+Z → 원래 소켓 · 주인 그대로(씬에 저장됨) · 만든 받침대 · 표지 빠짐 → Ctrl+Y → Ctrl+Z
+		var parent0: Node = ew.get_parent()
+		eqp._select_node(er.get_path_to(ew))
+		eqp.set_grip(2)
+		await _frames(30)
+		var mnt: Node = ew.get_parent()
+		var to_mount: bool = mnt is DRGripMount3D and mnt.owner == er and ew.owner == er and DRCharacter3D.find_hand_marker(ew, 1) != null \
+			and eqp._prev.get_arm_ik(0) != null and eqp._prev.get_arm_ik(1) != null and er.get_arm_ik(1) != null
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var back: bool = ew.get_parent() == parent0 and ew.owner == er and not mnt.is_inside_tree() and DRCharacter3D.find_hand_marker(ew, 1) == null \
+			and er.get_arm_ik(1) == null
+		eqp._unhandled_key_input(_ctrl_key(KEY_Y))
+		await _frames(30)
+		var again: bool = ew.get_parent() == mnt and mnt.owner == er and ew.owner == er and DRCharacter3D.find_hand_marker(ew, 1) != null
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		_expect(to_mount and back and again and ew.get_parent() == parent0 and ew.owner == er,
+			"② 잡기: 양손(받침대 · 오른손 표지 · 두 손 IK) → 탭 창 Ctrl+Z 원래 소켓 · 주인 그대로 → Ctrl+Y 다시 → Ctrl+Z (%s %s %s)" % [to_mount, back, again])
 		eqp._playing = true
 		# 머리 소켓 더하기 → 열린 씬에 붙고 캐릭터가 잇는다 → 되돌리기
 		var n0: int = eqp._sockets().size()
