@@ -10,9 +10,16 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 //    한쪽 면만 그리면 그 구멍으로 옷의 뒷면이 안 그려져 배경이 비친다 → 안쪽 면도 그리되 어둡게(옷 속 그림자처럼).
 //    구멍 둘을 잇는 시선(소매 → 몸통 → 반대 소매)은 슬롯 경계 뚜껑(정점 색 COLOR, DRSlotMesh._add_caps)이 막는다.
 //  - 텍스처는 밉맵(filter_linear_mipmap) — 2048 텍스처를 캐릭터 키 수십 픽셀로 그리면 nearest 는 움직일 때마다 색이 반짝인다.
+//    · 반복 끔(repeat_disable, 10-16 저녁): 모델 UV 는 전부 0 ~ 1 안이다. 반복이면 작게 그릴 때(밉맵 4 ~ 8 단계) 아틀라스 가장자리 섬에
+//      반대쪽 가장자리 색이 감겨 들어왔다 — 사람 몸은 머리 꼭대기가 아틀라스 맨 아래 줄이라 맨 위 줄의 피부 · 회색이 섞여
+//      "머리 꼭대기가 비어 보임"(사용자 10-16).
+//    · 비등방(anisotropic): 비스듬히 보이는 면(머리 꼭대기 · 어깨 윗면 · 실루엣 가장자리)은 도트 하나가 덮는 텍셀이 길쭉한데, 보통 밉맵은
+//      긴 축으로 단계를 골라(머리 꼭대기 8 단계 = 256 텍셀 네모) 옆 UV 섬 색(피부 · 회색 · 주황)을 섞었다. 비등방은 짧은 축으로 단계를
+//      고르고 긴 축을 따라 여러 번 읽는다(프로젝트 설정 rendering/textures/default_filters/anisotropic_filtering_level, 기본 4×).
 // 공통 값(bands · ambient · light_wrap · light_dir · rim · inside_shade)은 DRCharacter3D.set_shading() 이 모든 재질에 한꺼번에 준다.
+// 명암 단계가 AI 메시의 주름마다 잘게 끊기지 않게 노멀은 메시를 나눌 때 고르게 펴 둔다(DRSlotMesh.smooth_normals — 도트 느낌 "명암 매끈함").
 
-uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable, hint_default_white;
 uniform bool use_tex = false;
 uniform vec4 albedo_color : source_color = vec4(0.8, 0.8, 0.8, 1.0);
 uniform int bands : hint_range(2, 8) = 3;

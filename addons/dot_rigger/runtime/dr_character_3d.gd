@@ -44,7 +44,11 @@ const SLOT_NODE := {"top": "SlotTop", "bottom": "SlotBottom", "base": "SlotBase"
 static var _shading := {"bands": 3, "ambient": 0.45, "light_wrap": 0.25, "light_dir": Vector3(-0.4, 0.7, 0.6),
 	"rim": 0.0, "inside_shade": 0.35}
 static var _shader: Shader = null
-## 나눈 모델 캐시: 키(glb|슬롯 표|parts.json md5) -> {model, meshes{슬롯: ArrayMesh}, skin, split(DRSlotMesh.Result), rig(DRRigModel), aabb, height}
+## 명암 매끈함 기본값(m) — DRDotStyle.normal_smooth_cm 의 기본과 같다(스타일을 안 넣은 곳 — ③ 탭 · 시험 도구 — 도 같은 모습)
+const DEFAULT_SMOOTH_M := 0.06
+## 메시를 나눌 때 노멀을 고르게 펴는 반경(m, DRSlotMesh.smooth_normals). 바꿀 때는 set_normal_smooth() — 그 뒤에 조립하는 병사부터
+static var _smooth_m := DEFAULT_SMOOTH_M
+## 나눈 모델 캐시: 키(glb|슬롯 표|parts.json md5|명암 매끈함) -> {model, meshes{슬롯: ArrayMesh}, skin, split(DRSlotMesh.Result), rig(DRRigModel), aabb, height}
 static var _entries := {}
 ## 원래 재질(Material, 없으면 null) -> 공유 ShaderMaterial(dot_char)
 static var _mats := {}
@@ -624,6 +628,20 @@ static func get_shading() -> Dictionary:
 	return _shading.duplicate()
 
 
+## 명암 매끈함(m) — 메시를 나눌 때 노멀을 이 반경만큼 고르게 편다(10-16 저녁). 재질 값이 아니라 메시라서 **이 뒤에 조립하는 병사부터**
+## 바뀐다(이미 있는 병사는 다시 조립해야 — ① 탭은 미리보기를 다시 만든다). 값이 바뀌었으면 true
+static func set_normal_smooth(m: float) -> bool:
+	m = maxf(m, 0.0)
+	if is_equal_approx(m, _smooth_m):
+		return false
+	_smooth_m = m
+	return true
+
+
+static func normal_smooth() -> float:
+	return _smooth_m
+
+
 static func _apply_shading(sm: ShaderMaterial) -> void:
 	for k in _shading.keys():
 		sm.set_shader_parameter(String(k), _shading[k])
@@ -669,7 +687,7 @@ static func load_entry(glb: String, table: Dictionary = {}) -> Dictionary:
 		push_error("[DRCharacter3D] 스킨드 메시 · 뼈대가 없습니다: %s" % glb)
 		inst.free()
 		return {}
-	var res := DRSlotMesh.split(mi, skel, DRPartProfile.humanoid(), tbl, DRPartOverrides.load_for(glb))
+	var res := DRSlotMesh.split(mi, skel, DRPartProfile.humanoid(), tbl, DRPartOverrides.load_for(glb), true, true, _smooth_m)
 	if res.meshes.is_empty():
 		push_error("[DRCharacter3D] 슬롯 나누기 결과가 비었습니다: %s" % glb)
 		inst.free()
@@ -687,6 +705,11 @@ static func load_entry(glb: String, table: Dictionary = {}) -> Dictionary:
 	inst.free()
 	if tbl != DRSlotMesh.DEFAULT_SLOTS and _table_sig(tbl) != _table_sig(DRSlotMesh.DEFAULT_SLOTS):
 		push_warning("[DRCharacter3D] %s 의 슬롯 표가 기본 몸과 다릅니다 — 경계가 기본 몸과 안 맞아 틈 · 겹침이 생길 수 있음" % glb)
+	# 같은 모델 · 표의 다른 명암 매끈함 것은 뺀다(① 탭에서 값을 돌릴 때마다 캐시가 쌓이지 않게 — 쓰던 병사는 메시를 계속 쥐고 있다)
+	var stem := key.substr(0, key.rfind("|") + 1)
+	for k in _entries.keys():
+		if String(k).begins_with(stem):
+			_entries.erase(k)
 	_entries[key] = e
 	return e
 
@@ -695,7 +718,7 @@ static func _entry_key(glb: String, tbl: Dictionary) -> String:
 	var pj := DRPartOverrides.path_for(glb)
 	if not _md5_cache.has(pj):
 		_md5_cache[pj] = FileAccess.get_md5(pj) if FileAccess.file_exists(pj) else ""
-	return "%s|%s|%s" % [glb, _table_sig(tbl), _md5_cache[pj]]
+	return "%s|%s|%s|n%d" % [glb, _table_sig(tbl), _md5_cache[pj], roundi(_smooth_m * 1000.0)]
 
 
 static func _table_sig(tbl: Dictionary) -> String:

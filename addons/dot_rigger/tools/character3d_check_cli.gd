@@ -512,7 +512,7 @@ func _nocap_meshes(glb: String, table: Dictionary) -> Dictionary:
 	var inst := (load(glb) as PackedScene).instantiate()
 	var mi := DRBaker._find_skinned_mesh(inst)
 	var skl := DRBaker._find_node(inst, "Skeleton3D") as Skeleton3D
-	var r := DRSlotMesh.split(mi, skl, DRPartProfile.humanoid(), table, DRPartOverrides.load_for(glb), true, false)
+	var r := DRSlotMesh.split(mi, skl, DRPartProfile.humanoid(), table, DRPartOverrides.load_for(glb), true, false, DRCharacter3D.normal_smooth())
 	for s in r.meshes.keys():
 		var am: ArrayMesh = r.meshes[s]
 		for si in am.get_surface_count():

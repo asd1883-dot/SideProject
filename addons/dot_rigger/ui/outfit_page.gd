@@ -2389,9 +2389,9 @@ func preview_character() -> DRCharacter3D:
 	return _pv_ch
 
 
-## 모델 하나를 슬롯 표대로 자른다(게임과 같은 DRSlotMesh.split — 메모리의 칠하기 · 관절 경계) + 공유 도트 재질
+## 모델 하나를 슬롯 표대로 자른다(게임과 같은 DRSlotMesh.split — 메모리의 칠하기 · 관절 경계 · 명암 매끈함) + 공유 도트 재질
 func _split_of(t: PaintTarget, table: Dictionary, caps: bool) -> Dictionary:
-	var res := DRSlotMesh.split(t.mi, t.skel, _profile, table, t.ov, true, caps)
+	var res := DRSlotMesh.split(t.mi, t.skel, _profile, table, t.ov, true, caps, DRCharacter3D.normal_smooth())
 	for s in res.meshes.keys():
 		var am: ArrayMesh = res.meshes[s]
 		for si in am.get_surface_count():
@@ -2402,8 +2402,8 @@ func _split_of(t: PaintTarget, table: Dictionary, caps: bool) -> Dictionary:
 ## 자른 결과가 달라지는 것만 담은 열쇠 — 칠한 점 · 슬롯 나뉨에 영향 있는 자르기(needed_cuts) · 슬롯 표 · 뚜껑.
 ## 팔꿈치 · 무릎처럼 같은 슬롯 안 경계를 바꾼 것은 다시 자르지 않는다
 func _split_key(t: PaintTarget, table: Dictionary, caps: bool) -> String:
-	return "%s|%d|%d|%s|%s" % [t.glb, str(t.ov.map).hash(), JSON.stringify(DRSlotMesh.needed_cuts(t.ov.cuts, table)).hash(),
-		_table_sig(table), "caps" if caps else "open"]
+	return "%s|%d|%d|%s|%s|n%d" % [t.glb, str(t.ov.map).hash(), JSON.stringify(DRSlotMesh.needed_cuts(t.ov.cuts, table)).hash(),
+		_table_sig(table), "caps" if caps else "open", roundi(DRCharacter3D.normal_smooth() * 1000.0)]
 
 
 static func _table_sig(tbl: Dictionary) -> String:

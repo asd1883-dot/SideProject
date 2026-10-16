@@ -42,6 +42,9 @@ const DEFAULT_PATH := "res://game/dot_style.tres"
 @export_range(0.0, 1.0, 0.05) var rim := 0.0
 ## 옷 안쪽 면(소매 · 깃 속)의 밝기
 @export_range(0.0, 1.0, 0.05) var inside_shade := 0.35
+## 명암 매끈함(cm) — 메시를 나눌 때 면 방향(노멀)을 이 반경만큼 고르게 편다. AI 메시의 주름 · 울퉁불퉁마다 명암 단계가 잘게 끊겨
+## 도트가 얼룩지고 움직이면 반짝이던 것(10-16). 크면 큰 덩어리 명암(얼굴 입체감도 준다) · 0 = 모델 그대로. 바꾸면 병사를 다시 조립해야 보인다
+@export_range(0.0, 20.0, 0.5, "suffix:cm") var normal_smooth_cm := 6.0
 
 
 ## 기본 설정 파일(없으면 기본값 새것)
@@ -67,7 +70,9 @@ func apply_to(dots: DRDotView3D) -> void:
 	dots.inner_gap_m = inner_gap_m
 
 
-## 캐릭터 재질 공통 명암(모든 병사 · 미리보기의 공유 재질에 한꺼번에)
-func apply_shading() -> void:
+## 캐릭터 재질 공통 명암(모든 병사 · 미리보기의 공유 재질에 한꺼번에) + 명암 매끈함(메시 — 이 뒤에 조립하는 병사부터).
+## 매끈함이 바뀌었으면 true(미리보기는 캐릭터를 다시 만들어야 보인다)
+func apply_shading() -> bool:
 	DRCharacter3D.set_shading({"bands": light_bands, "ambient": ambient, "light_wrap": light_wrap, "light_dir": light_dir,
 		"rim": rim, "inside_shade": inside_shade})
+	return DRCharacter3D.set_normal_smooth(normal_smooth_cm / 100.0)

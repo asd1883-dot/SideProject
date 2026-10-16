@@ -308,6 +308,8 @@ func _build_style_panel(parent: Control) -> void:
 	_style_ctl(g, "빛 감싸기", "빛이 옆면까지 감싸는 정도", _num_ctl(0.0, 1.0, 0.05, s.light_wrap, func(v: float) -> void: s.light_wrap = v))
 	_style_ctl(g, "가장자리 빛", "림 라이트(0 = 끔)", _num_ctl(0.0, 1.0, 0.05, s.rim, func(v: float) -> void: s.rim = v))
 	_style_ctl(g, "옷 속 밝기", "소매 · 깃 속(안쪽 면) 밝기", _num_ctl(0.0, 1.0, 0.05, s.inside_shade, func(v: float) -> void: s.inside_shade = v))
+	_style_ctl(g, "명암 매끈함", "면 방향(노멀)을 이 반경(cm)만큼 고르게 편다 — AI 메시의 주름마다 명암 단계가 잘게 끊겨 도트가 얼룩지던 것. 크면 큰 덩어리 명암(얼굴 입체감도 준다) · 0 = 모델 그대로. 바꾸면 미리보기를 다시 조립한다",
+		_num_ctl(0.0, 20.0, 0.5, s.normal_smooth_cm, func(v: float) -> void: s.normal_smooth_cm = v))
 	for axis in 3:
 		var a := axis
 		_style_ctl(g, "빛 %s" % ["X", "Y", "Z"][a], "빛이 오는 쪽(세상 좌표, +Z = 화면 앞쪽)",
@@ -359,12 +361,13 @@ func _num_ctl(lo: float, hi: float, step: float, cur: float, on_set: Callable) -
 	return sp
 
 
-## 도트 느낌을 미리보기 도트 창 · 캐릭터 재질(공유)에 넣는다
+## 도트 느낌을 미리보기 도트 창 · 캐릭터 재질(공유)에 넣는다. 명암 매끈함(메시)이 바뀌었으면 미리보기를 다시 조립
 func _apply_style() -> void:
 	if _style == null:
 		return
 	_style.apply_to(_dots)
-	_style.apply_shading()
+	if _style.apply_shading() and _prev_ch != null:
+		_rebuild_preview()
 	if _dot_ob != null:
 		for i in _dot_ob.item_count:
 			if _dot_ob.get_item_id(i) == _style.dot_px:

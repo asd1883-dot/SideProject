@@ -17,7 +17,9 @@ class_name DRSlotMesh
 ##    GPU 스키닝이 메시의 정점 **전부**를 돌린다 → 안 쓰는 정점을 빼야 세 덩어리를 합쳐도 원본 정점 수와 거의 같다.
 ##  - 슬롯 경계의 구멍(목 · 손목 · 허리 단면)을 어두운 뚜껑으로 막는다(_add_caps — 옷 속이 비어 소매 → 몸통 → 반대 소매로 배경이 비치던 것).
 ##  - 슬롯 나뉨에 영향 없는 같은 슬롯 안 자르기(팔꿈치 · 무릎 …)는 건너뛴다(needed_cuts — 슬롯 넓이 · 상자가 전부 자른 것과 같음을 10-15 확인).
-## 스킨(뼈 인덱스 · 웨이트) · UV · 노멀은 그대로라 원래 Skin 을 그대로 쓴다. 에디터 전용 API 없음 — 게임 실행 중에도 돈다.
+##  - smooth_m > 0 이면 자르기 전에 노멀을 고르게 편다(smooth_normals, 10-16 저녁 — 명암 단계가 주름마다 끊기던 것). 자르기 전이라
+##    슬롯 경계(목 · 손목 · 허리)의 양쪽 노멀이 같다.
+## 스킨(뼈 인덱스 · 웨이트) · UV 는 그대로라 원래 Skin 을 그대로 쓴다. 에디터 전용 API 없음 — 게임 실행 중에도 돈다.
 
 const SLOT_TOP := "top"
 const SLOT_BOTTOM := "bottom"
@@ -35,6 +37,8 @@ const DEGENERATE_EPS := 1e-20
 const CAP_COLOR := Color(0.07, 0.07, 0.07, 1.0)
 ## 같은 자리 정점 합치기 눈금(1/m) — 0.01 mm. 텍스처 · 노멀 이음매로 둘로 나뉜 정점을 경계 고리에서 하나로 본다
 const WELD := 100000.0
+## 노멀 펴기 되풀이 상한(반경이 커도 이 이상은 안 돈다 — 사람 몸 1.1 만 정점 한 번 ≈ 10 ms)
+const MAX_SMOOTH_ITERS := 300
 
 
 class Result:
@@ -59,6 +63,7 @@ class Result:
 	var cap_tris: Dictionary = {}         # 슬롯 -> 뚜껑 삼각형 수(tri_counts 에 포함)
 	var cap_fan: int = 0                  # 평면 삼각분할이 안 돼 가운데 점 부채꼴로 막은 고리 수
 	var cap_open: int = 0                 # 닫히지 않은 경계 사슬(못 막음 — 원본 메시의 열린 가장자리와 이어진 것 등)
+	var smooth_iters: int = 0             # 노멀 펴기 되풀이 횟수(서피스 중 가장 큰 것, 0 = 안 함)
 	var ms: float = 0.0                   # 나누기 시간(ms)
 
 
@@ -73,8 +78,9 @@ static func slot_of(part: String, table: Dictionary) -> String:
 ## slot_table: 파트 → 슬롯(비면 DEFAULT_SLOTS). overrides: 부위 칠하기 · 관절 자르기(DRPartOverrides.load_for(glb 경로)), null = 웨이트대로
 ## prune_cuts: 슬롯 나뉨에 영향 없는 자르기를 건너뜀(needed_cuts — 결과 슬롯은 같고 정점 · 삼각형이 준다). false = 2D 처럼 전부(비교 시험용)
 ## caps: 슬롯 경계의 구멍(목 · 손목 · 허리 단면)을 어두운 뚜껑으로 막는다(_add_caps). false = 안 막음(비교 시험용)
+## smooth_m: 노멀을 이 반경(m)만큼 고르게 편다(smooth_normals). 0 = 모델 노멀 그대로
 static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile, slot_table: Dictionary = {},
-		overrides: DRPartOverrides = null, prune_cuts: bool = true, caps: bool = true) -> Result:
+		overrides: DRPartOverrides = null, prune_cuts: bool = true, caps: bool = true, smooth_m: float = 0.0) -> Result:
 	var t0 := Time.get_ticks_usec()
 	var res := Result.new()
 	var table: Dictionary = slot_table if not slot_table.is_empty() else DEFAULT_SLOTS
@@ -121,6 +127,8 @@ static func split(mi: MeshInstance3D, skel: Skeleton3D, profile: DRPartProfile, 
 			continue
 		res.source_verts += vcount
 		res.source_tris += int(idx.size() / 3)
+		if smooth_m > 0.0:
+			res.smooth_iters = maxi(res.smooth_iters, smooth_normals(arrays, smooth_m))
 
 		# 2-1) 정점 → 파트: 웨이트 argmax → 다리 평면 → 부위 칠하기 (DRMeshSplitter.split 2-1 과 같은 순서 · 같은 규칙)
 		var vpart := PackedStringArray()
@@ -233,6 +241,97 @@ static func needed_cuts(cuts: Array, table: Dictionary) -> Array:
 			need[from] = true
 			need[to] = true
 	return keep
+
+
+## 노멀 펴기(10-16 저녁) — dot_char 의 명암 단계(bands)는 노멀로 갈리는데 AI 메시는 주름 · 뭉침이 많아 단계 경계가 잘게 끊겼다:
+## 도트가 얼룩덜룩하고 움직일 때마다 반짝였다(사용자: "짜글짜글 · 도트 영역이 지저분"). 같은 자리 정점(UV · 노멀 이음매)을 묶어
+## 이웃 평균을 되풀이(라플라시안 확산)하면 굵은 몸 모양의 명암만 남는다. 위치 · UV · 웨이트는 그대로.
+## radius_m = 퍼지는 반경(확산의 표준편차쯤, m). 되풀이 횟수 = (반경 / (0.65 × 평균 변 길이))² — 메시가 촘촘하든 성기든 같은 크기로 퍼진다
+## (사람 몸 · 군복은 평균 변 1.9 cm → 6 cm 에 24 번). arrays 의 ARRAY_NORMAL 을 바꾼다. 돌려주는 값 = 되풀이 횟수(0 = 안 함)
+static func smooth_normals(arrays: Array, radius_m: float) -> int:
+	if radius_m <= 0.0 or arrays[Mesh.ARRAY_NORMAL] == null or arrays[Mesh.ARRAY_INDEX] == null:
+		return 0
+	var pos: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var nrm: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var n := pos.size()
+	if n == 0 or nrm.size() != n or idx.size() < 3:
+		return 0
+	# 같은 자리 정점 → 묶음 번호
+	var grp := PackedInt32Array()
+	grp.resize(n)
+	var first := {}
+	var gc := 0
+	for v in n:
+		var p := pos[v]
+		var k := Vector3i(roundi(p.x * WELD), roundi(p.y * WELD), roundi(p.z * WELD))
+		var f: Variant = first.get(k)
+		if f == null:
+			first[k] = gc
+			grp[v] = gc
+			gc += 1
+		else:
+			grp[v] = int(f)
+	# 묶음 사이 변(양쪽 방향, 열쇠 = a · gc + b) → 정렬 · 중복 빼고 묶음마다 이웃 목록(시작 위치 start · 이웃 nb)
+	var tri_n := int(idx.size() / 3)
+	var keys := PackedInt64Array()
+	keys.resize(tri_n * 6)
+	var kn := 0
+	var len_sum := 0.0
+	for t in tri_n:
+		for e in 3:
+			var va := idx[t * 3 + e]
+			var vb := idx[t * 3 + (e + 1) % 3]
+			var a := grp[va]
+			var b := grp[vb]
+			if a == b:
+				continue
+			len_sum += pos[va].distance_to(pos[vb])
+			keys[kn] = a * gc + b
+			keys[kn + 1] = b * gc + a
+			kn += 2
+	if kn == 0:
+		return 0
+	var iters := clampi(roundi(pow(radius_m / (0.65 * maxf(len_sum / (kn * 0.5), 1e-6)), 2.0)), 0, MAX_SMOOTH_ITERS)
+	if iters == 0:
+		return 0
+	keys.resize(kn)
+	keys.sort()
+	var start := PackedInt32Array()
+	start.resize(gc + 1)
+	var nb := PackedInt32Array()
+	var last := -1
+	for i in kn:
+		var key := keys[i]
+		if key == last:
+			continue
+		last = key
+		nb.append(key % gc)
+		start[int(key / gc) + 1] += 1
+	for g in gc:
+		start[g + 1] += start[g]
+	var gn := PackedVector3Array()
+	gn.resize(gc)
+	for v in n:
+		gn[grp[v]] += nrm[v]
+	for g in gc:
+		gn[g] = gn[g].normalized()
+	var nx := PackedVector3Array()
+	nx.resize(gc)
+	for _it in iters:
+		for g in gc:
+			var acc := gn[g]
+			for j in range(start[g], start[g + 1]):
+				acc += gn[nb[j]]
+			var l2 := acc.length_squared()
+			nx[g] = acc / sqrt(l2) if l2 > 1e-12 else gn[g]
+		var tmp := gn
+		gn = nx
+		nx = tmp
+	for v in n:
+		nrm[v] = gn[grp[v]]
+	arrays[Mesh.ARRAY_NORMAL] = nrm
+	return iters
 
 
 ## 슬롯 경계 뚜껑(10-15) — 슬롯마다 "원본 메시에서는 안쪽인데 이 슬롯에서는 가장자리인" 모서리(= 다른 슬롯과의 경계: 목 · 손목 · 허리 단면)를
