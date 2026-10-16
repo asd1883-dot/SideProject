@@ -541,10 +541,10 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 | 소켓 · 장비 · 왼손 | BoneAttachment3D 소켓 → 모델 씬 인스턴스 → `DRHandTarget3D`(왼손 표지, 동작별 IK 비중). 왼팔 = 내장 `TwoBoneIK3D`. `core/equip_hold.gd`(`DREquipHold`) — 모델 목록 · 맞추기 · asset.json `socket_hold`. 위 "② 장비 탭" |
 | ① 유닛 탭 | `ui/unit_page.gd` — 유닛 목록(부모 → 자식) · 새 자식 유닛 · 모습 칸(부모 값 / 바꿈) · 장비 요약(+ ② 탭 단추) · 3D 도트 미리보기(유닛 사본 — 소켓 장비까지) · 동작 표 · 도트 느낌 |
 | ② 장비 탭 · ③ 복장 탭 | `ui/equip_page.gd` · `ui/outfit_page.gd` — 위 절 |
-| 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑 |
+| 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑. 자르기 전에 노멀을 편다(`smooth_normals` — 도트 느낌 `명암 매끈함`, 기본 6 cm: AI 메시 주름마다 명암 단계가 끊겨 얼룩지던 것, 10-16) |
 | (옛) 무기 그립 | `DRGripFit` — 루트 칸 `weapon_asset` 로 든 무기(소켓이 없을 때만)를 동작마다 두 손에 다시 맞춘다. 소켓 방식이 갈음 |
 | 도트 화면 | `DRDotView3D` — 2D 캔버스 안의 3D 창(저해상도 · nearest · 도트 격자 스냅 · 외곽선 `shaders/dot_edges.gdshader`) |
-| 셰이더 | `shaders/dot_char.gdshader` — 계단 명암 + 병사별 `tint` · `fade`(디더로 사라지기) |
+| 셰이더 | `shaders/dot_char.gdshader` — 계단 명암 + 병사별 `tint` · `fade`(디더로 사라지기). 텍스처는 밉맵 · **반복 끔 · 비등방**(작게 그릴 때 아틀라스 반대쪽 가장자리 · 옆 UV 조각 색이 섞여 정수리가 비어 보이던 것, 10-16) |
 | 검사 | `tools/character3d_check_cli.gd`(차림 · 이음매 · 무기, 창 모드 `--screen 0`) · `test/dot_view_3d_demo.tscn` · 탭 검사(위 도구 표) · `game/tools/view3d_smoke.gd` |
 
 ## 다른 리그 / 다른 종류
