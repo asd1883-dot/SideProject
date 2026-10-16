@@ -178,8 +178,8 @@ func _process(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_EDITOR_PRE_SAVE:
 		_saved_skel_paths.clear()
-		for s in _sockets:
-			if is_instance_valid(s) and not s.external_skeleton.is_empty():
+		for s in find_sockets(self, _model):          # 지금 씬에 든 소켓(_sockets 는 다음 다시 잇기 전까지 방금 더하거나 뺀 것이 안 맞을 수 있다)
+			if not s.external_skeleton.is_empty():
 				_saved_skel_paths[s] = s.external_skeleton
 				s.external_skeleton = NodePath()
 	elif what == NOTIFICATION_EDITOR_POST_SAVE:

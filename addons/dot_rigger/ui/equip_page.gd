@@ -8,8 +8,11 @@ class_name DREquipPage
 ##   · 왼손 표지 = 장비 아래 DRHandTarget3D(왼팔 두 마디 IK 의 목표 — DRCharacter3D 가 조립 때 붙인다)
 ## 이 탭과 씬 독 · 인스펙터 · 3D 화면 기즈모가 **같은 노드**를 고친다(에디터 = 열린 유닛 씬 · 되돌리기 Ctrl+Z, 에디터 밖 = 인스턴스를 바로).
 ##
-##   왼쪽: 유닛 · 소켓 나무(소켓 → 장비 → 표지) · 소켓 더하기(뼈) · 장비 넣기/바꾸기/빼기 · 고른 노드 자리(cm · °) · 맞추기 · 저장
-##   가운데: 미리보기 — 돌려 보기(끌기 = 돌리기 · 휠 = 확대 · 가운데/Shift 끌기 = 옮기기) / 도트 보기(게임과 같은 DRDotView3D) · 동작 재생 · 손 ↔ 표지 거리
+##   왼쪽: 유닛 · 소켓 나무(소켓 → 장비 → 표지) · 소켓 더하기(뼈) · 장비 넣기/바꾸기/빼기 · 고른 노드 자리(cm · ° · 크기) · 맞추기 · 저장
+##   가운데: 미리보기 — 돌려 보기 + **유니티식 기즈모**(ui/transform_gizmo.gd, 10-16) / 도트 보기(게임과 같은 DRDotView3D) · 동작 재생 · 손 ↔ 표지 거리
+##     단축키(유니티와 같음): Q 보기 · W 이동 · E 회전 · R 크기 · Y 변환 · X 로컬/글로벌 · Z 피벗/중심 · F 고른 것 보기 · Ctrl 끌기 = 눈금 ·
+##     Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) 되돌리기 / 다시 · Ctrl+S 저장. 카메라: 휠 · 가운데 끌기(옮기기) · 오른쪽 / Alt+왼쪽 끌기(돌려 보기) · Alt+오른쪽(확대)
+##     미리보기를 누르면(끌지 않고) 그 자리의 왼손 표지 · 소켓 · 장비를 고른다(빈 곳 = 고르기 풀기). 기즈모를 놓으면 유닛 씬에 되돌리기 한 칸
 ##   오른쪽: 동작마다 왼손(IK 전 · 뒤 cm) · 왼손 IK 비중(0 = 동작 그대로 — 수류탄 · 장전 · 맨손 달리기 등)
 ## 미리보기는 유닛을 pack 한 사본(저장 안 한 고침까지)이라 편집 중인 씬을 건드리지 않는다. 자리만 바뀌면 사본의 노드 자리만 옮긴다.
 
@@ -22,6 +25,8 @@ const DEFAULT_MOTION := "Rifle_Aiming_Idle"
 const BONE_CHOICES := [["RightHand", "오른손 — 무기", "오른손"], ["Head", "머리 — 헬멧", "머리"], ["LeftHand", "왼손", "왼손소켓"],
 	["UpperChest", "등 · 가슴", "등"], ["Hips", "허리", "허리"], ["RightUpperLeg", "오른 허벅지", "오른허벅지"], ["LeftUpperLeg", "왼 허벅지", "왼허벅지"]]
 const BG_3D := Color(0.42, 0.47, 0.42)
+## 유니티식 변환 기즈모(class_name 없이 — 에디터를 다시 켜지 않고 "개발 내용 갱신"으로 바뀐다)
+const TransformGizmo := preload("res://addons/dot_rigger/ui/transform_gizmo.gd")
 
 var _unit_ob: OptionButton
 var _units: Dictionary = {}               # 경로 -> {name, parent}
@@ -36,6 +41,12 @@ var _bone_ob: OptionButton
 var _model_ob: OptionButton
 var _pos: Array[SpinBox] = []
 var _rot: Array[SpinBox] = []
+var _scl: Array[SpinBox] = []
+var _giz: TransformGizmo
+var _tool_btns: Array[Button] = []
+var _pivot_btn: Button
+var _space_btn: Button
+var _snap_sp: Array[SpinBox] = []         # Ctrl 눈금: 이동 cm · 회전 ° · 크기
 var _xf_title: Label
 var _status: Label
 var _xf_lock := false
@@ -145,6 +156,7 @@ func _build_ui() -> void:
 	left.add_child(tl)
 	_tree = Tree.new()
 	_tree.hide_root = true
+	_tree.allow_search = false              # 글자를 치면 찾기로 먹어 버려 W · E · R 단축키가 안 간다
 	_tree.custom_minimum_size = Vector2(0, 170)
 	_tree.item_selected.connect(_on_tree_selected)
 	left.add_child(_tree)
@@ -182,7 +194,7 @@ func _build_ui() -> void:
 	var grid := GridContainer.new()
 	grid.columns = 4
 	left.add_child(grid)
-	for row in [["위치 cm", _pos, 0.1, -500.0, 500.0], ["회전 °", _rot, 0.5, -360.0, 360.0]]:
+	for row in [["위치 cm", _pos, 0.1, -500.0, 500.0], ["회전 °", _rot, 0.5, -360.0, 360.0], ["크기", _scl, 0.01, 0.01, 100.0]]:
 		var l := Label.new()
 		l.text = String(row[0])
 		grid.add_child(l)
@@ -191,11 +203,13 @@ func _build_ui() -> void:
 			sp.step = float(row[2])
 			sp.min_value = float(row[3])
 			sp.max_value = float(row[4])
+			var is_scl := is_same(row[1], _scl)     # 빈 배열끼리는 == 가 참이라 같은 배열인지로
 			sp.allow_greater = true
-			sp.allow_lesser = true
+			sp.allow_lesser = not is_scl
 			sp.custom_minimum_size = Vector2(88, 0)
 			sp.prefix = ["x", "y", "z"][k]
-			sp.tooltip_text = "부모 기준(소켓 아래 장비 = 손 뼈 기준, 표지 = 장비 기준). 인스펙터의 position · rotation_degrees 와 같은 값"
+			sp.tooltip_text = "부모 기준(소켓 아래 장비 = 손 뼈 기준, 표지 = 장비 기준). 인스펙터의 position · rotation_degrees · scale 과 같은 값" + \
+				(" — 크기는 장비만(왼손 표지 · 소켓은 없음)" if is_scl else "")
 			sp.value_changed.connect(func(_v: float) -> void: _on_xf_changed())
 			grid.add_child(sp)
 			(row[1] as Array).append(sp)
@@ -224,6 +238,7 @@ func _build_ui() -> void:
 	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid.custom_minimum_size = Vector2(340, 0)
 	right_split.add_child(mid)
+	_build_gizmo_bar(mid)
 	var stack := Control.new()
 	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.custom_minimum_size = Vector2(320, 320)
@@ -231,8 +246,7 @@ func _build_ui() -> void:
 	_view3d = SubViewportContainer.new()
 	_view3d.stretch = true
 	_view3d.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_view3d.mouse_filter = Control.MOUSE_FILTER_STOP
-	_view3d.gui_input.connect(_on_view_input)
+	_view3d.mouse_filter = Control.MOUSE_FILTER_IGNORE     # 마우스는 위에 겹친 기즈모 층이 받아 카메라 몫은 _on_view_input 으로 넘긴다
 	stack.add_child(_view3d)
 	_vp3d = SubViewport.new()
 	_vp3d.own_world_3d = true
@@ -284,6 +298,14 @@ func _build_ui() -> void:
 	_dots.px_per_m = 170.0
 	_dot_vp.add_child(_dots)
 	_apply_dot_style()
+	_giz = TransformGizmo.new()
+	_giz.camera = _cam
+	_giz.view_input.connect(_on_view_input)
+	_giz.clicked.connect(_on_view_click)
+	_giz.transform_changed.connect(_on_giz_changed)
+	_giz.transform_end.connect(_on_giz_end)
+	stack.add_child(_giz)                    # 맨 위(돌려 보기에서만 보임 — set_dot_mode)
+	_sync_gizmo_bar()
 	var ctl := HFlowContainer.new()
 	mid.add_child(ctl)
 	var ml := Label.new()
@@ -357,6 +379,269 @@ func _build_ui() -> void:
 	_fill_models()
 	_dots.visible = false
 	_update_cam()
+
+
+## 미리보기 위 기즈모 도구 줄 — 유니티 툴바와 같은 자리 · 같은 단축키
+func _build_gizmo_bar(parent: Control) -> void:
+	var bar := HFlowContainer.new()
+	parent.add_child(bar)
+	var group := ButtonGroup.new()
+	for t in [[TransformGizmo.Tool.VIEW, "✋ Q", "Q — 보기: 손잡이 없음. 왼쪽 끌기 = 화면 옮기기"],
+			[TransformGizmo.Tool.MOVE, "✥ W 이동", "W — 이동: 축 화살표 · 평면 네모 · 가운데 네모(화면 평면)"],
+			[TransformGizmo.Tool.ROTATE, "⟳ E 회전", "E — 회전: 축 고리(고리를 따라 끈다) · 바깥 고리(화면 축) · 안쪽(자유)"],
+			[TransformGizmo.Tool.SCALE, "⤢ R 크기", "R — 크기: 축 끝 네모(로컬 축) · 가운데(전체 — 오른쪽 · 위로 끌면 커짐). 왼손 표지 · 소켓은 크기 없음"],
+			[TransformGizmo.Tool.TRANSFORM, "▣ Y 변환", "Y — 변환: 이동 화살표 · 평면 + 회전 고리 + 가운데(전체 크기)"]]:
+		var b := Button.new()
+		b.text = String(t[1])
+		b.toggle_mode = true
+		b.button_group = group
+		b.focus_mode = Control.FOCUS_NONE
+		b.tooltip_text = String(t[2]) + "\n끄는 중 Ctrl = 눈금 · 오른쪽 누름 = 취소 · 놓으면 유닛 씬에 되돌리기 한 칸(Ctrl+Z)"
+		var tv: int = t[0]
+		b.pressed.connect(func() -> void: set_tool(tv))
+		bar.add_child(b)
+		_tool_btns.append(b)
+	bar.add_child(VSeparator.new())
+	_pivot_btn = _btn(bar, "피벗", "Z — 기즈모 자리: 피벗(노드 원점) ↔ 중심(보이는 메시 가운데). 회전 · 크기의 중심도 이것", func() -> void: set_pivot_mode(not _giz.pivot_mode))
+	_space_btn = _btn(bar, "로컬", "X — 손잡이 방향: 로컬(노드 축) ↔ 글로벌(세상 축). 크기 손잡이는 늘 로컬", func() -> void: set_local_space(not _giz.local_space))
+	_pivot_btn.focus_mode = Control.FOCUS_NONE
+	_space_btn.focus_mode = Control.FOCUS_NONE
+	bar.add_child(VSeparator.new())
+	var sl := Label.new()
+	sl.text = "Ctrl 눈금"
+	sl.tooltip_text = "Ctrl 을 누른 채 끌면 이 눈금으로 끊어 움직인다(유니티 증분 스냅)"
+	sl.mouse_filter = Control.MOUSE_FILTER_STOP
+	bar.add_child(sl)
+	for s in [["cm", 0.1, 50.0, 0.1, 1.0, "이동 눈금(cm)"], ["°", 1.0, 90.0, 1.0, 15.0, "회전 눈금(°)"], ["배", 0.01, 1.0, 0.01, 0.1, "크기 눈금(배율)"]]:
+		var sp := SpinBox.new()
+		sp.min_value = float(s[1])
+		sp.max_value = float(s[2])
+		sp.step = float(s[3])
+		sp.value = float(s[4])
+		sp.suffix = String(s[0])
+		sp.tooltip_text = String(s[5])
+		sp.custom_minimum_size = Vector2(76, 0)
+		sp.value_changed.connect(func(_v: float) -> void: _apply_snap())
+		bar.add_child(sp)
+		_snap_sp.append(sp)
+
+
+## 도구 줄 단추 · 기즈모 칸을 지금 값으로
+func _sync_gizmo_bar() -> void:
+	if _giz == null:
+		return
+	for i in _tool_btns.size():
+		_tool_btns[i].set_pressed_no_signal(i == _giz.tool_mode)
+	_pivot_btn.text = "피벗" if _giz.pivot_mode else "중심"
+	_space_btn.text = "로컬" if _giz.local_space else "글로벌"
+	_apply_snap()
+	_giz.queue_redraw()
+
+
+func _apply_snap() -> void:
+	if _giz == null or _snap_sp.size() < 3:
+		return
+	_giz.snap_move = _snap_sp[0].value / 100.0
+	_giz.snap_rotate = _snap_sp[1].value
+	_giz.snap_scale = _snap_sp[2].value
+
+
+## 기즈모 도구(유니티 Q W E R Y)
+func set_tool(t: int) -> void:
+	if _giz.is_dragging():
+		_giz.cancel_drag()
+	_giz.tool_mode = t
+	_sync_gizmo_bar()
+
+
+func set_pivot_mode(on: bool) -> void:
+	_giz.pivot_mode = on
+	_sync_gizmo_bar()
+
+
+func set_local_space(on: bool) -> void:
+	_giz.local_space = on
+	_sync_gizmo_bar()
+
+
+## 기즈모를 걸 미리보기 노드 — 고른 장비 · 표지(소켓은 뼈를 따라가므로 없음)
+func _gizmo_target() -> Node3D:
+	var n := _node(_sel)
+	if n == null or not (n is Node3D) or n is BoneAttachment3D:
+		return null
+	return _prev_node(n) as Node3D
+
+
+static func _is_marker(n: Node) -> bool:
+	return n is DRHandTarget3D or (n is Node3D and String(n.name) == DRCharacter3D.SUPPORT_NAME)
+
+
+## 기즈모로 끄는 중 — 미리보기 사본만(왼손 IK 목표 · 숫자 칸이 따라온다). 유닛 씬은 놓을 때
+func _on_giz_changed(pn: Node3D) -> void:
+	if _prev != null:
+		_prev.sync_support()
+		_force_pose()
+	_show_xform_of(pn)
+
+
+## 기즈모를 놓았다 — 미리보기에서 옮긴 자리를 유닛 씬의 같은 노드에(에디터 = 되돌리기 한 칸 · Ctrl+Z)
+func _on_giz_end(pn: Node3D, _before: Transform3D) -> void:
+	var n := _node(_sel) as Node3D
+	if n == null or pn == null or _prev_node(n) != pn:
+		return
+	var after := pn.transform
+	if after.is_equal_approx(n.transform):
+		_show_xform()
+		return
+	var what := String(TransformGizmo.TOOL_NAMES[_giz.tool_mode])
+	_begin("장비: %s %s(기즈모)" % [n.name, what])
+	_op_prop(n, "transform", after)
+	_end(false)
+	_set_status("%s %s — %s" % [n.name, what, "Ctrl+Z 로 되돌리기" if _editing() else "적용"])
+
+
+## 미리보기를 눌렀다(끌지 않고) — 그 자리의 왼손 표지 · 소켓 · 장비를 고른다. 빈 곳 = 고르기 풀기(유니티와 같음)
+func _on_view_click(pos: Vector2) -> void:
+	if _prev == null or _root == null:
+		return
+	var pn := pick_in_preview(pos)
+	var p := _prev.get_path_to(pn) if pn != null else NodePath()
+	if pn == null or _root.get_node_or_null(p) == null:
+		_sel = NodePath()
+		_tree.deselect_all()
+		_show_xform()
+		_fill_motion_table()
+		return
+	_select_node(p)
+
+
+## 화면 점 아래의 미리보기 노드 — 왼손 표지(14 px 안) → 소켓(10 px 안) → 장비 메시(광선 ↔ 메시마다 로컬 경계 상자, 가장 가까운 것)
+func pick_in_preview(pos: Vector2) -> Node3D:
+	if _prev == null:
+		return null
+	var equips: Array[Node3D] = []
+	for s in _prev.get_sockets():
+		for c in s.get_children():
+			if c is Node3D and (c as Node3D).visible:
+				equips.append(c as Node3D)
+	var best: Node3D = null
+	var bd := 14.0
+	for e in equips:
+		var mk := DRCharacter3D.find_support(e)
+		if mk != null and not _cam.is_position_behind(mk.global_position):
+			var d := pos.distance_to(_cam.unproject_position(mk.global_position))
+			if d < bd:
+				bd = d
+				best = mk
+	if best != null:
+		return best
+	bd = 10.0
+	for s in _prev.get_sockets():
+		if not _cam.is_position_behind(s.global_position):
+			var d := pos.distance_to(_cam.unproject_position(s.global_position))
+			if d < bd:
+				bd = d
+				best = s
+	if best != null:
+		return best
+	var ro := _cam.project_ray_origin(pos)
+	var rd := _cam.project_ray_normal(pos)
+	var near := INF
+	for e in equips:
+		var meshes: Array[Node] = [e]
+		meshes.append_array(e.find_children("*", "MeshInstance3D", true, false))
+		for m in meshes:
+			var mi := m as MeshInstance3D
+			if mi == null or mi.mesh == null or not mi.is_visible_in_tree():
+				continue
+			var inv := mi.global_transform.affine_inverse()
+			var hit: Variant = mi.get_aabb().intersects_ray(inv * ro, inv.basis * rd)
+			if hit == null:
+				continue
+			var dist := ro.distance_to(mi.global_transform * (hit as Vector3))
+			if dist < near:
+				near = dist
+				best = e
+	return best
+
+
+## F — 고른 것을 화면 가운데로(장비 = 메시 경계 상자가 들어오게, 표지 · 소켓 = 가까이). 없으면 두 손
+func frame_selected() -> void:
+	var n := _node(_sel)
+	var pn := _prev_node(n) as Node3D if n != null else null
+	if pn == null:
+		focus_hands()
+		return
+	var bb := TransformGizmo.world_aabb(pn)
+	if bb.size == Vector3.ZERO:
+		_target = pn.global_position
+		_dist = 0.6
+	else:
+		_target = bb.get_center()
+		_dist = clampf(bb.size.length() * 1.5, 0.4, 6.0)
+	_update_cam()
+
+
+## 탭 창의 단축키(유니티와 같음) — 칸에 글자를 치는 중이면 칸이 먼저 먹으므로 여기 안 온다
+func _unhandled_key_input(ev: InputEvent) -> void:
+	var k := ev as InputEventKey
+	if k == null or not k.pressed or k.echo or not _active or not is_visible_in_tree():
+		return
+	if k.ctrl_pressed or k.meta_pressed:
+		match k.keycode:
+			KEY_Z:
+				_editor_undo(not k.shift_pressed)
+			KEY_Y:
+				_editor_undo(false)
+			KEY_S:
+				save_unit()
+			_:
+				return
+		get_viewport().set_input_as_handled()
+		return
+	if k.alt_pressed:
+		return
+	match k.keycode:
+		KEY_Q:
+			set_tool(TransformGizmo.Tool.VIEW)
+		KEY_W:
+			set_tool(TransformGizmo.Tool.MOVE)
+		KEY_E:
+			set_tool(TransformGizmo.Tool.ROTATE)
+		KEY_R:
+			set_tool(TransformGizmo.Tool.SCALE)
+		KEY_Y:
+			set_tool(TransformGizmo.Tool.TRANSFORM)
+		KEY_X:
+			set_local_space(not _giz.local_space)
+		KEY_Z:
+			set_pivot_mode(not _giz.pivot_mode)
+		KEY_F:
+			frame_selected()
+		KEY_ESCAPE:
+			if not _giz.is_dragging():
+				return
+			_giz.cancel_drag()
+		_:
+			return
+	get_viewport().set_input_as_handled()
+
+
+## Ctrl+Z · Ctrl+Y — 탭 창에서도 유닛 씬의 되돌리기(에디터 창과 같은 기록). EditorUndoRedoManager 에는 스크립트용 undo() 가 없어
+## 그 씬 기록의 UndoRedo 를 바로 부른다(에디터 창 Undo 알림의 이름만 한 칸 어긋날 수 있음 — 되돌리는 차례는 같다)
+func _editor_undo(undo: bool) -> void:
+	if not _editing():
+		return
+	var m := EditorInterface.get_editor_undo_redo()
+	var ur := m.get_history_undo_redo(m.get_object_history_id(_root))
+	if ur == null:
+		return
+	var nm := ur.get_current_action_name()
+	var ok := ur.undo() if undo else ur.redo()
+	if not undo:
+		nm = ur.get_current_action_name()
+	_follow_root()
+	_set_status(("되돌림: %s" if undo else "다시: %s") % nm if ok else ("되돌릴 것 없음" if undo else "다시 할 것 없음"))
 
 
 ## 도트 보기에 게임과 같은 도트 · 외곽선 값(DRDotStyle.load_default().apply_to). 명암(재질 공통)은 게임 화면 · ① 탭이 넣으므로 건드리지 않는다
@@ -620,13 +905,19 @@ func _fill_models() -> void:
 
 
 func _show_xform() -> void:
-	var n := _node(_sel) as Node3D
+	_show_xform_of(_node(_sel) as Node3D)
+
+
+## 숫자 칸에 노드 n 의 자리 · 회전 · 크기(부모 기준) — 기즈모로 끄는 중에는 미리보기 사본 노드(같은 부모 기준이라 값이 같다)
+func _show_xform_of(n: Node3D) -> void:
 	_xf_lock = true
 	var on := n != null and not (n is BoneAttachment3D)
 	for sp in _pos + _rot:
 		sp.editable = on
+	for sp in _scl:
+		sp.editable = on and not _is_marker(n)
 	if n == null:
-		_xf_title.text = "고른 노드 — 없음(나무에서 장비 · 표지를 고르세요)"
+		_xf_title.text = "고른 노드 — 없음(나무 · 미리보기에서 장비 · 표지를 고르세요)"
 	elif n is BoneAttachment3D:
 		_xf_title.text = "소켓 %s — 뼈를 따라가므로 자리는 장비 · 표지에서" % n.name
 	else:
@@ -634,6 +925,7 @@ func _show_xform() -> void:
 		for k in 3:
 			_pos[k].set_value_no_signal(snappedf(n.position[k] * 100.0, 0.01))
 			_rot[k].set_value_no_signal(snappedf(n.rotation_degrees[k], 0.01))
+			_scl[k].set_value_no_signal(snappedf(n.scale[k], 0.001))
 	_xf_lock = false
 
 
@@ -645,7 +937,11 @@ func _on_xf_changed() -> void:
 		return
 	var p := Vector3(_pos[0].value, _pos[1].value, _pos[2].value) / 100.0
 	var r := Vector3(_rot[0].value, _rot[1].value, _rot[2].value)
-	_set_props_merged("장비: %s 자리" % n.name, [[n, "position", p], [n, "rotation_degrees", r]])
+	var changes := [[n, "position", p], [n, "rotation_degrees", r]]
+	var s := Vector3(_scl[0].value, _scl[1].value, _scl[2].value)
+	if not _is_marker(n) and not s.is_equal_approx(n.scale.snapped(Vector3.ONE * 0.001)):
+		changes.append([n, "scale", s])     # 크기 칸을 안 건드렸으면 넣지 않는다(칸의 반올림 값으로 덮지 않게)
+	_set_props_merged("장비: %s 자리" % n.name, changes)
 
 
 # ───────────── 고치기(에디터 = 되돌리기 한 칸 · 밖 = 바로) ─────────────
@@ -1060,7 +1356,7 @@ func _sync_preview() -> void:
 			var n: Node = stack.pop_back()
 			if n.owner == _root:
 				var pn := _prev.get_node_or_null(_root.get_path_to(n))
-				if pn is Node3D and n is Node3D:
+				if pn is Node3D and n is Node3D and not (n is BoneAttachment3D):     # 소켓은 뼈가 움직인다 — 덮으면 그 프레임에 원점으로 튐(10-16)
 					(pn as Node3D).transform = (n as Node3D).transform
 				if pn is DRHandTarget3D and n is DRHandTarget3D:
 					(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
@@ -1128,11 +1424,14 @@ func _on_time(v: float) -> void:
 	_seek(v)
 
 
-## 돌려 보기 ↔ 도트 보기(게임과 같은 3/4 방향 · 저해상도 · 외곽선)
+## 돌려 보기 ↔ 도트 보기(게임과 같은 3/4 방향 · 저해상도 · 외곽선). 기즈모는 돌려 보기에서만
 func set_dot_mode(on: bool) -> void:
 	_dot_mode = on
+	if _giz.is_dragging():
+		_giz.cancel_drag()
 	_view3d.visible = not on
 	_dotc.visible = on
+	_giz.visible = not on
 	_view_btn.text = "돌려 보기" if on else "도트 보기"
 	set_page_active(_active)
 	if _prev != null:
@@ -1190,6 +1489,8 @@ func _update_cam() -> void:
 	_cam.transform = Transform3D(b, _target + b * Vector3(0.0, 0.0, _dist))   # 부모가 뷰포트라 로컬 = 세상(트리 밖에서도 된다)
 
 
+## 미리보기 카메라 — 기즈모 층이 기즈모 밖 입력을 넘겨준다(유니티 장면 창 손): 휠 = 확대 · 가운데 끌기 = 옮기기 ·
+## 오른쪽 끌기 · Alt+왼쪽 끌기 = 돌려 보기 · Alt+오른쪽 끌기 = 확대 · 보기 도구(Q) · Shift 의 왼쪽 끌기 = 옮기기 · 다른 도구의 빈 곳 왼쪽 끌기 = 돌려 보기
 func _on_view_input(ev: InputEvent) -> void:
 	var mb := ev as InputEventMouseButton
 	if mb != null:
@@ -1198,20 +1499,29 @@ func _on_view_input(ev: InputEvent) -> void:
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_dist = minf(10.0, _dist * 1.1)
 		elif mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_MIDDLE or mb.button_index == MOUSE_BUTTON_RIGHT:
-			_drag = (2 if mb.button_index != MOUSE_BUTTON_LEFT or mb.shift_pressed else 1) if mb.pressed else 0
+			if not mb.pressed:
+				_drag = 0
+			elif mb.button_index == MOUSE_BUTTON_MIDDLE:
+				_drag = 2
+			elif mb.button_index == MOUSE_BUTTON_RIGHT:
+				_drag = 3 if mb.alt_pressed else 1
+			elif mb.alt_pressed:
+				_drag = 1
+			else:
+				_drag = 2 if mb.shift_pressed or _giz.tool_mode == TransformGizmo.Tool.VIEW else 1
 		_update_cam()
-		accept_event()
 		return
 	var mm := ev as InputEventMouseMotion
 	if mm != null and _drag != 0:
 		if _drag == 1:
 			_yaw -= mm.relative.x * 0.4
 			_pitch = clampf(_pitch + mm.relative.y * 0.4, -85.0, 85.0)
-		else:
+		elif _drag == 2:
 			var b := DRBaker.view_basis(_yaw, _pitch)
 			_target += (b.x * -mm.relative.x + b.y * mm.relative.y) * _dist * 0.0022
+		else:
+			_dist = clampf(_dist * exp((mm.relative.y - mm.relative.x) * 0.006), 0.2, 10.0)
 		_update_cam()
-		accept_event()
 
 
 func _process(delta: float) -> void:
@@ -1223,7 +1533,8 @@ func _process(delta: float) -> void:
 		if _dots.origin != o:
 			_dots.origin = o
 			_ground.queue_redraw()
-	if _prev != null and _playing:
+	var dragging := _giz.is_dragging()
+	if _prev != null and _playing and not dragging:     # 끄는 동안은 자세를 멈춘다(손이 움직이면 놓은 자리가 손 기준으로 어긋남)
 		_acc += delta
 		if _acc >= 1.0 / STEP_HZ:
 			_prev.step_motion(_acc)
@@ -1231,10 +1542,17 @@ func _process(delta: float) -> void:
 			var ap := _prev.get_animation_player()
 			if ap.current_animation != "":
 				_time_sl.set_value_no_signal(ap.current_animation_position / maxf(ap.get_animation(ap.current_animation).length, 0.001))
+	if not _dot_mode:
+		var gt := _gizmo_target()
+		if _giz.target != gt:
+			_giz.cancel_drag()
+			_giz.target = gt
+		_giz.allow_scale = gt != null and not _is_marker(gt)
+		_giz.queue_redraw()                    # 동작을 따라 손잡이도 움직인다
 	_draw_marks()
 	_update_info()
 	_poll -= delta
-	if _poll <= 0.0:
+	if _poll <= 0.0 and not dragging:
 		_poll = POLL_SEC
 		_follow_root()
 
@@ -1313,7 +1631,7 @@ func _update_info() -> void:
 		mo, w, ik_cm, float(raw.get("dist", 0.0)) * 100.0, float(_live.get("rot", 0.0))]
 
 
-## 미리보기에 표시: 왼손 표지(초록) · IK 뒤 왼 손바닥(빨강) · 고른 노드 축(빨 x · 초 y · 파 z) · 소켓(노랑)
+## 미리보기에 표시: 왼손 표지(초록) · IK 뒤 왼 손바닥(빨강) · 소켓(노랑) · 고른 노드 축(빨 x · 초 y · 파 z — 보기 도구(Q)일 때만, 다른 도구는 기즈모가 보인다)
 func _draw_marks() -> void:
 	_imesh.clear_surfaces()
 	if _prev == null or _dot_mode:
@@ -1332,7 +1650,7 @@ func _draw_marks() -> void:
 		_cross(s.global_position, 0.02, Color(1.0, 0.9, 0.2))
 		any = true
 	var pn := _prev_node(_node(_sel)) as Node3D
-	if pn != null:
+	if pn != null and (_giz.tool_mode == TransformGizmo.Tool.VIEW or (_giz.tool_mode == TransformGizmo.Tool.SCALE and not _giz.allow_scale)):
 		var t := pn.global_transform
 		for k in 3:
 			var col := [Color(1, 0.3, 0.3), Color(0.3, 1, 0.3), Color(0.35, 0.55, 1)][k] as Color

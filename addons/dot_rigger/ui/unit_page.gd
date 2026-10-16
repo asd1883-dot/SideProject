@@ -578,7 +578,8 @@ func _equip_walk(xform: bool) -> String:
 			if n.owner != _root:
 				continue
 			if xform:
-				parts.append(str((n as Node3D).transform) if n is Node3D else "")
+				# 소켓 자리는 뼈가 정한다(에디터에서 유닛 씬이 동작을 틀면 계속 바뀜) — 장비 · 표지 자리만
+				parts.append(str((n as Node3D).transform) if n is Node3D and not (n is BoneAttachment3D) else "")
 				if n is DRHandTarget3D:
 					parts.append(str((n as DRHandTarget3D).motion_weights) + str((n as DRHandTarget3D).weight))
 			else:
@@ -790,6 +791,32 @@ func _on_open_scene() -> void:
 		EditorInterface.open_scene_from_path(_sel_path)
 
 
+## 탭 창의 Ctrl+Z · Ctrl+Y(Ctrl+Shift+Z) · Ctrl+S — 유닛 씬의 되돌리기 · 다시 · 저장(에디터 창과 같은 기록, ② 탭과 같은 방식).
+## 칸에 글자를 치는 중이면 칸이 먼저 먹으므로 여기 안 온다
+func _unhandled_key_input(ev: InputEvent) -> void:
+	var k := ev as InputEventKey
+	if k == null or not k.pressed or k.echo or not _active or not is_visible_in_tree() or not (k.ctrl_pressed or k.meta_pressed):
+		return
+	match k.keycode:
+		KEY_Z, KEY_Y:
+			if not (Engine.is_editor_hint() and _root != null and is_instance_valid(_root) and _root.is_inside_tree()):
+				return
+			var m := EditorInterface.get_editor_undo_redo()
+			var ur := m.get_history_undo_redo(m.get_object_history_id(_root))
+			var undo := k.keycode == KEY_Z and not k.shift_pressed
+			var nm := ur.get_current_action_name()
+			var ok := ur.undo() if undo else ur.redo()
+			if not undo:
+				nm = ur.get_current_action_name()
+			_status.text = (("되돌림: %s" if undo else "다시: %s") % nm) if ok else ("되돌릴 것 없음" if undo else "다시 할 것 없음")
+			_poll = 0.0                          # 다음 프레임에 칸 · 미리보기를 따라오게
+		KEY_S:
+			_on_save()
+		_:
+			return
+	get_viewport().set_input_as_handled()
+
+
 ## ② 장비 탭을 같은 유닛을 고른 채로 연다(탭 창 안일 때)
 func _on_open_equip() -> void:
 	var hub := get_window() as DRHubWindow
@@ -980,7 +1007,7 @@ func _sync_equip() -> void:
 			var n: Node = stack.pop_back()
 			if n.owner == _root:
 				var pn := _prev_ch.get_node_or_null(_root.get_path_to(n))
-				if pn is Node3D and n is Node3D:
+				if pn is Node3D and n is Node3D and not (n is BoneAttachment3D):     # 소켓은 뼈가 움직인다(덮으면 원점으로 튐)
 					(pn as Node3D).transform = (n as Node3D).transform
 				if pn is DRHandTarget3D and n is DRHandTarget3D:
 					(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
