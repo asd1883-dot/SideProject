@@ -4,8 +4,13 @@
     blender -b --factory-startup -P pipeline/blender/bind_to_skeleton.py -- \
         --base <기준 몸.glb(뼈대 · 동작 · 스킨 메시)> --src <생성한 모델.glb> --out <결과.glb> [--keep_base 0|1] [--fit height|span]
         [--hand_fit 1] [--hand_keep 1] [--thumb_fit 1] [--thumb_slim 0.55] [--finger_fit 1] [--forearm_twist 1] [--hand_scale 0.86] [--thumb_len 0.80] [--hand_heat 0] [--smooth 12] [--part_fix 1] [--part_fix_legs 1] [--part_fix_soft 0] [--hip_heat 0] [--shoulder_cut 0]
+        옷(기준 몸이 사람 몸 = 뼈대 그대로) 전용: [--limb_fit 1] [--limb_fit_target base|bone] [--limb_fit_upper 0.3,…] [--limb_fit_fore 0.1,…]
+        [--limb_fit_blend 0.15,0.45] [--cuff_fit 1] [--cuff_start -0.12] [--cuff_at -0.03] [--cuff_margin 0.006] [--cuff_fade 0.025]
+        [--arm_smooth 0] [--part_fix_arms 0]   (기준 몸이 UAL 마네킹이면 이 칸들은 무시 — 맨몸 공정은 그대로)
      맨몸(human_base) · 옷(uniform_m36) 모두 기본값(다리 정리 켬 — 10-08 옷도 되돌림). 원본 = pipeline/comfy/human_8581eb8d.glb · uniform_m36_80eaf512.glb, 기준 = source3d/UAL1_humanoid.glb
      ★ 맨몸은 10-15 부터 이 결과에 rerig_arms.py(팔 사슬을 몸 자체에 맞춰 다시 리깅)를 더한 것 — pipeline/make_human_base.py 로 한 번에.
+     ★ 옷은 10-15 부터 --base human_base.glb(사람 몸 뼈대 그대로, skeleton_from_base). 10-16 부터 옷은 팔 살을 그 뼈대 팔 축에 맞춘 뒤
+       웨이트를 옮기고(limb_fit) 팔에는 2D 용 웨이트 번지기 · 관절 정리를 안 한다 — 3D 에서 소매 끝이 맨몸 손목과 같은 축 · 같은 비틀림으로 움직이게.
 
 1. 기준 몸(UAL1_humanoid.glb)을 바인드 포즈(T-포즈)로 연다. 뼈대 · 동작은 그대로 쓴다.
 2. 생성한 모델(Tripo)의 메시를 하나로 합치고, 기준 몸의 스킨 메시에 크기 · 위치를 맞춘다.
@@ -16,7 +21,7 @@
 4. 기준 몸 스킨 메시는 뺀다(--keep_base 1 이면 남김 — 옷만 입힐 때).
 5. 뼈대 · 모든 동작 · 새 메시를 GLB 로 내보낸다. 결과 요약은 "BIND_RESULT {json}" 한 줄.
 """
-import bpy, bmesh, sys, os, json
+import bpy, bmesh, sys, os, json, math
 from mathutils import Vector, Matrix
 
 
@@ -31,6 +36,340 @@ def args():
         else:
             i += 1
     return out
+
+
+def _smoothstep(x, a, b):
+    if b <= a:
+        return 1.0 if x >= a else 0.0
+    t = min(1.0, max(0.0, (x - a) / (b - a)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _slice_loops(bm, p0, ax, segs=None):
+    """bm 을 평면(p0, ax)으로 잘라 나온 고리마다 (중심 — 모서리 길이 가중, 점들). rerig_arms.py 의 slice_loops 와 같은 식.
+    segs(리스트)를 주면 단면 선분(두 끝점)을 모두 덧붙인다 — 외곽 반지름을 선분으로 재는 데(_profile)"""
+    c = bm.copy()
+    r = bmesh.ops.bisect_plane(c, geom=c.verts[:] + c.edges[:] + c.faces[:], dist=1e-7, plane_co=p0, plane_no=ax)
+    cut = [e for e in r["geom_cut"] if isinstance(e, bmesh.types.BMEdge)]
+    adj = {}
+    for e in cut:
+        for v in e.verts:
+            adj.setdefault(v, []).append(e)
+    seen = set()
+    loops = []
+    for e in cut:
+        if e in seen:
+            continue
+        stack = [e]
+        seen.add(e)
+        es = []
+        while stack:
+            x = stack.pop()
+            es.append(x)
+            for v in x.verts:
+                for y in adj.get(v, []):
+                    if y not in seen:
+                        seen.add(y)
+                        stack.append(y)
+        acc = Vector()
+        tot = 0.0
+        pts = []
+        for x in es:
+            a_, b_ = x.verts[0].co, x.verts[1].co
+            l_ = (b_ - a_).length
+            acc += (a_ + b_) * 0.5 * l_
+            tot += l_
+            pts.append(a_.copy())
+            if segs is not None:
+                segs.append((a_.copy(), b_.copy()))
+        if tot > 1e-9:
+            loops.append((acc / tot, pts))
+    c.free()
+    return loops
+
+
+def _welded(obj):
+    """메시 사본(세상 좌표, 텍스처 이음매로 나뉜 정점을 합침 — 단면이 닫힌 고리가 되게)"""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.transform(obj.matrix_world)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
+    return bm
+
+
+def _centre(bm, p0, ax, rmax=0.09):
+    """평면(p0, ax) 단면 고리 중 중심이 p0 에 가장 가까운 것 → (중심, 점들) 또는 None"""
+    best = None
+    for cen, pts in _slice_loops(bm, p0, ax):
+        d = (cen - p0).length
+        if d < rmax and (best is None or d < best[0]):
+            best = (d, cen, pts)
+    return (best[1], best[2]) if best else None
+
+
+def fit_arms_to_bones(body, arm, stations_u, stations_f, blend, base=None):
+    """옷 팔 살을 기준 몸 팔에 맞춘다(limb_fit, 10-16) — 옷(skeleton_from_base)은 사람 몸 뼈대를 그대로 받는데
+    팔 살은 다른 AI 모델이라 자리가 다르다(uniform_m36: 소매 단면 중심이 뼈 축보다 2 ~ 2.6 cm 아래 · 아래팔 끝 2 cm 앞, 사람 몸은 1 cm 안).
+    그러면 ① 3D 에서 손목 이음매(옷 소매 ↔ 기본 몸 손)가 어긋나 손이 소매 구멍 가장자리에서 나오고(게임 시점에서 검은 뚜껑 아래로 손이
+    비켜 "손목이 꺾여 보임" — 사용자 10-16) ② Mixamo 가 손을 100 ~ 130° 비틀 때 소매가 가장자리 축으로 휘둘린다(사람 몸 U31 과 같은 일).
+    사람 몸은 rerig_arms.py 로 뼈를 살 중심에 옮겼지만 옷은 뼈대가 공용이라 뼈를 못 옮긴다 → 살을 옮긴다.
+    단면(뼈에 수직인 평면으로 자른 고리 중 축에 가장 가까운 것)마다 옷 중심이 기준 몸(base, 없으면 뼈 축) 중심에서 떨어진 만큼(축에 수직
+    성분)을 정점마다 빼 준다 — 기준 몸 중심에 맞추면 손목 자르기 평면에서 소매 고리가 손목 고리와 같은 중심이 된다(기준 몸 팔은 뼈 축에서 1 cm 안).
+    어깨 → 팔꿈치 → 손목 길이 s 를 따라 단면 사이를 선형으로, 마지막 단면 너머(손)는 그대로, 어깨 쪽은 blend(윗팔 비율)로 0 → 1.
+    팔 정점 = 그 자리 단면 반지름의 1.3 배 + 1 cm 안(몸통 · 겨드랑이는 안 건드림). 정점 수 · 순서 그대로, 웨이트 복사 전에 한다."""
+    import numpy as np
+    me = body.data
+    co = np.array([tuple(body.matrix_world @ v.co) for v in me.vertices])
+    bm = _welded(body)
+    bm_base = _welded(base) if base is not None else None
+    M = arm.matrix_world
+    out = {}
+    disp = np.zeros_like(co)
+    for sd in ("l", "r"):
+        bu, bl, bh = (arm.data.bones.get(n + sd) for n in ("upperarm_", "lowerarm_", "hand_"))
+        if bu is None or bl is None or bh is None:
+            continue
+        SH, EL, WR = M @ bu.head_local, M @ bl.head_local, M @ bh.head_local
+        du = EL - SH
+        Lu = du.length
+        du = du / Lu
+        df = WR - EL
+        Lf = df.length
+        df = df / Lf
+        st = []          # (s, 오프셋(축에 수직), 단면 최대 반지름)
+        for u in stations_u:
+            p0 = SH + du * (u * Lu)
+            st.append((u * Lu, p0, du))
+        for t in stations_f:
+            p0 = EL + df * (t * Lf)
+            st.append((Lu + t * Lf, p0, df))
+        found = []
+        n_base = 0
+        for s_, p0, ax in st:
+            got = _centre(bm, p0, ax)
+            if got is None:
+                continue
+            target = p0
+            if bm_base is not None:
+                gb = _centre(bm_base, p0, ax)
+                if gb is not None:
+                    target = gb[0]
+                    n_base += 1
+            off = got[0] - target
+            off = off - ax * off.dot(ax)
+            rmax = max(((q - p0) - ax * (q - p0).dot(ax)).length for q in got[1])
+            found.append((s_, np.array(tuple(off)), rmax))
+        if len(found) < 3:
+            continue
+        S = np.array([f[0] for f in found])
+        OFF = np.array([f[1] for f in found])
+        RM = np.array([f[2] for f in found])
+        moved = 0
+        far = 0.0
+        for i in range(len(co)):
+            p = Vector(co[i])
+            a_ = (p - SH).dot(du)
+            if a_ < 0.0:
+                continue
+            b_ = (p - EL).dot(df)
+            if b_ < 0.0:
+                if a_ > Lu:
+                    continue
+                s_ = a_
+                r_ = ((p - SH) - du * a_).length
+            else:
+                s_ = Lu + b_
+                r_ = ((p - EL) - df * b_).length
+            if s_ > S[-1]:
+                rlim = 0.14                                     # 손(손가락 · 엄지까지)
+            else:
+                rlim = float(np.interp(s_, S, RM)) * 1.3 + 0.01
+            if r_ > rlim:
+                continue
+            w = _smoothstep(s_, blend[0] * Lu, blend[1] * Lu)
+            if w <= 0.0:
+                continue
+            o = np.array([np.interp(s_, S, OFF[:, k]) for k in range(3)])
+            disp[i] = -o * w
+            moved += 1
+            far = max(far, float(np.linalg.norm(o * w)))
+        out[sd] = {"stations_cm": [[round(float(S[k]) * 100, 1), [round(float(x) * 100, 2) for x in OFF[k]], round(float(RM[k]) * 100, 1)] for k in range(len(S))],
+                   "target": "base %d/%d" % (n_base, len(st)) if bm_base is not None else "bone axis",
+                   "moved_vertices": moved, "max_move_cm": round(far * 100, 2)}
+    bm.free()
+    if bm_base is not None:
+        bm_base.free()
+    mwi = body.matrix_world.inverted()
+    for i in np.nonzero(np.linalg.norm(disp, axis=1) > 1e-7)[0]:
+        me.vertices[int(i)].co = mwi @ Vector(tuple(co[i] + disp[i]))
+    me.update()
+    return out
+
+
+def _profile(segs, p0, ax, u, v, n=36, rmax=0.12):
+    """단면 선분들의 바깥 외곽 반지름 — 축(p0 · ax) 둘레 n 칸의 가운데 방향 광선이 선분과 만나는 가장 먼 거리.
+    점으로만 재면 소매 바깥 고리의 긴 모서리가 칸을 건너뛰어 그 칸에 안쪽 고리(AI 모델 자기 팔)가 잡힌다(10-16 시험). 못 만난 칸은 양옆으로 보간"""
+    s2 = []
+    for a_, b_ in segs:
+        da, db = a_ - p0, b_ - p0
+        A = (da.dot(u), da.dot(v))
+        B = (db.dot(u), db.dot(v))
+        if math.hypot(*A) > rmax and math.hypot(*B) > rmax:
+            continue
+        s2.append((A, B))
+    out = [-1.0] * n
+    for k in range(n):
+        th = -math.pi + (k + 0.5) * 2.0 * math.pi / n
+        dx, dy = math.cos(th), math.sin(th)
+        best = -1.0
+        for A, B in s2:
+            ex, ey = B[0] - A[0], B[1] - A[1]
+            den = dx * ey - dy * ex
+            if abs(den) < 1e-12:
+                continue
+            t = (A[0] * dy - A[1] * dx) / den
+            if t < 0.0 or t > 1.0:
+                continue
+            px, py = A[0] + ex * t, A[1] + ey * t
+            s_ = px * dx + py * dy
+            if s_ > best:
+                best = s_
+        out[k] = best
+    have = [k for k in range(n) if out[k] >= 0.0]
+    if len(have) < 3:
+        return None
+    fill = list(out)
+    for k in range(n):
+        if out[k] >= 0.0:
+            continue
+        lo, hi, dl, dh = k, k, 0, 0
+        while out[lo] < 0.0:
+            lo = (lo - 1) % n
+            dl += 1
+        while out[hi] < 0.0:
+            hi = (hi + 1) % n
+            dh += 1
+        fill[k] = out[lo] + (out[hi] - out[lo]) * dl / (dl + dh)
+    return fill
+
+
+def fit_cuffs(body, arm, base, start, cuff_at, margin, fade_end, n=36):
+    """소매 끝 맞춤(cuff_fit, 10-16) — 3D 에서 옷 소매는 손목 자르기 평면(parts.json 손목 관절, 기본 −3 cm)에서 끝나고 그 너머는 기본 몸 손이다.
+    소매 끝이 손목보다 많이 굵으면(uniform_m36: 둘레 29.9 cm vs 맨몸 손목 20.0) 그 사이 뚜껑 띠(어두운 단면)가 1 ~ 2 cm 로 넓게 보인다.
+    소매 바깥 외곽을 칸(각도)마다 기준 몸 외곽 + margin 이 되게 손목 쪽에서만 줄이거나(넓으면) 늘린다(좁아서 맨몸이 비어져 나오면):
+    배율 = (기준 반지름 + margin) / 옷 반지름, 정점마다 축 둘레 반지름에 곱한다(소매 안쪽 고리 — AI 모델 자기 팔 — 도 같은 배율이라 안에 머문다).
+    손목에서 start(−) → cuff_at 사이 smoothstep 으로 0 → 1, 손목 관절 너머 fade_end 까지 1 → 0(옷 자기 손은 그대로). 팔 살 맞춤(limb_fit) 뒤에."""
+    import numpy as np
+    me = body.data
+    co = np.array([tuple(body.matrix_world @ v.co) for v in me.vertices])
+    bm = _welded(body)
+    bmb = _welded(base)
+    M = arm.matrix_world
+    out = {}
+    disp = np.zeros_like(co)
+    # 재는 자리는 소매 끝(cuff_at)까지만 — 그 너머(손목 관절 둘레)는 AI 모델 자기 손 · 엄지가 단면에 섞여 외곽이 엉뚱해진다(10-16 시험:
+    # 손목 관절 자리를 넣었더니 배율이 2.9 까지 튀어 소매가 7 cm 부풀었다). 너머는 소매 끝 배율을 그대로(np.interp 가 끝값을 이어 줌)
+    offs = [start + (cuff_at - start) * i / 4.0 for i in range(5)]
+    for sd in ("l", "r"):
+        bl, bh = arm.data.bones.get("lowerarm_" + sd), arm.data.bones.get("hand_" + sd)
+        if bl is None or bh is None:
+            continue
+        EL, WR = M @ bl.head_local, M @ bh.head_local
+        ax = (WR - EL).normalized()
+        u = Vector((0.0, 0.0, 1.0))
+        u = (u - ax * u.dot(ax)).normalized()
+        v = ax.cross(u)
+        F = []           # 칸마다 배율 [자리] — 자리 = offs
+        used = []
+        rep = []         # 자리마다 [cm, 옷 평균 반지름, 기준 몸 평균 반지름, 배율 최소, 최대]
+        for off in offs:
+            p0 = WR + ax * off
+            go = _centre(bm, p0, ax, 0.12)
+            gb = _centre(bmb, p0, ax, 0.12)
+            if go is None or gb is None:
+                continue
+            # 단면 선분 전부(소매 바깥 · 안쪽 고리)로 바깥 외곽 — 축에서 12 cm 안
+            sg_o = []
+            sg_b = []
+            _slice_loops(bm, p0, ax, sg_o)
+            _slice_loops(bmb, p0, ax, sg_b)
+            ro = _profile(sg_o, p0, ax, u, v, n)
+            rb = _profile(sg_b, p0, ax, u, v, n)
+            if ro is None or rb is None:
+                continue
+            f = [(rb[k] + margin) / max(ro[k], 1e-4) for k in range(n)]
+            f = [(f[(k - 1) % n] + 2.0 * f[k] + f[(k + 1) % n]) / 4.0 for k in range(n)]       # 칸 사이를 매끈하게
+            F.append(f)
+            used.append(off)
+            rep.append([round(off * 100, 1), round(sum(ro) / n * 100, 2), round(sum(rb) / n * 100, 2), round(min(f), 2), round(max(f), 2)])
+        if len(used) < 2:
+            continue
+        OFF = np.array(used)
+        FA = np.array(F)                          # (자리, 칸)
+        moved = 0
+        far = 0.0
+        WRn = np.array(tuple(WR))
+        axn = np.array(tuple(ax))
+        un = np.array(tuple(u))
+        vn = np.array(tuple(v))
+        d_all = (co - WRn) @ axn
+        for i in np.nonzero((d_all > start) & (d_all < fade_end))[0]:
+            d = float(d_all[i])
+            rel = co[i] - WRn - axn * d
+            r = float(np.linalg.norm(rel))
+            if r < 1e-6 or r > 0.12:
+                continue
+            k_ = _smoothstep(d, start, cuff_at) * (1.0 - _smoothstep(d, 0.0, fade_end))
+            if k_ <= 0.0:
+                continue
+            th = math.atan2(float(rel @ vn), float(rel @ un))
+            x = (th + math.pi) / (2 * math.pi) * n - 0.5
+            k0 = int(math.floor(x)) % n
+            k1 = (k0 + 1) % n
+            fr = x - math.floor(x)
+            fcol = FA[:, k0] * (1.0 - fr) + FA[:, k1] * fr
+            f = float(np.interp(d, OFF, fcol))
+            s = 1.0 + (f - 1.0) * k_
+            disp[i] = rel * (s - 1.0)
+            moved += 1
+            far = max(far, abs(s - 1.0) * r)
+        out[sd] = {"stations": rep, "moved_vertices": moved, "max_move_cm": round(far * 100, 2)}
+    bm.free()
+    bmb.free()
+    mwi = body.matrix_world.inverted()
+    for i in np.nonzero(np.linalg.norm(disp, axis=1) > 1e-7)[0]:
+        me.vertices[int(i)].co = mwi @ Vector(tuple(co[i] + disp[i]))
+    me.update()
+    return out
+
+
+def arm_coords(co, arm, sd):
+    """정점(세상 좌표 numpy (n, 3))마다 팔 사슬 위 자리 — (s = 어깨 → 팔꿈치 → 손목 너머 길이, 축 거리, 윗팔 길이). 팔 밖(어깨 안쪽)은 s = -1"""
+    import numpy as np
+    M = arm.matrix_world
+    bu, bl, bh = (arm.data.bones.get(n + sd) for n in ("upperarm_", "lowerarm_", "hand_"))
+    n = len(co)
+    S = -np.ones(n)
+    R = np.full(n, 1e9)
+    if bu is None or bl is None or bh is None:
+        return S, R, 0.0
+    SH, EL, WR = (np.array(tuple(M @ b.head_local)) for b in (bu, bl, bh))
+    du = EL - SH
+    Lu = float(np.linalg.norm(du))
+    du /= Lu
+    df = WR - EL
+    df /= float(np.linalg.norm(df))
+    a_ = (co - SH) @ du
+    b_ = (co - EL) @ df
+    ru = np.linalg.norm((co - SH) - np.outer(a_, du), axis=1)
+    rf = np.linalg.norm((co - EL) - np.outer(b_, df), axis=1)
+    up = (a_ >= 0.0) & (b_ < 0.0) & (a_ <= Lu)
+    fo = (a_ >= 0.0) & (b_ >= 0.0)
+    S[up] = a_[up]
+    R[up] = ru[up]
+    S[fo] = Lu + b_[fo]
+    R[fo] = rf[fo]
+    return S, R, Lu
 
 
 def world_bbox(objs, deps=None):
@@ -154,6 +493,22 @@ def main():
     body.data.transform(M)
     body.data.update()
     flo, fhi = world_bbox([body])
+
+    # 2.5) 팔 살을 기준 뼈대 팔 축에 맞춤(limb_fit, 10-16) — 옷(기준 몸 뼈대를 그대로 쓸 때)만 기본 켬. 웨이트 복사 전에 해야
+    # 소매 살이 사람 팔을 같은 축으로 둘러싸 가까운 면 복사가 같은 자리(같은 비틀림 몫)의 웨이트를 받는다. fit_arms_to_bones 머리말 참고.
+    limb_fit = {}
+    if skel_from_base and a.get("limb_fit", "1") == "1":
+        su = [float(x) for x in a.get("limb_fit_upper", "0.3,0.45,0.6,0.75,0.9").split(",")]
+        sf = [float(x) for x in a.get("limb_fit_fore", "0.1,0.25,0.4,0.55,0.7,0.8,0.88,0.95").split(",")]
+        bl_ = [float(x) for x in a.get("limb_fit_blend", "0.15,0.45").split(",")]
+        limb_fit = fit_arms_to_bones(body, arm, su, sf, bl_, base if a.get("limb_fit_target", "base") == "base" else None)
+        flo, fhi = world_bbox([body])
+    # 소매 끝 맞춤(cuff_fit, 10-16) — 소매 끝 외곽을 맨몸 손목 + margin 으로(뚜껑 띠가 얇게). fit_cuffs 머리말 참고
+    cuff_fit = {}
+    if skel_from_base and a.get("cuff_fit", "1") == "1":
+        cuff_fit = fit_cuffs(body, arm, base, float(a.get("cuff_start", "-0.12")), float(a.get("cuff_at", "-0.03")),
+                             float(a.get("cuff_margin", "0.006")), float(a.get("cuff_fade", "0.025")))
+        flo, fhi = world_bbox([body])
 
     # 3) 웨이트 복사
     # 손 맞춤 — AI 손은 기준 손보다 좁고 손가락 간격 · 엄지 자리가 달라서, 가까운 면만 보고 옮기면
@@ -354,6 +709,7 @@ def main():
     # 이웃 정점 평균으로 여러 번 번지게 해 관절 주변에 섞이는 띠를 만든다. 손(손목 너머)은 손가락을 맞춰 둔 그대로 둔다.
     smooth_n = int(a.get("smooth", "12"))
     smoothed = 0
+    arm_frozen = 0
     if smooth_n > 0:
         import numpy as np
         me = body.data
@@ -388,6 +744,20 @@ def main():
             for v in me.vertices:
                 if (v.co - wrist).dot(ax) > 0.01:
                     free[v.index] = False
+        # 옷(기준 몸 뼈대 그대로)은 팔(윗팔 가운데부터 바깥)을 번지게 하지 않는다(10-16) — 사람 몸 팔 웨이트는 이미 매끈한 식
+        # (rerig_arms.py: 아래팔 t 에 따라 비틀림 뼈로 선형 · 손목 평면 smoothstep)이라 복사한 그대로가 맨몸과 같은 변형이다.
+        # 번지게 하면 손목 쪽 자르기 고리(−3 cm)에 손 0.2 · 비틀림1 0.1 · 엄지 0.05 가 섞여(사람 몸은 비틀림2 1.0) 손을 굽히거나
+        # 비틀 때 소매 끝이 맨몸 손목과 다르게 움직였다(uniform_m36 10-15 판).
+        arm_frozen = 0
+        if skel_from_base and a.get("arm_smooth", "0") != "1":
+            co_np = np.array([tuple(body.matrix_world @ v.co) for v in me.vertices])
+            for side in ("l", "r"):
+                S_, R_, Lu_ = arm_coords(co_np, arm, side)
+                if Lu_ <= 0.0:
+                    continue
+                m_ = (S_ >= 0.5 * Lu_) & (R_ < 0.14)
+                arm_frozen += int((m_ & free).sum())
+                free[m_] = False
         for _ in range(smooth_n):
             acc = np.zeros_like(W)
             np.add.at(acc, ev[:, 0], W[ev[:, 1]])
@@ -517,10 +887,15 @@ def main():
 
         FINGERS = ("thumb_", "index_", "middle_", "ring_", "pinky_")
         chains = []
+        # 옷(기준 몸 뼈대 그대로)의 팔은 건너뛴다(10-16) — 이 정리는 2D 조각 경계용으로 정점을 뼈 하나(웨이트 1)로 덮는데, 비틀림 뼈를
+        # 모르는 채 손목 평면 앞의 손 웨이트 정점을 아래팔 1.0(안 비틀림)으로 바꿔 비트는 이웃 사이에 가시를 만든다. 3D 슬롯 경계는
+        # parts.json 관절 자르기 평면이 정하므로 팔 웨이트는 맨몸에서 옮긴 그대로 둔다.
+        arm_chains = not skel_from_base or a.get("part_fix_arms", "0") == "1"
         for sd in ("l", "r"):
-            chains.append({"bones": ["upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd], "parent": "clavicle_" + sd,
-                           "family": lambda n, sd=sd: n in ("upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd) or (n.startswith(FINGERS) and n.endswith("_" + sd)),
-                           "steal": ("clavicle_" + sd, "spine_03", "spine_02"), "steal_r": float(a.get("steal_r", "0.075"))})
+            if arm_chains:
+                chains.append({"bones": ["upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd], "parent": "clavicle_" + sd,
+                               "family": lambda n, sd=sd: n in ("upperarm_" + sd, "lowerarm_" + sd, "hand_" + sd) or (n.startswith(FINGERS) and n.endswith("_" + sd)),
+                               "steal": ("clavicle_" + sd, "spine_03", "spine_02"), "steal_r": float(a.get("steal_r", "0.075"))})
             # 다리 관절 경계 정리 — 기본 켬(10-08 되돌림). 끄면 3D 사타구니 면 늘어남은 줄지만(26 → 5.5 배) 2D 조각의 관절 부분이
             # 고무처럼 비틀린 채 잘려, 2D 에서 다리를 벌리면 사타구니 · 무릎 뒤 틈이 더 벌어졌다(틈 픽셀 2563 → 2980, 02 U22).
             # 2D 컷아웃은 인형처럼 딱딱한 다리가 낫다 — 맨몸 · 옷 모두 켬.
@@ -874,7 +1249,7 @@ def main():
         "src_size_raw": [round(x, 3) for x in ssize], "turned_deg": turned,
         "scale": round(s, 4), "scale_x": round(sx, 4), "span_ratio_before": round(span_ratio, 3),
         "fitted_size_m": [round(x, 3) for x in (fhi - flo)],
-        "skeleton_from_base": skel_from_base,
+        "skeleton_from_base": skel_from_base, "limb_fit": limb_fit, "cuff_fit": cuff_fit, "arm_smooth_frozen": arm_frozen,
         "hand_fit": hand_fit, "thumb_fit_deg": thumb_fit, "finger_fit": finger_fit, "forearm_twist": forearm_twist, "hand_reshape": hand_reshape, "hand_heat": hand_heat, "hip_heat": hip_heat, "smooth_iter": smooth_n, "smoothed_vertices": smoothed, "part_fix": part_fix,
         "triangles": tris, "vertices": len(body.data.vertices),
         "unweighted_vertices": unweighted, "bone_groups": len(body.vertex_groups),

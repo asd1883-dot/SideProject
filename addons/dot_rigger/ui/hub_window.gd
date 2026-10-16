@@ -4,8 +4,9 @@ class_name DRHubWindow
 
 ## Dot Rigger 창 — 한 창에 탭 페이지.  프로젝트 > 도구 > Dot Rigger.
 ##
-##   [ Dot Rigger | ① 유닛 | ② 장비 굽기 | ③ 복장 굽기 ]        Ctrl+1 · 2 · 3
-##   (10-16: ① 은 3D 유닛 탭 — 예전 2D 캐릭터 굽기 페이지(main_window.gd)는 사용자 지시로 뺐다)
+##   [ Dot Rigger | ① 유닛 | ② 장비 굽기 | ③ 복장 ]        Ctrl+1 · 2 · 3
+##   (10-16: 3D 노선 — ① 유닛 탭(unit_page.gd)이 예전 2D 캐릭터 굽기(main_window.gd)를, ③ 복장(outfit_page.gd)이 예전 2D 복장 굽기
+##    (outfit_window.gd)를 갈음했다. 사용자 지시: "예전 작업 목록은 남길 필요 없어" · "모든 리소스 탭들의 마이그레이션 및 연동 검증")
 ##   ┌───────────────────────── 고른 페이지 ─────────────────────────┐
 ##
 ## - 페이지는 처음 눌렀을 때 만든다(창이 빨리 뜨고, 안 쓰는 페이지는 비용이 없다). 한 번 만든 페이지는 탭을 바꿔도
@@ -20,7 +21,7 @@ const META_SECTION := "dot_rigger_hub"
 const PAGES := [
 	{"key": "unit", "title": "① 유닛", "tip": "유닛 프리팹(3D) — 몸 · 복장 · 무기 · 세트별 동작 표 · 3D 도트 미리보기 · 새 자식 유닛(상속)"},
 	{"key": "equip", "title": "② 장비 굽기", "tip": "무기 · 헬멧을 퍼펫의 세트마다 맞춰 굽기(그립 · 그리기 순서)"},
-	{"key": "outfit", "title": "③ 복장 굽기", "tip": "옷 갈아입히기 — 뼈대에 붙이기 · 부위 칠하기 · 상의/하의 굽기"},
+	{"key": "outfit", "title": "③ 복장", "tip": "옷(3D) — 뼈대에 붙이기 · 부위 경계 · 칠하기 · 상의/하의 슬롯 · 3D 도트 미리보기(차림 4가지 · 이음매 확대)"},
 ]
 
 var _pages: Dictionary = {}      # key -> DRPage (만든 것만)
@@ -57,7 +58,7 @@ static func _make_page(key: String) -> DRPage:
 		"equip":
 			return DREquipWindow.new()
 		"outfit":
-			return DROutfitWindow.new()
+			return DROutfitPage.new()
 	return null
 
 
@@ -277,7 +278,7 @@ func _init_context() -> void:
 		preset = String(es.get_project_metadata(META_SECTION, "preset", ""))
 		sets = String(es.get_project_metadata(META_SECTION, "sets", ""))
 	if preset == "" or not FileAccess.file_exists(preset):
-		preset = DROutfitWindow._default_preset()
+		preset = DROutfitPage._default_preset()
 	if sets == "" or not FileAccess.file_exists(sets):
 		sets = _sets_for_preset(preset)
 	_ctx = {"preset": preset, "sets": sets}
