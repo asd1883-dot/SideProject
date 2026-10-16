@@ -7,6 +7,7 @@ extends SceneTree
 ##  [4] Ctrl+1 · 2 · 3 으로 탭 바꾸기 · 페이지는 한 번 만들면 그대로(작업 유지)
 ##
 ##   godot --path . --screen 0 --resolution 1500x920 --script res://addons/dot_rigger/tools/hub_smoke_cli.gd
+##   (--headless 로 돌리면 창 없이 논리만 — 그림은 건너뜀)
 ## 필요: game/units/soldier_base.tscn · outfits/uniform_m36/outfit.json · game/motions/rifleman_anims.res. 그림 = res://puppet_test/_hub_*.png
 
 const OUTFIT := "res://outfits/uniform_m36/outfit.json"
@@ -40,6 +41,8 @@ func _wait(cond: Callable, cap: int = 3000) -> void:
 
 
 func _shot(hub: Window, name: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return                       # --headless(창 없이 논리만) — 그림은 창 모드에서만
 	await process_frame
 	await RenderingServer.frame_post_draw
 	hub.get_texture().get_image().save_png("res://puppet_test/%s.png" % name)
@@ -79,7 +82,8 @@ func _run() -> void:
 	if not outfit._loaded:
 		outfit.load_outfit(OUTFIT)
 	await _wait(func(): return outfit._loaded and not outfit._busy and outfit._pv_ch != null)
-	_check(outfit._loaded and outfit._pv_ch != null and outfit._pv_ch.worn("top") != "", "군복 불러옴 · 미리보기 캐릭터가 입음")
+	_check(outfit._loaded and outfit._pv_ch != null and outfit._pv_ch.get_slot_node("top").mesh != null and outfit._pv_ch.get_slot_node("bottom").mesh != null,
+		"군복 불러옴 · 미리보기 캐릭터 상의 · 하의 슬롯에 메시(이 탭이 자른 것)")
 	for i in 30:
 		await process_frame
 	await _shot(hub, "_hub_outfit")

@@ -3,7 +3,7 @@ extends SceneTree
 ## 3D 화면(BattleView3D) 검사 — 창 없이(--headless) 전투를 돌리며 3D 캐릭터 쪽 논리가 도는지 본다(10-16).
 ##   Godot --headless --path <프로젝트> --script res://game/tools/view3d_smoke.gd [-- --seconds=60 --squads=2 --seed=1941]
 ## 보는 것: 병사마다 캐릭터가 붙는가 · 상태에 맞는 동작이 나오는가(멈춘 채인 병사 비율) · 쓰러진 병사가 풀로 돌아가 다시 쓰이는가 ·
-##          무기 그립이 동작마다 바뀌는가 · 복장 보기 4가지(병종 복장 / 상의만 / 하의만 / 내복)가 슬롯을 바꾸는가.
+##          무기(뼈 소켓 · 10-16)의 왼손 IK 비중이 동작마다 바뀌는가(조준 = 붙임 · 장전 · 수류탄 = 놓음) · 복장 보기 4가지(병종 복장 / 상의만 / 하의만 / 내복)가 슬롯을 바꾸는가.
 ## 그림은 안 본다(렌더 없음) — 모양은 창으로 보는 시험장(battle_test.tscn)에서. 마지막 줄이 "VIEW3D SMOKE OK" 면 통과.
 
 const TYPE_PATH := "res://game/units/rifleman.tres"
@@ -51,13 +51,17 @@ func _run() -> void:
 	if not pool.is_empty():
 		var ch := pool[0] as DRCharacter3D
 		var ap := ch.get_animation_player()
-		print("캐릭터  프리팹 %s · 슬롯 %s · 무기 %s · 동작 %d개 · 키 %.2f m(모델 %.3f) · 상의 %s · 하의 %s · 미리 만들기 %d명 %.0f ms" % [
+		var w := ch.get_weapon_node()
+		print("캐릭터  프리팹 %s · 슬롯 %s · 무기 %s(소켓 %s · 왼팔 IK %s) · 동작 %d개 · 키 %.2f m(모델 %.3f) · 상의 %s · 하의 %s · 미리 만들기 %d명 %.0f ms" % [
 			type.prefab.resource_path.get_file(),
 			str(DRCharacter3D.SLOTS.map(func(sl): return ch.get_slot_node(sl) != null and ch.get_slot_node(sl).mesh != null)),
-			str(ch.get_weapon_node() != null), ap.get_animation_list().size(), ch.height_m, ch.model_height(),
+			String(w.name) if w != null else "없음", String(w.get_parent().name) if w != null else "-", str(ch.get_left_arm_ik() != null),
+			ap.get_animation_list().size(), ch.height_m, ch.model_height(),
 			ch.worn("top").get_file(), ch.worn("bottom").get_file(), pool.size(), prewarm_ms])
-		if ch.get_weapon_node() == null:
-			fails.append("무기 안 붙음")
+		if w == null or not (w.get_parent() is BoneAttachment3D):
+			fails.append("무기가 소켓에 안 붙음")
+		elif ch.get_left_arm_ik() == null:
+			fails.append("왼팔 IK 없음(무기 위 왼손 표지)")
 		if ap.get_animation_list().size() < 2:
 			fails.append("동작 묶음 안 들어감(%s)" % (ch.motions.library_path if ch.motions != null else "동작 표 없음"))
 		if ch.worn("top") == "" or ch.worn("bottom") == "":
@@ -71,10 +75,10 @@ func _run() -> void:
 	var frozen := 0                        # 살아 있는데 맞는 동작이 없는 병사 · 프레임
 	var alive_frames := 0
 	var recycled := 0
-	var grip_moves := 0                    # 동작이 바뀌어 무기 그립이 새 동작 것으로 옮겨 간 횟수
+	var ik_moves := 0                      # 동작이 바뀌어 왼손 IK 비중이 새 동작 것으로 옮겨 간 횟수(붙임 ↔ 놓음)
 	var max_entries := 0
 	var last_motion := {}                  # 병사 id -> 동작
-	var last_grip := {}                    # 병사 id -> 마지막 목표 그립
+	var last_ik := {}                      # 병사 id -> 마지막 목표 IK 비중
 	var view_us := 0
 	var steps := int(seconds / DT)
 	for k in steps:
@@ -96,15 +100,16 @@ func _run() -> void:
 			elif String(last_motion.get(e.s.id, "")) != e.motion:
 				last_motion[e.s.id] = e.motion
 				played[e.motion] = int(played.get(e.motion, 0)) + 1
-			if e.ch._grip_t >= 0.0 and last_grip.get(e.s.id, Transform3D.IDENTITY) != e.ch._grip_to:
-				last_grip[e.s.id] = e.ch._grip_to
-				grip_moves += 1
+			if e.ch._grip_t >= 0.0 and float(last_ik.get(e.s.id, -1.0)) != e.ch._ik_to:
+				if last_ik.has(e.s.id):
+					ik_moves += 1
+				last_ik[e.s.id] = e.ch._ik_to
 		for team in 2:
 			if bf.count_fighting(team) == 0:
 				bf.deploy_squad(team, type)
 	var frozen_pct := 100.0 * float(frozen) / maxf(float(alive_frames), 1.0)
-	print("전투  %.0f초 · 화면 병사 최대 %d · 쓰러져 풀로 돌아감 %d · 사살 %s · 멈춘 채 %.1f %% · 무기 그립 옮김 %d번" % [
-		bf.time, max_entries, recycled, str(bf.stats["kills"]), frozen_pct, grip_moves])
+	print("전투  %.0f초 · 화면 병사 최대 %d · 쓰러져 풀로 돌아감 %d · 사살 %s · 멈춘 채 %.1f %% · 왼손 IK 붙임↔놓음 %d번" % [
+		bf.time, max_entries, recycled, str(bf.stats["kills"]), frozen_pct, ik_moves])
 	var names := played.keys()
 	names.sort_custom(func(a, b): return int(played[a]) > int(played[b]))
 	var parts := PackedStringArray()
@@ -120,8 +125,8 @@ func _run() -> void:
 		fails.append("나온 동작이 %d개뿐" % names.size())
 	if recycled == 0:
 		fails.append("쓰러진 병사가 풀로 안 돌아감")
-	if grip_moves == 0:
-		fails.append("무기 그립이 동작 따라 안 바뀜")
+	if ik_moves == 0:
+		fails.append("왼손 IK 비중이 동작 따라 안 바뀜")
 
 	# 3) 복장 보기 — 슬롯마다 입은 복장
 	var probe: DRCharacter3D = null

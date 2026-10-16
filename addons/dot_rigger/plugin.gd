@@ -2,7 +2,7 @@
 extends EditorPlugin
 
 ## Dot Rigger — 프로젝트 > 도구 메뉴에 창 하나를 띄운다.
-## 창(DRHubWindow) 안에 탭 페이지: ① 캐릭터 굽기 · ② 장비 굽기 · ③ 복장 굽기.
+## 창(DRHubWindow) 안에 탭 페이지: ① 유닛 · ② 장비(뼈 소켓) · ③ 복장 — 10-16 셋 다 3D(예전 2D 굽기 페이지는 뺐다).
 ## (10-06 이전에는 기능마다 창이 따로였다 — 여러 창을 껐다 켜는 게 번거로워 한 창의 탭으로 합쳤다)
 ## 3D 노선(10-15): 같은 메뉴의 "3D 동작 내보내기" = 게임 동작 표의 동작을 3D 캐릭터용 AnimationLibrary 로 저장(DRMotionExporter).
 ## 동작 표(DRMotionTable)를 인스펙터에서 열면 상태별 편집 화면(동작 여러 개 · 비중 % · 상하체 합성 — ui/motion_table_editor.gd, 10-16).

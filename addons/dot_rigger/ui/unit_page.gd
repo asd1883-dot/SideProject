@@ -6,7 +6,8 @@ class_name DRUnitPage
 ## 유닛 = 유닛 프리팹(루트가 DRCharacter3D 인 씬). 기본형 군인(game/units/soldier_base.tscn)을 부모로, 다른 유닛은 그것을 상속한 자식 씬 —
 ## 자식은 바꾼 칸만 따로 갖고 나머지는 부모를 따라간다(유니티 프리팹 변형). 이 탭과 인스펙터는 **같은 것**(열린 유닛 씬의 루트)을 고친다.
 ##
-##   왼쪽: 유닛 목록(부모 → 자식 나무) · [+ 자식 유닛] · [씬 열기] · [저장] · 모습 칸(몸 · 상의 · 하의 · 무기 · 동작 표 · 키 — 자식은 "부모 값 / 바꿈" + ↺)
+##   왼쪽: 유닛 목록(부모 → 자식 나무) · [+ 자식 유닛] · [씬 열기] · [저장] · 모습 칸(몸 · 상의 · 하의 · 동작 표 · 키 — 자식은 "부모 값 / 바꿈" + ↺)
+##         · 장비 요약(뼈 소켓 → 무기 · 헬멧 — 고치기는 ② 장비 탭 · 씬 독 · 기즈모. 예전 "무기" 칸(weapon_asset)은 10-16 소켓 방식으로 갈음)
 ##   가운데: 3D 도트 미리보기(게임과 같은 DRDotView3D · 초당 12번) — 세트 · 상태를 고르면 동작 표대로 비중을 뽑아 튼다 · 다시 고르기 · 좌우 · 도트 크기
 ##   오른쪽: 그 유닛의 동작 표(DRMotionTableEditor — 인스펙터와 같은 화면: 세트 → 상태 → 동작 · % · 상하체 합성 · 3D 동작 내보내기)
 ##
@@ -21,7 +22,6 @@ const FIELDS := [
 	["body_model", "몸", "기본 몸(사람 몸 glb). 옷을 안 입힌 슬롯은 이 몸(내복)"],
 	["outfit_top", "상의", "상의 복장(③ 복장 탭이 만든 outfit.json). (내복) = 안 입힘"],
 	["outfit_bottom", "하의", "하의 복장(outfit.json). (내복) = 안 입힘"],
-	["weapon_asset", "무기", "무기(② 장비 탭이 그립을 저장한 asset.json). (맨손) = 안 듦"],
 	["motions", "동작 표", "세트 → 상태 → 동작(비중 % · 상하체 합성). 오른쪽에서 고친다"],
 	["height_m", "키", "모델을 이 키(m)로 맞춘다"],
 ]
@@ -35,7 +35,9 @@ var _parent_vals: Dictionary = {}    # 부모 유닛의 칸 값(자식이면) �
 var _fields: Dictionary = {}         # 칸 -> {ctl, mark, revert}
 var _child_name: LineEdit
 var _status: Label
+var _equip_lbl: Label
 var _sig := ""
+var _xsig := ""                      # 장비 자리(기즈모 · ② 탭) — 바뀌면 미리보기 사본의 자리만 옮긴다
 var _poll := 0.0
 var _active := true
 # 미리보기
@@ -140,6 +142,21 @@ func _build_ui() -> void:
 	left.add_child(grid)
 	for f in FIELDS:
 		_add_field(grid, String(f[0]), String(f[1]), String(f[2]))
+	var el := Label.new()
+	el.text = "장비"
+	el.tooltip_text = "뼈 소켓(BoneAttachment3D)에 꽂은 장비 — 오른손 = 무기(왼손은 무기 위 표지에 IK), 머리 = 헬멧 …"
+	grid.add_child(el)
+	_equip_lbl = Label.new()
+	_equip_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_equip_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_equip_lbl.custom_minimum_size = Vector2(180, 0)
+	_equip_lbl.add_theme_font_size_override("font_size", 12)
+	grid.add_child(_equip_lbl)
+	var eb := Button.new()
+	eb.text = "② 탭"
+	eb.tooltip_text = "② 장비 탭에서 이 유닛의 소켓 · 장비를 고친다(같은 유닛을 고른 채로 연다)"
+	eb.pressed.connect(_on_open_equip)
+	grid.add_child(eb)
 	var own := Button.new()
 	own.text = "이 유닛만의 동작 표로 복사"
 	own.tooltip_text = "지금 동작 표를 이 유닛 이름으로 복사해(game/units/<유닛>_motions.tres · 3D 동작 묶음도 따로) 이 유닛에만 쓴다 — 자식 유닛이 동작을 따로 갖고 싶을 때"
@@ -544,12 +561,50 @@ func _root_sig() -> String:
 	if _root == null or not is_instance_valid(_root):
 		return ""
 	var m: Resource = _root.motions
-	return "%s|%s|%s|%s|%s|%.3f" % [_root.body_model, _root.outfit_top, _root.outfit_bottom, _root.weapon_asset,
-		str(m.get_instance_id()) if m != null else "-", _root.height_m]
+	return "%s|%s|%s|%s|%.3f|%s" % [_root.body_model, _root.outfit_top, _root.outfit_bottom,
+		str(m.get_instance_id()) if m != null else "-", _root.height_m, _equip_walk(false)]
+
+
+## 유닛의 소켓 · 장비 노드(루트가 가진 것 — 안에서 조립한 몸은 주인이 없어 빠진다)를 훑어
+## xform = false → 구조(경로 · 뼈 · 모델 씬 · 보이기 — 바뀌면 다시 조립), true → 자리 · 왼손 비중(바뀌면 사본 자리만)
+func _equip_walk(xform: bool) -> String:
+	var parts := PackedStringArray()
+	for s in DRCharacter3D.find_sockets(_root):
+		if s.owner != _root:
+			continue
+		var stack: Array[Node] = [s]
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			if n.owner != _root:
+				continue
+			if xform:
+				parts.append(str((n as Node3D).transform) if n is Node3D else "")
+				if n is DRHandTarget3D:
+					parts.append(str((n as DRHandTarget3D).motion_weights) + str((n as DRHandTarget3D).weight))
+			else:
+				parts.append("%s|%s|%s|%s" % [_root.get_path_to(n), (n as BoneAttachment3D).bone_name if n is BoneAttachment3D else "",
+					n.scene_file_path, str((n as Node3D).visible) if n is Node3D else ""])
+			stack.append_array(n.get_children())
+	return ";".join(parts)
+
+
+## 장비 요약 한 줄씩 — "오른손(RightHand) → kar98k · 왼손 표지". 숨긴 장비(자식 유닛이 부모 것을 가린 것)는 뺀다
+func _equip_summary() -> String:
+	var lines := PackedStringArray()
+	for s in DRCharacter3D.find_sockets(_root):
+		if s.owner != _root:
+			continue
+		var items := PackedStringArray()
+		for c in s.get_children():
+			if c is Node3D and (c as Node3D).visible:
+				items.append(String(c.name) + (" · 왼손 표지" if DRCharacter3D.find_support(c) != null else ""))
+		lines.append("%s(%s) → %s" % [s.name, s.bone_name, ", ".join(items) if not items.is_empty() else "(비어 있음)"])
+	return "\n".join(lines) if not lines.is_empty() else "(없음 — 맨손)"
 
 
 func _refresh_all() -> void:
 	_sig = _root_sig()
+	_xsig = _equip_walk(true)
 	_fill_fields()
 	_motion_ed.set_table(_root.motions)
 	_rebuild_preview()
@@ -559,7 +614,7 @@ func _fill_fields() -> void:
 	_fill_option("body_model", _files("res://source3d/characters", "glb"), "")
 	_fill_option("outfit_top", _named_files("res://outfits", "outfit.json"), "(내복)")
 	_fill_option("outfit_bottom", _named_files("res://outfits", "outfit.json"), "(내복)")
-	_fill_option("weapon_asset", _named_files("res://source3d/weapons", "asset.json"), "(맨손)")
+	_equip_lbl.text = _equip_summary()
 	_fill_tables()
 	var sp := _fields["height_m"]["ctl"] as SpinBox
 	sp.set_value_no_signal(_root.height_m)
@@ -654,7 +709,7 @@ static func _files(dir: String, ext: String) -> PackedStringArray:
 	return out
 
 
-## 폴더 아래 이름이 file_name 인 파일(outfits/*/outfit.json · source3d/weapons/*/asset.json)
+## 폴더 아래 이름이 file_name 인 파일(outfits/*/outfit.json)
 static func _named_files(dir: String, file_name: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	var d := DirAccess.open(dir)
@@ -735,6 +790,17 @@ func _on_open_scene() -> void:
 		EditorInterface.open_scene_from_path(_sel_path)
 
 
+## ② 장비 탭을 같은 유닛을 고른 채로 연다(탭 창 안일 때)
+func _on_open_equip() -> void:
+	var hub := get_window() as DRHubWindow
+	if hub == null:
+		return
+	hub.open_page("equip")
+	var ep := hub.page("equip") as DREquipPage
+	if ep != null and _sel_path != "" and ep._sel_path != _sel_path:
+		ep.select_unit(_sel_path)
+
+
 func _on_save() -> void:
 	if _root == null:
 		return
@@ -784,24 +850,26 @@ func _on_exported() -> void:
 
 # ───────────── 미리보기 ─────────────
 
-## 루트의 지금 칸 값으로(저장 안 한 고침까지) 미리보기 캐릭터를 새로 조립
+## 유닛을 통째로 묶은 사본(저장 안 한 고침까지 — 칸 · 소켓 · 장비 · 왼손 표지)으로 미리보기 캐릭터를 새로 조립. 편집 중인 씬은 안 건드린다
 func _rebuild_preview() -> void:
 	if _prev_ch != null and is_instance_valid(_prev_ch):
 		_prev_ch.queue_free()
 	_prev_ch = null
 	if _root == null:
 		return
-	var ch := DRCharacter3D.new()
-	ch.auto_build = false
-	ch.body_model = _root.body_model
-	ch.outfit_top = _root.outfit_top
-	ch.outfit_bottom = _root.outfit_bottom
-	ch.weapon_asset = _root.weapon_asset
-	ch.motions = _root.motions
-	ch.height_m = _root.height_m
-	_dots.world.add_child(ch)
-	if not ch.build():
+	var ps := PackedScene.new()
+	if ps.pack(_root) != OK:
+		_now.text = "⚠ 유닛을 묶지 못함(pack)"
+		return
+	var ch := ps.instantiate() as DRCharacter3D
+	if ch == null:
+		return
+	ch.preview_playing = false
+	ch.preview_motion = ""
+	_dots.world.add_child(ch)                      # 여기서 조립된다(auto_build)
+	if ch.get_skeleton() == null:
 		_now.text = "⚠ 조립 실패(몸 모델을 확인)"
+		ch.queue_free()
 		return
 	var ap := ch.get_animation_player()
 	if ap != null:
@@ -895,6 +963,33 @@ func _process(delta: float) -> void:
 		var sig := _root_sig()
 		if sig != _sig and _root != null:
 			_refresh_all()
+		elif _root != null:
+			var xs := _equip_walk(true)
+			if xs != _xsig:
+				_xsig = xs
+				_sync_equip()
+
+
+## 장비 자리 · 왼손 비중만 바뀌었다(기즈모 · ② 탭) — 다시 조립하지 않고 미리보기 사본의 같은 노드만 맞춘다
+func _sync_equip() -> void:
+	if _prev_ch == null or not is_instance_valid(_prev_ch):
+		return
+	for s in DRCharacter3D.find_sockets(_root):
+		var stack: Array[Node] = [s]
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			if n.owner == _root:
+				var pn := _prev_ch.get_node_or_null(_root.get_path_to(n))
+				if pn is Node3D and n is Node3D:
+					(pn as Node3D).transform = (n as Node3D).transform
+				if pn is DRHandTarget3D and n is DRHandTarget3D:
+					(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
+					(pn as DRHandTarget3D).weight = (n as DRHandTarget3D).weight
+			stack.append_array(n.get_children())
+	_prev_ch.sync_support()
+	var mo := _prev_ch.current_motion()
+	if mo != "":
+		_prev_ch.play_motion(mo, 0.0)                  # 왼손 비중을 지금 동작 것으로 다시
 
 
 func _draw_ground() -> void:

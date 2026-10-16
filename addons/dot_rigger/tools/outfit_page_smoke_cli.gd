@@ -240,11 +240,15 @@ func _run() -> void:
 	_check(_sum(rn.cap_tris) == 0 and rn.tri_counts["top"] < top_b, "뚜껑 끔: 뚜껑 삼각형 0(상의 %d)" % int(rn.tri_counts["top"]))
 	page._caps_cb.button_pressed = true
 	_check(_sum(page.split_results()["outfit"].cap_tris) > 0, "뚜껑 켬: 뚜껑 삼각형 %d" % _sum(page.split_results()["outfit"].cap_tris))
-	if FileAccess.file_exists(DROutfitPage.WEAPON_ASSET):
+	if load(DROutfitPage.WEAPON_UNIT) != null:     # 기본형 군인 프리팹(무기 파일이 없는 새 클론이면 건너뜀)
 		page._weapon_cb.button_pressed = true
-		_check(ch.get_weapon_node() != null, "무기 들기(kar98k)")
+		var w := ch.get_weapon_node()
+		_check(w != null and w.get_parent() is BoneAttachment3D and ch.get_support_marker() != null and ch.get_left_arm_ik() != null,
+			"무기 들기 = 기본형 군인의 소켓 장비(%s · 왼손 표지 · 왼팔 IK)" % (String(w.name) if w != null else "-"))
+		var rep := ch.support_report()
+		_check(not rep.is_empty() and float(rep["ik"]) < 0.01, "왼손이 표지에 붙음(%.2f cm, 동작 그대로면 %.2f cm)" % [float(rep.get("ik", -1.0)) * 100.0, float(rep.get("raw", -1.0)) * 100.0])
 		page._weapon_cb.button_pressed = false
-		_check(ch.get_weapon_node() == null, "무기 내림")
+		_check(ch.get_weapon_node() == null and ch.get_left_arm_ik() == null and ch.get_sockets().is_empty(), "무기 내림(소켓 · IK 같이 빠짐)")
 
 	_finish(page)
 

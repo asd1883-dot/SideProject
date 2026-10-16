@@ -2,17 +2,13 @@
 extends Control
 class_name DRPage
 
-## Dot Rigger 창(DRHubWindow)의 페이지 하나 — 캐릭터 굽기 · 장비 굽기 · 복장 굽기가 이것을 상속한다.
+## Dot Rigger 창(DRHubWindow)의 페이지 하나 — ① 유닛 · ② 장비 · ③ 복장(10-16 3D 노선)이 이것을 상속한다.
 ## 예전에는 기능마다 창(Window)이 따로였다. 창을 여러 개 껐다 켜는 게 번거로워(10-06 사용자) 한 창의 탭 페이지로 바꿨다.
 ## 페이지는 그냥 Control 이라 어디에든 넣을 수 있다 — 검사 도구는 창 없이 root 에 바로 넣어 돌린다(test_layout).
 
-## 공통 설정(프리셋 · 세트 목록)을 이 페이지가 바꿨을 때 — 창이 받아 다른 페이지에 돌린다.
-## ctx 에는 바뀐 것만: {"preset": 경로} · {"sets": 경로} · {"rebaked": true}(세트를 다시 구움)
-signal context_changed(ctx: Dictionary)
-
 ## 탭에 보이는 이름
 var page_title := ""
-## 탭 창(DRHubWindow) 안에 있나 — 그러면 프리셋 · 세트 목록 칸은 창 위의 `공통 설정` 줄이 대신한다
+## 탭 창(DRHubWindow) 안에 있나
 var hosted := false
 var _paused_viewports: Dictionary = {}   # SubViewport -> 멈추기 전 갱신 방식
 
@@ -43,12 +39,6 @@ func set_page_active(on: bool) -> void:
 		if vp != null and not _paused_viewports.has(vp) and vp.render_target_update_mode != SubViewport.UPDATE_DISABLED:
 			_paused_viewports[vp] = vp.render_target_update_mode
 			vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
-
-
-## 공통 설정이 정해지거나 바뀌면 창이 부른다(페이지를 만든 직후에도 한 번). ctx = {preset, sets} 전부,
-## changed = 이번에 바뀐 키("preset" · "sets" · "rebaked"). 페이지마다 자기 칸을 맞추고 필요하면 다시 불러온다.
-func apply_context(_ctx: Dictionary, _changed: PackedStringArray) -> void:
-	pass
 
 
 ## 미리보기 배경색(창 위 공통 설정 줄에서 고름, 10-08). c.a == 0 = 기본(페이지마다 원래 색). 페이지가 자기 미리보기에 적용한다.

@@ -7,11 +7,12 @@ class_name DRCharacter3D
 ##
 ## 노드 구조(setup 뒤):
 ##   DRCharacter3D                        ← 게임이 위치 · 방향(rotation.y) · 크기(scale)를 준다. 모델은 +Z 를 본다
-##     └ <몸 glb 인스턴스>(human_base)       — 구조 그대로: AnimationPlayer(root_node "..") 의 트랙 `%GeneralSkeleton:<뼈>` 가 그대로 풀린다
-##         ├ Armature/GeneralSkeleton
-##         │    ├ SlotTop · SlotBottom · SlotBase (MeshInstance3D — 슬롯 메시. 원래 통메시 Body 는 뺐다)
-##         │    └ WeaponMount (BoneAttachment3D, 무기를 들 때만) └ Weapon (MeshInstance3D)
-##         └ AnimationPlayer
+##     ├ <몸 glb 인스턴스>(human_base)       — 구조 그대로: AnimationPlayer(root_node "..") 의 트랙 `%GeneralSkeleton:<뼈>` 가 그대로 풀린다
+##     │   ├ Armature/GeneralSkeleton
+##     │   │    ├ SlotTop · SlotBottom · SlotBase (MeshInstance3D — 슬롯 메시. 원래 통메시 Body 는 뺐다)
+##     │   │    └ DR_SocketRef · DR_LeftElbow · DR_LeftArmIK · DR_LeftHandRot (왼손 표지가 있을 때만 — 왼팔 IK 수정자)
+##     │   └ AnimationPlayer
+##     └ 오른손 (BoneAttachment3D = 소켓, 씬에 든 노드 — 10-16)  └ kar98k (장비 = 모델 씬 인스턴스)  └ 왼손 (DRHandTarget3D 표지)
 ##
 ## 슬롯: top(몸통 · 윗팔 · 아래팔) · bottom(골반 · 허벅지 · 종아리 · 발) · base(머리 · 손 — 늘 기본 몸).
 ## 기본 몸 = 세 덩어리(내복 차림). 복장을 입으면 그 슬롯 노드의 메시를 복장 것으로 바꿔 끼운다 — "기본 몸 메시를 숨기고 복장 메시를 보인다"
@@ -25,9 +26,8 @@ class_name DRCharacter3D
 ##   ch.setup()                             # 기본 = 사람 몸(human_base)
 ##   ch.set_motions(lib)                    # A 갈래의 AnimationLibrary(트랙 %GeneralSkeleton:<뼈>)
 ##   ch.wear("res://outfits/uniform_m36/outfit.json")            # 군복 전체 · ["top"] 이면 상의만
-##   ch.attach_weapon("res://source3d/weapons/kar98k/asset.json")
-##   ch.get_animation_player().play("Rifle_Idle")
-##   DRGripFit.apply_anim(ch, "Rifle_Idle")  # 저장 그립은 지금 소총 동작에 안 맞는다 — 동작에 맞춘 그립(캐시)으로 바꿔 끼움
+##   ch.play_motion("Rifle_Idle")           # 무기 = 유닛 프리팹의 소켓 노드(② 장비 탭) — 조립 때 저절로 붙고 왼손은 표지에 IK
+##   (옛 방식: ch.attach_weapon(asset.json) + DRGripFit — 소켓 무기가 없을 때만, weapon_asset 칸)
 ##   ch.rotation.y = atan2(dir.x, dir.z)    # dir 쪽을 보게(+X = PI/2)
 ##   ch.scale = Vector3.ONE * (1.75 / ch.model_height())
 ##   ch.set_tint(Color(0.45, 0.45, 0.45)) ; ch.set_fade(0.3)    # 죽은 병사 어둡게 · 도트식으로 사라지기
@@ -76,7 +76,7 @@ static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
 	set(v):
 		outfit_bottom = v
 		_changed()
-## 무기(장비 asset.json — ② 장비 탭의 그립 포함). 비우면 맨손
+## 옛 방식 무기(asset.json 그립 + DRGripFit). 소켓(오른손 BoneAttachment3D)에 무기가 있으면 쓰지 않는다 — 무기는 ② 장비 탭에서 소켓에 넣는다(10-16)
 @export_file("*.json") var weapon_asset := "":
 	set(v):
 		weapon_asset = v
@@ -131,6 +131,26 @@ var _mount: BoneAttachment3D = null
 var _weapon_mi: MeshInstance3D = null
 var _weapon: Dictionary = {}
 var _grip := Transform3D.IDENTITY   # 손 뼈 로컬 무기 변환(배율 전) — DREquipBaker.compose_grip 과 같은 뜻
+# 소켓 · 장비(10-16) — 아래 "소켓 · 장비" 절
+var _sockets: Array[BoneAttachment3D] = []
+var _equip_mis: Array[MeshInstance3D] = []     # 소켓 장비 메시 중 도트 재질을 입힌 것(tint · fade · 그림자를 같이)
+var _sock_weapon: Node3D = null                # 오른손 소켓의 보이는 장비
+var _support: Node3D = null                    # 왼손 표지(DRHandTarget3D 또는 이름 "왼손")
+var _support_sock: BoneAttachment3D = null     # 표지가 든 소켓
+var _ik_ref: ModifierBoneTarget3D = null       # 뼈대 아래(주인 없음): 수정자 차례 안에서 소켓 뼈를 따라감
+var _ik_wrist: Node3D = null                   # _ik_ref 아래: 왼 손목 목표(원점) · 손 회전(기저)
+var _ik_pole: ModifierBoneTarget3D = null      # 극 = 동작의 왼 팔꿈치(IK 보다 앞 차례라 동작 자세) — 팔꿈치가 동작 쪽으로 굽게
+var _ik: TwoBoneIK3D = null
+var _ik_rot: CopyTransformModifier3D = null
+var _ik_bones := PackedInt32Array()            # [위팔, 아래팔, 손, 소켓 뼈]
+var _ik_rel := Transform3D.IDENTITY            # 소켓 → 표지(배율 뺌)
+var _palm_l := Vector3.ZERO                    # 왼손 뼈 로컬 손바닥 점(뼈 머리 · 꼬리 가운데 — DRGripFit 과 같은 뜻)
+var _ik_w := 0.0
+var _ik_from := 0.0
+var _ik_to := 0.0
+var _equip_sig := ""                           # 편집 중인 씬에서 소켓 구조가 바뀌었나(에디터만)
+var _saved_skel_paths := {}                    # 저장하는 동안 비운 소켓의 뼈대 길(소켓 -> 길)
+var _equip_poll := 0.0
 
 
 # ---------------------------------------------------------------- 만들기
@@ -138,13 +158,40 @@ var _grip := Transform3D.IDENTITY   # 손 뼈 로컬 무기 변환(배율 전) �
 func _ready() -> void:
 	if auto_build and _model == null:
 		build()
-	set_process(Engine.is_editor_hint() and preview_playing)
+	_update_processing()
 
 
-## 에디터 미리보기 재생(preview_playing) — 게임에서는 화면(BattleView3D)이 step_motion 으로 직접 돌린다
+## 에디터 미리보기 재생(preview_playing) — 게임에서는 화면(BattleView3D)이 step_motion 으로 직접 돌린다.
+## 편집 중인 씬이면 소켓 장비 · 왼손 표지를 기즈모로 옮길 때 왼손 IK 가 바로 따라가게 한다(10-16)
 func _process(delta: float) -> void:
-	if Engine.is_editor_hint() and preview_playing and _ap != null:
+	if not Engine.is_editor_hint():
+		return
+	if preview_playing and _ap != null:
 		step_motion(delta)
+	if is_part_of_edited_scene():
+		_editor_follow(delta)
+
+
+## 에디터에서 씬을 저장할 때 — 소켓이 가리키는 뼈대는 안에서 조립한(저장 안 되는) 노드라 그 길을 비웠다가 저장 뒤 그대로 되돌린다
+## (안 그러면 씬 파일에 external_skeleton = "../human_base/…" 같은 줄이 저장할 때마다 남는다. 불러오면 조립 뒤 어차피 다시 잇는다).
+## 되돌릴 때는 길만 — 묶음(뼈대 신호 연결)은 그대로라 다시 묶으면 "이미 연결됨" 오류(10-16)
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_EDITOR_PRE_SAVE:
+		_saved_skel_paths.clear()
+		for s in _sockets:
+			if is_instance_valid(s) and not s.external_skeleton.is_empty():
+				_saved_skel_paths[s] = s.external_skeleton
+				s.external_skeleton = NodePath()
+	elif what == NOTIFICATION_EDITOR_POST_SAVE:
+		for s in _saved_skel_paths.keys():
+			if is_instance_valid(s):
+				(s as BoneAttachment3D).external_skeleton = _saved_skel_paths[s]
+		_saved_skel_paths.clear()
+
+
+## _process 를 켤지 — 에디터에서 미리보기를 재생하거나 편집 중인 씬일 때만(게임 · 미리보기 사본은 끈다)
+func _update_processing() -> void:
+	set_process(Engine.is_editor_hint() and (preview_playing or (is_inside_tree() and is_part_of_edited_scene())))
 
 
 ## 위 "유닛 모습" 칸대로 조립한다 — 몸 → 키 → 상의 · 하의 → 동작 묶음 → 무기. 다시 부르면 처음부터(칸을 바꿨을 때)
@@ -163,8 +210,9 @@ func build() -> bool:
 		set_motions(load(motions.library_path) as AnimationLibrary)
 	if Engine.is_editor_hint() and _ap != null:
 		_ap.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL   # 에디터에서는 _process 가 직접 돌린다
-	if weapon_asset != "":
-		attach_weapon(weapon_asset)
+	refresh_equipment()
+	if weapon_asset != "" and _sock_weapon == null:
+		attach_weapon(weapon_asset)        # 옛 방식(asset.json 그립 + DRGripFit) — 소켓 무기가 없을 때만
 	_built = true
 	_apply_preview()
 	built.emit()
@@ -189,9 +237,9 @@ func _apply_height() -> void:
 ## 에디터 미리보기 자세(preview_motion) — 그 동작의 30 % 자세(재생 켜면 이어서 돈다)
 func _apply_preview() -> void:
 	if not Engine.is_editor_hint() or _ap == null or not _built:
-		set_process(false)
+		_update_processing()
 		return
-	set_process(preview_playing)
+	_update_processing()
 	if preview_motion == "" or not _ap.has_animation(preview_motion):
 		return
 	DRGripFit.fit_anim(self, preview_motion)       # 캐시를 먼저(처음 계산이 재생 상태를 건드리므로)
@@ -217,8 +265,10 @@ func dress(top_on: bool, bottom_on: bool) -> void:
 
 # ---------------------------------------------------------------- 동작 재생(무기 그립 포함)
 
-## 동작을 튼다(섞는 시간 blend 초). 무기를 들었으면 그 동작에 맞춘 그립(DRGripFit — 동작마다 두 손에 다시 맞춘 것, 캐시)으로
-## 같은 시간 동안 옮긴다(동작이 바뀔 때 총이 손에서 튀지 않게). 그립 캐시가 없으면 처음 한 번 계산(precompute_grips 로 미리 해 둘 것)
+## 동작을 튼다(섞는 시간 blend 초).
+## 소켓 무기(정석, 10-16): 무기 자리는 소켓 기준으로 고정이고, 그 동작의 왼손 IK 비중(표지의 동작별 비중)으로 같은 시간 동안 옮긴다 —
+##   `_grip_t` 가 섞기 시간, `_grip_from` · `_grip_to` 는 무기의 소켓 기준 자리(동작과 상관없이 같다).
+## 옛 무기(weapon_asset): 그 동작에 맞춘 그립(DRGripFit — 동작마다 두 손에 다시 맞춘 것, 캐시)으로 같은 시간 동안 옮긴다.
 func play_motion(motion: String, blend: float = 0.1) -> void:
 	if _ap == null or not _ap.has_animation(motion):
 		return
@@ -227,6 +277,19 @@ func play_motion(motion: String, blend: float = 0.1) -> void:
 	if first:
 		_ap.advance(0.0)                   # 처음 자세를 바로 — 안 그러면 다음 갱신까지 레스트(T자) 자세로 보인다
 	_motion = motion
+	if _sock_weapon != null:
+		var w := _support_weight(motion)
+		if first or blend <= 0.0:
+			_set_ik_weight(w)
+			_grip_t = -1.0
+		else:
+			_ik_from = _ik_w
+			_ik_to = w
+			_grip_from = _sock_weapon.transform
+			_grip_to = _sock_weapon.transform
+			_grip_blend = blend
+			_grip_t = 0.0
+		return
 	if _weapon_mi == null:
 		return
 	var g := DRGripFit.fit_anim(self, motion)
@@ -252,14 +315,17 @@ func step_motion(dt: float) -> bool:
 	if _grip_t >= 0.0:
 		_grip_t += dt
 		var k := clampf(_grip_t / maxf(_grip_blend, 0.001), 0.0, 1.0)
-		set_weapon_grip(_grip_from.interpolate_with(_grip_to, k))
+		if _weapon_mi != null:
+			set_weapon_grip(_grip_from.interpolate_with(_grip_to, k))
+		if _ik != null:
+			_set_ik_weight(lerpf(_ik_from, _ik_to, k))
 		if k >= 1.0:
 			_grip_t = -1.0
 	return wrapped
 
 
-## 동작마다 무기 그립을 미리 계산(로딩 때). DRGripFit 캐시라 같은 몸 · 무기 · 동작 묶음이면 병사 수와 상관없이 한 번.
-## 처음 계산은 자세를 잠깐 바꿨다 되돌리므로 재생 중이 아닐 때 부른다
+## 동작마다 무기 그립을 미리 계산(로딩 때) — 옛 무기(weapon_asset)만. DRGripFit 캐시라 같은 몸 · 무기 · 동작 묶음이면 병사 수와 상관없이 한 번.
+## 소켓 무기는 미리 계산할 것이 없다(자리 고정 + 왼손은 IK 가 갱신 때마다 — 뼈대 수정자). 처음 계산은 자세를 잠깐 바꿨다 되돌리므로 재생 중이 아닐 때 부른다
 func precompute_grips() -> void:
 	if _weapon_mi == null or _ap == null:
 		return
@@ -498,6 +564,9 @@ func set_fade(f: float) -> void:
 		mi.set_instance_shader_parameter("fade", _fade)
 	if _model != null:
 		_model.visible = _fade > 0.0
+	for s in _sockets:                     # 소켓 장비(무기 · 헬멧)도 같이 — 몸 모델 밖에 있다
+		if is_instance_valid(s):
+			s.visible = _fade > 0.0
 
 
 func get_fade() -> float:
@@ -530,6 +599,9 @@ func _geometry() -> Array[MeshInstance3D]:
 			out.append(mi)
 	if _weapon_mi != null and is_instance_valid(_weapon_mi):
 		out.append(_weapon_mi)
+	for mi in _equip_mis:                  # 소켓 장비 중 도트 재질을 입힌 메시
+		if is_instance_valid(mi):
+			out.append(mi)
 	return out
 
 
@@ -650,8 +722,9 @@ static func _read_json(path: String) -> Dictionary:
 	return out
 
 
-# ---------------------------------------------------------------- 무기
+# ---------------------------------------------------------------- 무기(옛 방식 — weapon_asset)
 
+## (옛 방식 — 10-16 부터 무기는 소켓 노드. 소켓 무기가 없을 때 weapon_asset 칸으로만 쓴다)
 ## 무기를 든다 — asset.json 의 "equip"(장비 굽기 창이 저장한 그립)대로 2D 장비 굽기와 **같은 자리**:
 ## 붙일 파트(R_Hand)의 맨 위 뼈에 BoneAttachment3D, 그 아래 무기 = compose_grip(set_name) × weapon_scale(DREquipBaker.place_weapon 과 같은 식).
 ## set_name = 2D 세트 이름(그 세트의 조정 set_adjust 까지 더함, "" = 공통 조정만). hidden 노드(탄 클립 등)는 뺀다.
@@ -707,11 +780,17 @@ func get_weapon_grip() -> Transform3D:
 	return _grip
 
 
-func get_weapon_node() -> MeshInstance3D:
+## 든 무기 — 오른손 소켓의 장비(정석, 10-16). 없으면 옛 방식(weapon_asset)의 메시. 안 들었으면 null
+func get_weapon_node() -> Node3D:
+	if _sock_weapon != null and is_instance_valid(_sock_weapon):
+		return _sock_weapon
 	return _weapon_mi
 
 
+## 무기가 붙은 BoneAttachment3D — 소켓(정석) 또는 옛 방식의 WeaponMount
 func get_weapon_mount() -> BoneAttachment3D:
+	if _sock_weapon != null and is_instance_valid(_sock_weapon):
+		return _sock_weapon.get_parent() as BoneAttachment3D
 	return _mount
 
 
@@ -794,3 +873,322 @@ static func load_weapon_entry(asset_json: String) -> Dictionary:
 	}
 	_weapons[asset_json] = w
 	return w
+
+
+# ---------------------------------------------------------------- 소켓 · 장비(10-16, 3D 게임 정석)
+## 사용자(10-16): "2번 탭은 장비 3D 모델 하이어라키에 접근해 맞추는 방식, 즉 3D 게임 방식의 정석으로. 나중에 헬멧도 모델링 head 에 꽂으면 되고."
+## 소켓 = 이 노드 아래(몸 모델 밖)의 BoneAttachment3D — 씬에 실제로 든 노드라 씬 독 · 인스펙터에 보이고, 자식 프리팹(상속 씬)이
+##   소켓을 더하거나 장비를 바꿀 수 있다(상속 노드는 지울 수 없어 부모 장비는 숨기고 새 장비를 넣는다 — 게임에서는 숨긴 장비를 지운다).
+## 몸은 안에서(주인 없는 노드로) 조립하므로 조립할 때마다 소켓을 지금 뼈대에 다시 잇는다(use_external_skeleton + external_skeleton).
+## 장비 = 소켓의 보이는 자식(모델 씬 인스턴스 — 무기 · 헬멧). 자리 · 회전은 소켓 기준으로 고정(에디터 기즈모 · ② 장비 탭 숫자).
+## 왼손 = 장비 아래 표지(DRHandTarget3D 또는 이름 "왼손")에 왼팔 두 마디 IK. 내장 수정자만 쓴다(병사가 많아도 가볍게 — 10-16 실측
+## 갱신 한 번에 잴 수 없을 만큼 작음):
+##   DR_SocketRef(ModifierBoneTarget3D — 소켓 뼈를 수정자 차례 안에서 따라감. 소켓 노드는 갱신 끝에 옮겨져 목표로 쓰면 한 박자 늦다)
+##     └ DR_LeftWrist(손목 목표 = 표지 − 손바닥 거리, 기저 = 표지 회전)
+##   DR_LeftElbow(ModifierBoneTarget3D — 동작의 왼 팔꿈치 = 극. TwoBoneIK3D 는 극이 없으면 풀지 않는다 — 10-16 실측)
+##   DR_LeftArmIK(TwoBoneIK3D 위팔 → 아래팔 → 손) · DR_LeftHandRot(CopyTransformModifier3D — 손 회전 = 표지 회전)
+## 뼈대 수정자는 게임 · 미리보기 사본에서 "자세가 바뀔 때만"(MANUAL — step_motion 초당 12번) 돈다. 기본(IDLE)이면 멈춘 병사도
+## 매 프레임 돈다(10-16 실측). 편집 중인 씬만 IDLE(기즈모로 표지를 끌 때 팔이 바로 따라오게).
+
+const SUPPORT_NAME := "왼손"
+const WEAPON_BONE := "RightHand"
+const LEFT_ARM := ["LeftUpperArm", "LeftLowerArm", "LeftHand"]
+
+
+## 소켓 · 장비 · 왼손 표지를 다시 찾아 지금 몸에 잇는다 — 조립 때 저절로, ② 장비 탭이 노드를 바꾼 뒤, 편집 중인 씬에서 구조가 바뀌면.
+## 몸이 없으면(조립 전) 아무것도 안 한다
+func refresh_equipment() -> void:
+	_free_ik()
+	_sockets.clear()
+	_equip_mis.clear()
+	_sock_weapon = null
+	_support = null
+	_support_sock = null
+	if _skel == null or not is_instance_valid(_skel):
+		return
+	var edited := is_inside_tree() and is_part_of_edited_scene()
+	for s in find_sockets(self, _model):
+		if not _bind_socket(s):
+			continue
+		_sockets.append(s)
+		for c in s.get_children():
+			var e := c as Node3D
+			if e == null:
+				continue
+			if not e.visible:
+				if not Engine.is_editor_hint():
+					e.queue_free()             # 게임: 자식 프리팹이 숨긴 부모 장비 — 병사마다 남기지 않는다
+				continue
+			_paint_equipment(e, edited)
+			if _sock_weapon == null and s.bone_name == WEAPON_BONE:
+				_sock_weapon = e
+			if _support == null:
+				_support = find_support(e)
+				_support_sock = s if _support != null else null
+	if _support != null:
+		_make_ik(edited)
+	_set_ik_weight(_support_weight(_motion))
+	_equip_sig = _socket_sig()
+
+
+## 이 노드 아래(skip — 몸 모델 — 빼고)의 소켓(BoneAttachment3D)을 씬 순서대로. 소켓 안으로는 더 내려가지 않는다
+static func find_sockets(root: Node, skip: Node = null) -> Array[BoneAttachment3D]:
+	var out: Array[BoneAttachment3D] = []
+	_collect_sockets(root, skip, out)
+	return out
+
+
+static func _collect_sockets(n: Node, skip: Node, out: Array[BoneAttachment3D]) -> void:
+	for c in n.get_children():
+		if c == skip:
+			continue
+		if c is BoneAttachment3D:
+			out.append(c as BoneAttachment3D)
+		else:
+			_collect_sockets(c, skip, out)
+
+
+## 장비 아래 왼손 표지 — DRHandTarget3D 가 먼저, 없으면 이름이 "왼손" 인 Node3D(모델 씬 속에 들어 있어도 된다)
+static func find_support(e: Node) -> Node3D:
+	var by_name: Node3D = null
+	var stack: Array[Node] = [e]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is DRHandTarget3D:
+			return n as Node3D
+		if by_name == null and n is Node3D and String(n.name) == SUPPORT_NAME:
+			by_name = n as Node3D
+		stack.append_array(n.get_children())
+	return by_name
+
+
+## 소켓을 지금 뼈대에 잇는다. 몸을 다시 조립했으면 옛 뼈대는 지워졌으므로 길을 비웠다가(옛 연결 표시를 풀고) 새 뼈대로 묶는다 —
+## 길만 바꾸면 BoneAttachment3D 가 새 뼈대에서 옛 연결을 끊으려다 오류를 낸다
+func _bind_socket(s: BoneAttachment3D) -> bool:
+	var bi := _skel.find_bone(s.bone_name) if s.bone_name != "" else -1
+	if bi < 0:
+		push_warning("[DRCharacter3D] 소켓 %s 의 뼈 '%s' 가 몸에 없습니다" % [s.name, s.bone_name])
+		return false
+	if s.use_external_skeleton and s.get_skeleton() == _skel:
+		# 길이 벌써 이 뼈대 — 묶인 채(다시 잇기)일 수도, 길만 맞고 안 묶였을 수도 있다: 조립된 씬을 pack 한 사본(① ② 미리보기) ·
+		# 그 길이 저장된 씬은 몸을 조립하기 전에 트리에 들어가 못 묶인다(10-16 — 그대로 두면 소켓이 뼈를 안 따라가 3 cm 어긋남).
+		# 뼈 이름을 다시 넣으면 묶였으면 풀고 다시 묶는다
+		s.bone_name = s.bone_name
+		return true
+	s.external_skeleton = NodePath()
+	s.use_external_skeleton = true
+	s.external_skeleton = s.get_path_to(_skel)
+	s.bone_name = s.bone_name                # 새 뼈대에서 뼈 번호를 다시 찾고 묶는다(몸 모델이 바뀌어도)
+	return true
+
+
+## 장비 메시에 도트 재질(char_material — 병사끼리 공유) · tint · fade · 그림자. 숨긴 부품(탄 클립 등)은 건너뛴다.
+## 편집 중인 씬이 직접 가진 메시(owner = 이 노드)는 건드리지 않는다 — 씬에 저장되므로. 모델 씬 인스턴스 속 메시는 저장되지 않는다(10-16 확인)
+func _paint_equipment(e: Node3D, edited: bool) -> void:
+	var stack: Array[Node] = [e]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is Node3D and not (n as Node3D).visible:
+			continue
+		stack.append_array(n.get_children())
+		var mi := n as MeshInstance3D
+		if mi == null or mi.mesh == null or (edited and mi.owner == self):
+			continue
+		for si in mi.mesh.get_surface_count():
+			var cur := mi.get_surface_override_material(si)
+			if cur is ShaderMaterial and _shader != null and (cur as ShaderMaterial).shader == _shader:
+				continue                        # 이미 입힘(다시 잇기)
+			var src: Material = mi.mesh.surface_get_material(si)
+			if src == null:
+				src = cur
+			mi.set_surface_override_material(si, char_material(src))
+		_apply_params(mi)
+		_equip_mis.append(mi)
+
+
+## 왼팔 IK 수정자를 뼈대 아래에 만든다(주인 없는 노드 — 저장 안 됨, 몸을 다시 조립하면 같이 사라진다)
+func _make_ik(edited: bool) -> void:
+	var ids := PackedInt32Array()
+	for b in LEFT_ARM:
+		ids.append(_skel.find_bone(String(b)))
+	ids.append(_skel.find_bone(_support_sock.bone_name))
+	if ids.has(-1):
+		push_warning("[DRCharacter3D] 왼팔 IK 뼈(%s)가 몸에 없습니다 — 왼손 표지를 쓰지 않음" % ", ".join(PackedStringArray(LEFT_ARM)))
+		return
+	_ik_bones = ids
+	var rig: DRRigModel = _body.get("rig", null)
+	var part: DRRigModel.Part = rig.parts.get("L_Hand", null) if rig != null else null
+	_palm_l = part.tail_local * 0.5 if part != null else Vector3.ZERO
+	_ik_ref = ModifierBoneTarget3D.new()
+	_ik_ref.name = "DR_SocketRef"
+	_skel.add_child(_ik_ref)
+	_ik_ref.bone_name = _support_sock.bone_name
+	_ik_wrist = Node3D.new()
+	_ik_wrist.name = "DR_LeftWrist"
+	_ik_ref.add_child(_ik_wrist)
+	_ik_pole = ModifierBoneTarget3D.new()
+	_ik_pole.name = "DR_LeftElbow"
+	_skel.add_child(_ik_pole)
+	_ik_pole.bone_name = String(LEFT_ARM[1])
+	_ik = TwoBoneIK3D.new()
+	_ik.name = "DR_LeftArmIK"
+	_skel.add_child(_ik)
+	_ik.setting_count = 1
+	_ik.set_root_bone_name(0, String(LEFT_ARM[0]))
+	_ik.set_middle_bone_name(0, String(LEFT_ARM[1]))
+	_ik.set_end_bone_name(0, String(LEFT_ARM[2]))
+	_ik.set_target_node(0, _ik.get_path_to(_ik_wrist))
+	_ik.set_pole_node(0, _ik.get_path_to(_ik_pole))
+	_ik_rot = CopyTransformModifier3D.new()
+	_ik_rot.name = "DR_LeftHandRot"
+	_skel.add_child(_ik_rot)
+	_ik_rot.setting_count = 1
+	_ik_rot.set_apply_bone_name(0, String(LEFT_ARM[2]))
+	_ik_rot.set_reference_type(0, BoneConstraint3D.REFERENCE_TYPE_NODE)
+	_ik_rot.set_reference_node(0, _ik_rot.get_path_to(_ik_wrist))
+	_ik_rot.set_copy_flags(0, CopyTransformModifier3D.TRANSFORM_FLAG_ROTATION)
+	_skel.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE if edited else Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL
+	sync_support()
+
+
+func _free_ik() -> void:
+	for n in [_ik_rot, _ik, _ik_pole, _ik_ref]:
+		if n != null and is_instance_valid(n):
+			var nn := n as Node
+			if nn.get_parent() != null:
+				nn.get_parent().remove_child(nn)
+			nn.free()                          # 바로 — 같은 이름으로 다시 만들 때 겹치지 않게
+	_ik_ref = null
+	_ik_wrist = null
+	_ik_pole = null
+	_ik = null
+	_ik_rot = null
+	_ik_bones = PackedInt32Array()
+	_ik_w = 0.0
+
+
+## 소켓 → 왼손 표지 변환을 IK 목표에 옮긴다 — 표지 · 장비를 옮긴 뒤(② 장비 탭이 부른다 · 편집 중인 씬은 매 프레임). 게임은 조립 때 한 번
+func sync_support() -> void:
+	if _support == null or _ik_wrist == null or not is_instance_valid(_support) or not is_instance_valid(_ik_wrist):
+		return
+	var rel := Transform3D.IDENTITY
+	var n: Node = _support
+	while n != null and n != _support_sock:
+		if n is Node3D:
+			rel = (n as Node3D).transform * rel
+		n = n.get_parent()
+	rel.basis = rel.basis.orthonormalized()     # 장비 배율은 뺀다(손 회전 · 손바닥 거리는 뼈대 단위)
+	_ik_rel = rel
+	var t := rel * Transform3D(Basis.IDENTITY, -_palm_l)
+	if not t.is_equal_approx(_ik_wrist.transform):
+		_ik_wrist.transform = t
+
+
+## 그 동작의 왼손 IK 비중 — 표지(DRHandTarget3D)의 동작별 비중. 동작이 없으면(레스트 자세) 0
+func _support_weight(motion: String) -> float:
+	if _support == null or _ik == null or motion == "":
+		return 0.0
+	if _support is DRHandTarget3D:
+		return (_support as DRHandTarget3D).weight_for(motion)
+	return 1.0
+
+
+func _set_ik_weight(w: float) -> void:
+	_ik_w = w
+	if _ik == null or not is_instance_valid(_ik):
+		return
+	var on := w > 0.001
+	_ik.active = on
+	_ik_rot.active = on
+	if on:
+		_ik.influence = w
+		_ik_rot.influence = w
+
+
+## 편집 중인 씬(에디터): 기즈모로 장비 · 표지를 옮기면 IK 목표를 바로 맞추고, 소켓 · 장비를 더하거나 빼면(되돌리기 포함) 다시 잇는다
+func _editor_follow(delta: float) -> void:
+	if not _built:
+		return
+	sync_support()
+	_equip_poll -= delta
+	if _equip_poll <= 0.0:
+		_equip_poll = 0.25
+		if _socket_sig() != _equip_sig:
+			refresh_equipment()
+
+
+## 소켓 구조(소켓 · 뼈 · 보이는 장비 · 표지) — 바뀌면 다시 잇는다
+func _socket_sig() -> String:
+	var parts := PackedStringArray()
+	for s in find_sockets(self, _model):
+		parts.append("%s>%s" % [s.name, s.bone_name])
+		for c in s.get_children():
+			if c is Node3D:
+				var m := find_support(c)
+				parts.append("%d|%s|%s" % [c.get_instance_id(), str((c as Node3D).visible), str(m.get_instance_id()) if m != null else "-"])
+	return ";".join(parts)
+
+
+## 지금 묶인 소켓들
+func get_sockets() -> Array[BoneAttachment3D]:
+	return _sockets.duplicate()
+
+
+## 왼손 표지(없으면 null)
+func get_support_marker() -> Node3D:
+	return _support
+
+
+## 왼팔 IK(TwoBoneIK3D, 표지가 없으면 null) · 지금 비중
+func get_left_arm_ik() -> TwoBoneIK3D:
+	return _ik
+
+
+func get_ik_weight() -> float:
+	return _ik_w
+
+
+## 소켓 장비 중 도트 재질을 입힌 메시(검사용)
+func get_equipment_meshes() -> Array[MeshInstance3D]:
+	return _equip_mis.duplicate()
+
+
+## 지금 뼈 자세 그대로 왼 손바닥 ↔ 표지를 잰다(뼈대 공간) — skeleton_updated 신호 안에서 부르면 IK 뒤, 밖에서 부르면 동작 자세(수정자 전 —
+## 갱신이 끝나면 뼈대가 동작 자세로 되돌아가 있다). {dist(m), rot(도), palm, target, hand(왼손 뼈 변환)} · 표지가 없으면 {}
+func support_now() -> Dictionary:
+	if _ik == null or _skel == null or _ik_bones.size() < 4:
+		return {}
+	var hand := _skel.get_bone_global_pose(_ik_bones[2])
+	var tgt := _skel.get_bone_global_pose(_ik_bones[3]) * _ik_rel     # 손바닥이 올 자리(원점) · 손 회전(기저)
+	var palm := hand * _palm_l
+	return {
+		"dist": palm.distance_to(tgt.origin), "palm": palm, "target": tgt.origin, "hand": hand,
+		"rot": rad_to_deg(hand.basis.orthonormalized().get_rotation_quaternion().angle_to(tgt.basis.get_rotation_quaternion())),
+	}
+
+
+## 지금 자세에서 왼손이 표지에 얼마나 붙었나(② 장비 탭 · 검사) — 뼈대를 바로 한 번 갱신해 IK 뒤 손을 읽는다(자세는 그대로).
+## {ik: IK 뒤 손바닥 ↔ 표지(m), raw: 동작 그대로의 손바닥 ↔ 표지(m), rot: IK 뒤 손 회전 ↔ 표지 회전(도),
+##  reach: 어깨 → 손목 목표 / 팔 길이(1 넘으면 안 닿음), weight: 지금 IK 비중, palm · target(뼈대 공간)}. 표지가 없으면 {}
+func support_report() -> Dictionary:
+	if _ik == null or _skel == null or _ik_bones.size() < 4:
+		return {}
+	sync_support()
+	var hb := _ik_bones[2]
+	var raw := support_now()                                          # 수정자 전 = 동작 자세
+	var rec := {}
+	var cb := func() -> void: rec["ik"] = support_now()
+	_skel.skeleton_updated.connect(cb)
+	_skel.set_bone_pose_rotation(hb, _skel.get_bone_pose_rotation(hb))   # 갱신할 거리를 만든다(값은 그대로)
+	_skel.notification(Skeleton3D.NOTIFICATION_UPDATE_SKELETON)
+	_skel.skeleton_updated.disconnect(cb)
+	var ik: Dictionary = rec.get("ik", raw)
+	var sh := _skel.get_bone_global_pose(_ik_bones[0]).origin
+	var el := _skel.get_bone_global_pose(_ik_bones[1]).origin
+	var arm := sh.distance_to(el) + el.distance_to((raw["hand"] as Transform3D).origin)
+	var wrist_t := (_skel.get_bone_global_pose(_ik_bones[3]) * _ik_rel) * -_palm_l     # 손목 목표 = 표지 − 손바닥 거리(표지 회전으로)
+	return {
+		"ik": float(ik["dist"]), "raw": float(raw["dist"]), "rot": float(ik["rot"]),
+		"reach": sh.distance_to(wrist_t) / maxf(arm, 1e-5),
+		"weight": _ik_w, "palm": ik["palm"], "target": ik["target"],
+	}

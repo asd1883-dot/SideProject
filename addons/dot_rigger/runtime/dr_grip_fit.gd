@@ -3,6 +3,8 @@ extends RefCounted
 class_name DRGripFit
 
 ## 무기 그립을 지금 몸 · 지금 동작의 두 손에 다시 맞춘다(10-15) — 3D 쪽 보정. asset.json 은 고치지 않는다.
+## ※ 10-16 부터 옛 방식: 무기는 유닛 프리팹의 소켓 노드(BoneAttachment3D, ② 장비 탭)에 고정하고 왼손은 표지에 IK 로 붙인다
+##   (DRCharacter3D "소켓 · 장비" 절). 이 파일은 소켓 무기가 없는 유닛의 weapon_asset 칸(옛 asset.json 그립)과 pose() 도우미로만 쓴다.
 ##
 ## asset.json 의 그립(grip_base · grip_frame · grip_pivot)은 장비 굽기 창이 DREquipBaker.auto_grip 으로 **그때의 그립 세트 레스트 자세**에서
 ## 잡은 값(손 뼈 로컬)이다. 10-15 확인: kar98k 의 그립은 10-12 굽기 때 세트가 Sprint 하나뿐이라 **달리기 자세(Sprint 62.5 %)** 의 두 손바닥으로

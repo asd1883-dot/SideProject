@@ -34,7 +34,8 @@ const OUTFITS_DIR := "res://outfits"
 const MODELS_DIR := "res://source3d/characters"
 ## 미리보기 동작 = 게임이 쓰는 3D 동작 묶음(동작 표의 library_path 와 같은 파일)
 const MOTIONS_LIB := "res://game/motions/rifleman_anims.res"
-const WEAPON_ASSET := "res://source3d/weapons/kar98k/asset.json"
+## 미리보기 무기 = 이 유닛 프리팹의 소켓 장비(② 장비 탭에서 맞춘 것 — 오른손 소켓 → 무기 → 왼손 표지)
+const WEAPON_UNIT := "res://game/units/soldier_base.tscn"
 ## 기본 동작 — 앞손(왼손)이 총몸을 받쳐 손목이 크게 꺾이고 비틀리는 자세라 소매 끝 이음매가 가장 잘 드러난다(10-16 사용자 스크린샷 자세)
 const DEFAULT_MOTION := "Crouch_Idle+Rifle_Aiming_Idle"
 const PREVIEW_HEIGHT := 1.75
@@ -238,6 +239,7 @@ var _dot_ob: OptionButton
 var _zoom_sl: HSlider
 var _caps_cb: CheckBox
 var _weapon_cb: CheckBox
+var _weapon_socks: Array[Node] = []     # 미리보기 캐릭터에 꽂은 기본형 군인의 소켓(무기 끄면 뺀다)
 var _pv_info: Label
 var _look := "full"
 var _focus := "body"
@@ -289,7 +291,7 @@ func set_page_active(on: bool) -> void:
 		_dots.visible = on
 
 
-## 공통 설정 줄의 미리보기 배경(자홍이면 틈 · 비침이 잘 보인다) — 칠하기 화면 · 미리보기 둘 다
+## 탭 창 위 미리보기 배경(자홍이면 틈 · 비침이 잘 보인다) — 칠하기 화면 · 미리보기 둘 다
 func set_preview_bg(c: Color) -> void:
 	if _pv_bg != null:
 		_pv_bg.color = c if c.a > 0.0 else PV_BG_DEFAULT
@@ -926,7 +928,7 @@ func _build_preview(parent: Control) -> void:
 	bar5.add_child(_caps_cb)
 	_weapon_cb = CheckBox.new()
 	_weapon_cb.text = "무기"
-	_weapon_cb.tooltip_text = "kar98k 를 든다(동작마다 그립 맞춤 — 게임과 같게). 손목 이음매를 가리면 끈다"
+	_weapon_cb.tooltip_text = "기본형 군인의 장비(② 장비 탭 — 오른손 소켓의 무기 · 왼손 IK)를 든다, 게임과 같게. 손목 이음매를 가리면 끈다"
 	_weapon_cb.toggled.connect(func(on): _set_weapon(on))
 	bar5.add_child(_weapon_cb)
 	_pv_info = _hint(box, "", 300.0)
@@ -1146,18 +1148,6 @@ static func _blender_path() -> String:
 		if es.has_setting(BLENDER_SETTING):
 			return String(es.get_setting(BLENDER_SETTING))
 	return BLENDER_DEFAULT
-
-
-## hub 공통 설정 줄 호환용 — 3D 복장 탭은 안 쓴다(예전 DROutfitWindow._default_preset 그대로, hub_window.gd 가 프리셋 칸 처음 값으로 부른다)
-static func _default_preset() -> String:
-	if FileAccess.file_exists("res://human.tres"):
-		return "res://human.tres"
-	for f in DirAccess.get_files_at("res://"):
-		if String(f).ends_with(".tres"):
-			var p := load("res://" + String(f))
-			if p is DRPreset:
-				return "res://" + String(f)
-	return ""
 
 
 # ---------------------------------------------------------------- 불러오기
@@ -2367,6 +2357,7 @@ func _build_preview_char() -> bool:
 			_pv_ch.get_parent().remove_child(_pv_ch)
 		_pv_ch.free()
 	_pv_ch = null
+	_weapon_socks.clear()                        # 캐릭터와 같이 지워졌다
 	_body_key = ""
 	_outfit_key = ""
 	var ch := DRCharacter3D.new()
@@ -2595,14 +2586,24 @@ func set_turn(deg: float) -> void:
 		_pv_ch.rotation = Vector3(0.0, deg_to_rad(_turn), 0.0)
 
 
+## 무기 = 기본형 군인 프리팹의 소켓 장비(오른손 소켓 → 무기 → 왼손 표지)를 빌려 미리보기 캐릭터에 꽂는다 — 게임 · ② 장비 탭과 같은 자리 · 같은 왼손 IK
 func _set_weapon(on: bool) -> void:
 	if _pv_ch == null or not is_instance_valid(_pv_ch):
 		return
-	if on and FileAccess.file_exists(WEAPON_ASSET):
-		if _pv_ch.get_weapon_node() == null and _pv_ch.attach_weapon(WEAPON_ASSET):
-			_pv_ch.precompute_grips()
-	else:
-		_pv_ch.detach_weapon()
+	for s in _weapon_socks:
+		if is_instance_valid(s):
+			s.get_parent().remove_child(s)
+			s.free()
+	_weapon_socks.clear()
+	var ps := load(WEAPON_UNIT) as PackedScene if on and ResourceLoader.exists(WEAPON_UNIT) else null
+	if ps != null:
+		var unit := ps.instantiate()                 # 트리에 안 넣음 = 조립 안 함(소켓 노드만 빌린다)
+		for s in DRCharacter3D.find_sockets(unit):
+			s.get_parent().remove_child(s)
+			_pv_ch.add_child(s)
+			_weapon_socks.append(s)
+		unit.free()
+	_pv_ch.refresh_equipment()
 	if _cur_motion != "":
 		var f := _time_sl.value
 		var ap := _pv_ch.get_animation_player()

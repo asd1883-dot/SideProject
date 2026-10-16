@@ -37,7 +37,11 @@ func _run() -> void:
 	_check(page._units.has(BASE), "유닛 목록에 기본형 군인(%d개)" % page._units.size())
 	_check(page._sel_path == BASE and page._root != null, "처음 고른 유닛 %s" % page._sel_path.get_file())
 	var ch := page._prev_ch
-	_check(ch != null and ch.get_weapon_node() != null and ch.worn("top") != "" and ch.worn("bottom") != "", "미리보기 조립(군복 상의 · 하의 · 무기)")
+	_check(ch != null and ch.worn("top") != "" and ch.worn("bottom") != "", "미리보기 조립(군복 상의 · 하의)")
+	var w := ch.get_weapon_node() if ch != null else null
+	_check(w != null and w.get_parent() is BoneAttachment3D and ch.get_support_marker() != null and ch.get_left_arm_ik() != null,
+		"미리보기 무기 = 유닛의 소켓 장비(%s · 왼손 표지 · 왼팔 IK)" % (String(w.name) if w != null else "-"))
+	_check(page._equip_lbl.text.contains("RightHand") and page._equip_lbl.text.contains("왼손 표지"), "장비 요약: %s" % page._equip_lbl.text.replace("\n", " / "))
 	_check(page._motion_ed.table == page._root.motions and page._state_ob.item_count > 0, "동작 표 붙음 · 상태 목록 %d칸" % page._state_ob.item_count)
 	page.play_state("서기")
 	_check(ch != null and ch.current_motion() == "Rifle_Idle", "상태 서기 → %s" % (ch.current_motion() if ch != null else "?"))
@@ -57,20 +61,22 @@ func _run() -> void:
 	var cpath := page.new_child_unit(CHILD_NAME)
 	_check(cpath != "" and FileAccess.file_exists(cpath), "파일 %s" % cpath.get_file())
 	_check(page._sel_path == cpath and String((page._units.get(cpath, {}) as Dictionary).get("parent", "")) == BASE, "자식 고름 · 부모 = 기본형 군인")
-	_check(not page._parent_vals.is_empty() and page._root.weapon_asset == page._parent_vals["weapon_asset"], "칸이 부모 값을 따라감(무기 %s)" % page._root.weapon_asset.get_base_dir().get_file())
+	_check(not page._parent_vals.is_empty() and page._root.outfit_top == page._parent_vals["outfit_top"], "칸이 부모 값을 따라감(상의 %s)" % page._root.outfit_top.get_base_dir().get_file())
+	var cw := page._prev_ch.get_weapon_node() if page._prev_ch != null else null
+	_check(cw != null and cw.get_parent() is BoneAttachment3D and page._prev_ch.get_left_arm_ik() != null, "부모의 소켓 장비도 따라옴(%s · 왼팔 IK)" % (String(cw.name) if cw != null else "-"))
 	var marks := PackedStringArray()
 	for f in DRUnitPage.FIELDS:
 		marks.append("%s=%s" % [f[1], (page._fields[f[0]]["mark"] as Label).text])
 	print("        표시: ", ", ".join(marks))
-	_check((page._fields["weapon_asset"]["mark"] as Label).text == "부모 값", "무기 칸 표시 = 부모 값")
-	var mp40 := "res://source3d/weapons/mp40/asset.json"
-	page._set_prop("weapon_asset", mp40)
-	_check((page._fields["weapon_asset"]["mark"] as Label).text == "바꿈" and (page._fields["weapon_asset"]["revert"] as Button).visible, "무기를 바꾸면 표시 = 바꿈 · ↺ 보임")
+	_check((page._fields["outfit_top"]["mark"] as Label).text == "부모 값", "상의 칸 표시 = 부모 값")
+	page._set_prop("outfit_top", "")
+	_check((page._fields["outfit_top"]["mark"] as Label).text == "바꿈" and (page._fields["outfit_top"]["revert"] as Button).visible and page._prev_ch.worn("top") == "",
+		"상의를 (내복)으로 바꾸면 표시 = 바꿈 · ↺ 보임 · 미리보기 상의 벗음")
 	page._on_save()
 	var txt := FileAccess.get_file_as_string(cpath)
 	print("        저장한 자식 씬:\n" + txt.indent("          "))
-	_check(txt.contains("instance=ExtResource") and txt.contains("weapon_asset = \"%s\"" % mp40), "자식 씬 = 부모 상속 + 바꾼 무기만")
-	_check(not txt.contains("outfit_top") and not txt.contains("body_model"), "안 바꾼 칸(상의 · 몸)은 파일에 없음 — 부모를 따라감")
+	_check(txt.contains("instance=ExtResource") and txt.contains("outfit_top = \"\""), "자식 씬 = 부모 상속 + 바꾼 상의만")
+	_check(not txt.contains("outfit_bottom") and not txt.contains("body_model") and not txt.contains("kar98k"), "안 바꾼 칸(하의 · 몸) · 부모 장비는 파일에 없음 — 부모를 따라감")
 
 	print("[4] 이 유닛만의 동작 표")
 	page._on_own_table()

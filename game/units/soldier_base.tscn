@@ -1,11 +1,39 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3]
 
 [ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_character_3d.gd" id="1_char"]
 [ext_resource type="Resource" path="res://game/units/rifleman_motions.tres" id="2_mot"]
+[ext_resource type="PackedScene" path="res://source3d/weapons/kar98k/kar98k.tscn" id="3_k98"]
+[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_hand_target_3d.gd" id="4_hand"]
 
-[node name="기본형군인" type="Node3D"]
+[node name="기본형군인" type="Node3D" unique_id=1055925878]
 script = ExtResource("1_char")
 outfit_top = "res://outfits/uniform_m36/outfit.json"
 outfit_bottom = "res://outfits/uniform_m36/outfit.json"
-weapon_asset = "res://source3d/weapons/kar98k/asset.json"
 motions = ExtResource("2_mot")
+
+[node name="오른손" type="BoneAttachment3D" parent="." unique_id=392684096]
+bone_name = "RightHand"
+use_external_skeleton = true
+external_skeleton = NodePath("")
+
+[node name="kar98k" parent="오른손" unique_id=776820278 instance=ExtResource("3_k98")]
+transform = Transform3D(0.20659992, 0.9783812, 0.009317189, -0.60064536, 0.11930667, 0.7905638, 0.77236134, -0.16892686, 0.6123087, 0.02154994, 0.13010162, 0.04280165)
+
+[node name="왼손" type="Marker3D" parent="오른손/kar98k" unique_id=760705746]
+transform = Transform3D(-0.45697308, -0.8698072, -0.18604025, -0.034929298, -0.19144659, 0.9808814, -0.88879436, 0.45473465, 0.057104196, 0, -0.024999857, 0.36447468)
+gizmo_extents = 0.06
+script = ExtResource("4_hand")
+motion_weights = Dictionary[String, float]({
+"Crawl_Fwd": 0.0,
+"Crouch_Fwd": 0.0,
+"Crouch_Idle": 0.0,
+"Crouch_Idle+Toss_Grenade": 0.0,
+"Crouch_Reload": 0.0,
+"Crouch_Rifle_Kneel_Hit_To_Back": 0.0,
+"Prone_Death": 0.0,
+"Prone_Throw_Grenade": 0.0,
+"Sprint": 0.0,
+"Stand_Reloading": 0.0,
+"Stand_Rifle_Hit_To_Back": 0.0,
+"Toss_Grenade": 0.0
+})

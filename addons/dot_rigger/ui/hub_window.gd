@@ -4,9 +4,10 @@ class_name DRHubWindow
 
 ## Dot Rigger 창 — 한 창에 탭 페이지.  프로젝트 > 도구 > Dot Rigger.
 ##
-##   [ Dot Rigger | ① 유닛 | ② 장비 굽기 | ③ 복장 ]        Ctrl+1 · 2 · 3
-##   (10-16: 3D 노선 — ① 유닛 탭(unit_page.gd)이 예전 2D 캐릭터 굽기(main_window.gd)를, ③ 복장(outfit_page.gd)이 예전 2D 복장 굽기
-##    (outfit_window.gd)를 갈음했다. 사용자 지시: "예전 작업 목록은 남길 필요 없어" · "모든 리소스 탭들의 마이그레이션 및 연동 검증")
+##   [ Dot Rigger | ① 유닛 | ② 장비 | ③ 복장 ]        Ctrl+1 · 2 · 3
+##   (10-16: 3D 노선 — ① 유닛(unit_page.gd) · ② 장비(equip_page.gd, 뼈 소켓) · ③ 복장(outfit_page.gd)이 예전 2D 굽기 페이지
+##    (main_window.gd · equip_window.gd · outfit_window.gd)를 갈음했다. 사용자 지시: "예전 작업 목록은 남길 필요 없어" ·
+##    "모든 리소스 탭들의 마이그레이션 및 연동 검증" · "장비 3D 모델 하이어라키에 접근하여 맞추는 방식, 3D 게임 방식의 정석")
 ##   ┌───────────────────────── 고른 페이지 ─────────────────────────┐
 ##
 ## - 페이지는 처음 눌렀을 때 만든다(창이 빨리 뜨고, 안 쓰는 페이지는 비용이 없다). 한 번 만든 페이지는 탭을 바꿔도
@@ -14,13 +15,13 @@ class_name DRHubWindow
 ## - 안 보이는 페이지의 미리보기 뷰포트는 멈춰 둔다(DRPage.set_page_active).
 ## - 마지막에 보던 탭을 기억한다(에디터 프로젝트 메타데이터).
 ## - 페이지 추가 = PAGES 에 한 줄(DRPage 를 상속한 클래스).
-## - **공통 설정**(탭 줄 아래): 캐릭터 프리셋 · 세트 목록(sets.json)을 한 번만 고르면 세 탭이 같이 쓴다.
-##   캐릭터 탭에서 프리셋을 저장/불러오거나 세트를 구우면 여기와 다른 탭에 바로 전해진다(DRPage.context_changed → apply_context).
+## - 탭 줄 아래: 미리보기 배경(세 탭 미리보기에 같이). 예전 "공통 설정"(캐릭터 프리셋 · 세트 목록 — 2D 굽기용)은 10-16 뺐다 —
+##   3D 탭은 유닛 프리팹(game/units) · 옷(outfits) · 장비(소켓)를 직접 고른다.
 
 const META_SECTION := "dot_rigger_hub"
 const PAGES := [
 	{"key": "unit", "title": "① 유닛", "tip": "유닛 프리팹(3D) — 몸 · 복장 · 무기 · 세트별 동작 표 · 3D 도트 미리보기 · 새 자식 유닛(상속)"},
-	{"key": "equip", "title": "② 장비 굽기", "tip": "무기 · 헬멧을 퍼펫의 세트마다 맞춰 굽기(그립 · 그리기 순서)"},
+	{"key": "equip", "title": "② 장비", "tip": "장비(3D) — 유닛의 뼈 소켓(BoneAttachment3D)에 무기 · 헬멧 모델 꽂기 · 자리 맞추기(기즈모) · 왼손 IK 표지 · 동작마다 왼손 비중"},
 	{"key": "outfit", "title": "③ 복장", "tip": "옷(3D) — 뼈대에 붙이기 · 부위 경계 · 칠하기 · 상의/하의 슬롯 · 3D 도트 미리보기(차림 4가지 · 이음매 확대)"},
 ]
 
@@ -28,10 +29,6 @@ var _pages: Dictionary = {}      # key -> DRPage (만든 것만)
 var _buttons: Dictionary = {}    # key -> Button
 var _body: Control
 var _current := ""
-var _ctx := {"preset": "", "sets": ""}   # 세 탭이 같이 쓰는 설정
-var _preset_edit: LineEdit
-var _sets_edit: LineEdit
-var _ctx_note: Label
 var _bg_pick: ColorPickerButton
 var _preview_bg := Color(0, 0, 0, 0)   # a == 0 = 기본(탭마다 원래 색)
 var _bg_restored := false
@@ -56,7 +53,7 @@ static func _make_page(key: String) -> DRPage:
 		"unit":
 			return DRUnitPage.new()
 		"equip":
-			return DREquipWindow.new()
+			return DREquipPage.new()
 		"outfit":
 			return DROutfitPage.new()
 	return null
@@ -149,7 +146,7 @@ func _build_ui() -> void:
 	hint.add_theme_color_override("font_color", Color(0.5, 0.53, 0.58))
 	bar.add_child(hint)
 
-	# 공통 설정 줄 — 세 탭이 같이 쓰는 캐릭터 프리셋 · 세트 목록
+	# 탭 줄 아래 설정 줄 — 미리보기 배경
 	var ctx_panel := PanelContainer.new()
 	var cb := StyleBoxFlat.new()
 	cb.bg_color = Color(0.15, 0.16, 0.19)
@@ -162,27 +159,11 @@ func _build_ui() -> void:
 	var crow := HBoxContainer.new()
 	crow.add_theme_constant_override("separation", 6)
 	ctx_panel.add_child(crow)
-	var cl := Label.new()
-	cl.text = "공통 설정"
-	cl.add_theme_color_override("font_color", accent)
-	cl.tooltip_text = "세 탭이 같이 쓰는 설정. 여기서 한 번 고르면 캐릭터 · 장비 · 복장 탭이 모두 이 캐릭터와 이 세트를 본다."
-	cl.mouse_filter = Control.MOUSE_FILTER_STOP
-	crow.add_child(cl)
-	_preset_edit = _ctx_field(crow, "캐릭터 프리셋", "캐릭터 모델 · 도트화 값 · 동작 세트가 든 프리셋(.tres). 캐릭터 탭에서 저장/불러오면 여기도 바뀐다. 바꾸면 그 프리셋의 출력 폴더에서 세트 목록도 찾아 넣는다.",
-		"*.tres ; 캐릭터 프리셋", func(p): set_context({"preset": p}))
-	_sets_edit = _ctx_field(crow, "세트 목록", "캐릭터 탭이 세트를 구울 때 만드는 sets.json. 장비 · 복장은 이 세트들에 맞춰 굽는다.",
-		"*.json ; 세트 목록(sets.json)", func(p): set_context({"sets": p}))
-	_ctx_note = Label.new()
-	_ctx_note.add_theme_font_size_override("font_size", 12)
-	_ctx_note.add_theme_color_override("font_color", Color(0.62, 0.65, 0.7))
-	_ctx_note.clip_text = true
-	_ctx_note.custom_minimum_size = Vector2(160, 0)
-	_ctx_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	crow.add_child(_ctx_note)
 	# 미리보기 배경(10-08 사용자 요청) — ① ② ③ 미리보기에 같이. 자홍이면 조각 사이 구멍 · 비침이 잘 보인다
 	var bl := Label.new()
 	bl.text = "미리보기 배경"
-	bl.tooltip_text = "① 캐릭터 · ② 장비 · ③ 복장 미리보기의 바탕색. 자홍처럼 튀는 색으로 두면 조각 사이 구멍 · 비침이 잘 보인다. 굽는 그림에는 안 들어간다."
+	bl.add_theme_color_override("font_color", accent)
+	bl.tooltip_text = "① 유닛 · ② 장비 · ③ 복장 미리보기의 바탕색. 자홍처럼 튀는 색으로 두면 이음매 구멍 · 비침이 잘 보인다. 게임 화면에는 안 들어간다."
 	bl.mouse_filter = Control.MOUSE_FILTER_STOP
 	crow.add_child(bl)
 	_bg_pick = ColorPickerButton.new()
@@ -211,45 +192,8 @@ func _build_ui() -> void:
 	margin.add_child(_body)
 
 
-func _ctx_field(parent: Control, label: String, tip: String, filter: String, on_pick: Callable) -> LineEdit:
-	var l := Label.new()
-	l.text = "  " + label
-	l.tooltip_text = tip
-	l.mouse_filter = Control.MOUSE_FILTER_STOP
-	parent.add_child(l)
-	var e := LineEdit.new()
-	e.custom_minimum_size = Vector2(250, 0)
-	e.tooltip_text = tip
-	e.text_submitted.connect(func(t): on_pick.call(String(t).strip_edges()))
-	e.focus_exited.connect(func(): on_pick.call(e.text.strip_edges()))
-	parent.add_child(e)
-	var b := Button.new()
-	b.text = "…"
-	b.tooltip_text = "고르기"
-	b.pressed.connect(func(): _pick_file(filter, label, on_pick))
-	parent.add_child(b)
-	return e
+# ---------------------------------------------------------------- 미리보기 배경
 
-
-func _pick_file(filter: String, title_text: String, on_pick: Callable) -> void:
-	if not Engine.is_editor_hint():
-		return
-	var dlg := EditorFileDialog.new()
-	dlg.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	dlg.access = EditorFileDialog.ACCESS_RESOURCES
-	dlg.filters = PackedStringArray([filter])
-	dlg.title = "%s — Dot Rigger" % title_text
-	dlg.file_selected.connect(func(p):
-		dlg.queue_free()
-		on_pick.call(String(p)))
-	dlg.canceled.connect(func(): dlg.queue_free())
-	add_child(dlg)
-	dlg.popup_file_dialog()
-
-
-# ---------------------------------------------------------------- 공통 설정
-
-## 처음 한 번: 지난번 값 → 없으면 프로젝트에서 찾은 프리셋 · 그 출력 폴더의 sets.json
 ## 미리보기 배경 — 만든 탭 모두에 적용하고 기억한다(c.a == 0 = 기본)
 func set_preview_bg(c: Color) -> void:
 	_preview_bg = c
@@ -268,90 +212,6 @@ func _restore_preview_bg() -> void:
 	var h := String(EditorInterface.get_editor_settings().get_project_metadata(META_SECTION, "preview_bg", ""))
 	if h != "" and Color.html_is_valid(h):
 		set_preview_bg(Color.html(h))
-
-
-func _init_context() -> void:
-	var preset := ""
-	var sets := ""
-	if Engine.is_editor_hint():
-		var es := EditorInterface.get_editor_settings()
-		preset = String(es.get_project_metadata(META_SECTION, "preset", ""))
-		sets = String(es.get_project_metadata(META_SECTION, "sets", ""))
-	if preset == "" or not FileAccess.file_exists(preset):
-		preset = DROutfitPage._default_preset()
-	if sets == "" or not FileAccess.file_exists(sets):
-		sets = _sets_for_preset(preset)
-	_ctx = {"preset": preset, "sets": sets}
-	_show_context()
-
-
-## 프리셋의 출력 폴더에 있는 sets.json (없으면 res://puppet/sets.json)
-static func _sets_for_preset(preset: String) -> String:
-	if preset != "" and FileAccess.file_exists(preset):
-		var p := load(preset) as DRPreset
-		if p != null and p.out_dir != "":
-			return p.out_dir.path_join("sets.json")
-	return "res://puppet/sets.json"
-
-
-func get_context() -> Dictionary:
-	return _ctx.duplicate()
-
-
-## 공통 설정을 바꾼다(창의 칸 · 페이지가 알린 것). 바뀐 것이 있으면 기억하고 모든 페이지에 전한다(from 은 빼고).
-func set_context(delta: Dictionary, from: DRPage = null) -> void:
-	var changed := PackedStringArray()
-	if delta.has("preset") and String(delta["preset"]) != "" and String(delta["preset"]) != String(_ctx["preset"]):
-		_ctx["preset"] = String(delta["preset"])
-		changed.append("preset")
-		if not delta.has("sets"):      # 프리셋이 바뀌면 그 프리셋의 세트 목록으로
-			var s := _sets_for_preset(String(_ctx["preset"]))
-			if s != String(_ctx["sets"]) and FileAccess.file_exists(s):
-				_ctx["sets"] = s
-				changed.append("sets")
-	if delta.has("sets") and String(delta["sets"]) != "" and String(delta["sets"]) != String(_ctx["sets"]):
-		_ctx["sets"] = String(delta["sets"])
-		changed.append("sets")
-	if bool(delta.get("rebaked", false)):
-		changed.append("rebaked")
-	_show_context()
-	if changed.is_empty():
-		return
-	if Engine.is_editor_hint():
-		var es := EditorInterface.get_editor_settings()
-		es.set_project_metadata(META_SECTION, "preset", _ctx["preset"])
-		es.set_project_metadata(META_SECTION, "sets", _ctx["sets"])
-	for k in _pages.keys():
-		var pg := _pages[k] as DRPage
-		if pg != from:
-			pg.apply_context(_ctx.duplicate(), changed)
-
-
-func _show_context() -> void:
-	if _preset_edit == null:
-		return
-	_preset_edit.text = String(_ctx["preset"])
-	_sets_edit.text = String(_ctx["sets"])
-	var notes := PackedStringArray()
-	var preset := String(_ctx["preset"])
-	if preset == "" or not FileAccess.file_exists(preset):
-		notes.append("⚠ 프리셋이 없습니다 — ① 캐릭터 탭에서 모델을 불러와 `프리셋 저장`")
-	else:
-		var p := load(preset) as DRPreset
-		if p != null:
-			notes.append("모델 %s" % p.model_path.get_file())
-	var sets := String(_ctx["sets"])
-	if sets == "" or not FileAccess.file_exists(sets):
-		notes.append("⚠ 세트 목록이 없습니다 — ① 캐릭터 탭에서 세트로 담고 굽기")
-	else:
-		var v: Variant = JSON.parse_string(FileAccess.get_file_as_string(sets))
-		if v is Dictionary:
-			var names := PackedStringArray()
-			for s in (v as Dictionary).get("sets", []):
-				names.append(String((s as Dictionary).get("name", "")))
-			notes.append("세트 %d개 (%s)" % [names.size(), ", ".join(names)])
-	_ctx_note.text = "   " + " · ".join(notes)
-	_ctx_note.tooltip_text = _ctx_note.text.strip_edges()
 
 
 ## 창을 띄운다 — key 를 안 주면 마지막에 보던 탭(처음이면 ① 유닛). 예전에 기억한 "rig"(2D 캐릭터 굽기)는 ① 유닛으로
@@ -451,10 +311,6 @@ func open_page(key: String) -> void:
 		_body.add_child(page)
 		page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)   # 페이지가 창 안을 꽉 채우게(넣은 뒤에 해야 먹는다)
 		_pages[key] = page
-		page.context_changed.connect(func(d): set_context(d, page))
-		if String(_ctx["preset"]) == "" and String(_ctx["sets"]) == "":
-			_init_context()
-		page.apply_context(_ctx.duplicate(), PackedStringArray(["preset", "sets"]))
 		page.set_preview_bg(_preview_bg)
 	for k in _pages.keys():
 		var pg := _pages[k] as DRPage
