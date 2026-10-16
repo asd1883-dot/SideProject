@@ -2,7 +2,7 @@ extends SceneTree
 
 ## 기본 병종 리소스를 만든다(없을 때만 — 이미 있으면 사용자가 인스펙터에서 고친 값이므로 건드리지 않는다).
 ##   Godot --headless --path <프로젝트> --script res://game/tools/make_default_units.gd [-- --force]
-## 만드는 것: game/units/kar98k.tres(무기) · rifleman_motions.tres(동작 표) · rifleman.tres(병종)
+## 만드는 것: game/units/kar98k.tres(무기) · rifleman_motions.tres(동작 표) · rifleman.tres(병종 — 3D 모습은 soldier_base.tscn 프리팹)
 
 const DIR := "res://game/units"
 
@@ -64,8 +64,11 @@ func _init() -> void:
 		t.motions = motions
 		t.sets_json = "res://puppet/sets.json"
 		t.outfit_json = "res://outfits/uniform_m36/outfit.json"
-		t.body_model = "res://source3d/characters/human_base/human_base.glb"
-		_save(t, type_path)          # 3D 동작 묶음(motion_library)은 비워 둔다 = 동작 표의 library_path
+		# 3D 모습 = 유닛 프리팹(기본형 군인 씬 — 몸 · 상의 · 하의 · 무기 · 동작 표 · 키는 그 씬의 루트 칸)
+		var base_path := "res://game/units/soldier_base.tscn"
+		if ResourceLoader.exists(base_path):
+			t.prefab = load(base_path) as PackedScene
+		_save(t, type_path)
 	print("UNITS DONE ", DIR)
 	quit()
 

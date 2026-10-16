@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_character_3d.gd" id="1_char"]
+[ext_resource type="Resource" path="res://game/units/rifleman_motions.tres" id="2_mot"]
+
+[node name="기본형군인" type="Node3D"]
+script = ExtResource("1_char")
+outfit_top = "res://outfits/uniform_m36/outfit.json"
+outfit_bottom = "res://outfits/uniform_m36/outfit.json"
+weapon_asset = "res://source3d/weapons/kar98k/asset.json"
+motions = ExtResource("2_mot")

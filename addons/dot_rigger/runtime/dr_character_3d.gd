@@ -55,6 +55,68 @@ static var _skin_same := {}
 static var _json_cache := {}         # 경로 -> Dictionary
 static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
 
+# ---------------------------------------------------------------- 유닛 프리팹(10-16)
+## 이 노드를 씬의 루트로 두면 그 씬이 유닛 프리팹이 된다(game/units/soldier_base.tscn — 기본형 군인).
+## 다른 유닛 = 그 씬을 상속한 자식 씬(Dot Rigger ① 유닛 탭의 [새 자식 유닛] 또는 씬 > 새 상속 씬)에서 바꿀 칸만 바꾼다 —
+## 안 바꾼 칸은 부모를 따라간다(유니티 프리팹 변형과 같다). 칸을 바꾸면 에디터 3D 화면의 모습도 바로 다시 만든다.
+
+@export_group("유닛 모습")
+## 기본 몸(사람 몸 glb). 옷을 안 입힌 슬롯은 이 몸(내복)이 보인다
+@export_file("*.glb", "*.gltf") var body_model := BODY_DEFAULT:
+	set(v):
+		body_model = v
+		_changed()
+## 상의 복장(outfit.json — ③ 복장 탭이 만든 것). 비우면 내복
+@export_file("*.json") var outfit_top := "":
+	set(v):
+		outfit_top = v
+		_changed()
+## 하의 복장(outfit.json). 비우면 내복
+@export_file("*.json") var outfit_bottom := "":
+	set(v):
+		outfit_bottom = v
+		_changed()
+## 무기(장비 asset.json — ② 장비 탭의 그립 포함). 비우면 맨손
+@export_file("*.json") var weapon_asset := "":
+	set(v):
+		weapon_asset = v
+		_changed()
+## 동작 표(세트 → 상태 → 동작 · 비중 % · 상하체 합성). 3D 동작 묶음은 표의 library_path 에서 읽는다
+@export var motions: DRMotionTable:
+	set(v):
+		motions = v
+		_changed()
+## 키(m) — 모델을 이 키로 맞춘다(0 = 모델 그대로)
+@export_range(0.0, 2.5, 0.01, "suffix:m") var height_m := 1.75:
+	set(v):
+		height_m = v
+		_apply_height()
+## 씬에 들어가면(_ready) 위 칸대로 저절로 조립한다. 끄면 setup() · wear() 를 직접 부를 때만
+@export var auto_build := true
+
+@export_group("미리보기 (에디터)")
+## 에디터 3D 화면에서 이 동작 자세로 보여 준다(동작 표의 동작 · 내보낸 3D 동작 묶음에 있어야 함)
+@export var preview_motion := "":
+	set(v):
+		preview_motion = v
+		_apply_preview()
+## 미리보기 동작을 에디터에서 계속 재생(끄면 그 동작의 한 장면에서 멈춤)
+@export var preview_playing := false:
+	set(v):
+		preview_playing = v
+		_apply_preview()
+
+## 조립이 끝났을 때(build) — 유닛 탭 미리보기 등이 받는다
+signal built
+
+var _built := false
+var _rebuild_queued := false
+var _motion := ""                    # 지금 튼 동작(play_motion)
+var _grip_from := Transform3D.IDENTITY
+var _grip_to := Transform3D.IDENTITY
+var _grip_t := -1.0                  # 동작이 바뀔 때 무기 그립을 섞은 시간(−1 = 안 섞는 중)
+var _grip_blend := 0.1
+
 var _body_path := ""
 var _body: Dictionary = {}
 var _model: Node3D = null
@@ -73,22 +135,172 @@ var _grip := Transform3D.IDENTITY   # 손 뼈 로컬 무기 변환(배율 전) �
 
 # ---------------------------------------------------------------- 만들기
 
+func _ready() -> void:
+	if auto_build and _model == null:
+		build()
+	set_process(Engine.is_editor_hint() and preview_playing)
+
+
+## 에디터 미리보기 재생(preview_playing) — 게임에서는 화면(BattleView3D)이 step_motion 으로 직접 돌린다
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint() and preview_playing and _ap != null:
+		step_motion(delta)
+
+
+## 위 "유닛 모습" 칸대로 조립한다 — 몸 → 키 → 상의 · 하의 → 동작 묶음 → 무기. 다시 부르면 처음부터(칸을 바꿨을 때)
+func build() -> bool:
+	_rebuild_queued = false
+	_motion = ""
+	_grip_t = -1.0
+	if not setup(body_model):
+		return false
+	_apply_height()
+	if outfit_top != "":
+		wear(outfit_top, PackedStringArray(["top"]))
+	if outfit_bottom != "":
+		wear(outfit_bottom, PackedStringArray(["bottom"]))
+	if motions != null and motions.library_path != "" and ResourceLoader.exists(motions.library_path):
+		set_motions(load(motions.library_path) as AnimationLibrary)
+	if Engine.is_editor_hint() and _ap != null:
+		_ap.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL   # 에디터에서는 _process 가 직접 돌린다
+	if weapon_asset != "":
+		attach_weapon(weapon_asset)
+	_built = true
+	_apply_preview()
+	built.emit()
+	return true
+
+
+## 칸이 바뀌었다 — 이미 조립했으면(씬 안) 다음 프레임에 한 번 다시 조립. 씬을 불러오는 중(트리 밖)에는 _ready 가 조립한다
+func _changed() -> void:
+	if not _built or not is_inside_tree() or not auto_build or _rebuild_queued:
+		return
+	_rebuild_queued = true
+	build.call_deferred()
+
+
+func _apply_height() -> void:
+	if _model == null:
+		return
+	var h := model_height()
+	_model.scale = Vector3.ONE * (height_m / h if height_m > 0.0 and h > 0.0 else 1.0)
+
+
+## 에디터 미리보기 자세(preview_motion) — 그 동작의 30 % 자세(재생 켜면 이어서 돈다)
+func _apply_preview() -> void:
+	if not Engine.is_editor_hint() or _ap == null or not _built:
+		set_process(false)
+		return
+	set_process(preview_playing)
+	if preview_motion == "" or not _ap.has_animation(preview_motion):
+		return
+	DRGripFit.fit_anim(self, preview_motion)       # 캐시를 먼저(처음 계산이 재생 상태를 건드리므로)
+	play_motion(preview_motion, 0.0)
+	_ap.seek(_ap.get_animation(preview_motion).length * 0.3, true)
+
+
+## 인스펙터의 미리보기 동작 칸 = 지금 동작 묶음의 동작 목록에서 고르기
+func _validate_property(property: Dictionary) -> void:
+	if String(property["name"]) == "preview_motion":
+		property["hint"] = PROPERTY_HINT_ENUM_SUGGESTION
+		property["hint_string"] = ",".join(motion_names())
+
+
+## 복장 보기(시험장 F4) — 이 유닛의 상의 · 하의를 입히거나 벗긴다(없는 쪽은 내복)
+func dress(top_on: bool, bottom_on: bool) -> void:
+	take_off()
+	if top_on and outfit_top != "":
+		wear(outfit_top, PackedStringArray(["top"]))
+	if bottom_on and outfit_bottom != "":
+		wear(outfit_bottom, PackedStringArray(["bottom"]))
+
+
+# ---------------------------------------------------------------- 동작 재생(무기 그립 포함)
+
+## 동작을 튼다(섞는 시간 blend 초). 무기를 들었으면 그 동작에 맞춘 그립(DRGripFit — 동작마다 두 손에 다시 맞춘 것, 캐시)으로
+## 같은 시간 동안 옮긴다(동작이 바뀔 때 총이 손에서 튀지 않게). 그립 캐시가 없으면 처음 한 번 계산(precompute_grips 로 미리 해 둘 것)
+func play_motion(motion: String, blend: float = 0.1) -> void:
+	if _ap == null or not _ap.has_animation(motion):
+		return
+	var first := _motion == "" or not _ap.is_playing()
+	_ap.play(motion, 0.0 if first else blend)
+	if first:
+		_ap.advance(0.0)                   # 처음 자세를 바로 — 안 그러면 다음 갱신까지 레스트(T자) 자세로 보인다
+	_motion = motion
+	if _weapon_mi == null:
+		return
+	var g := DRGripFit.fit_anim(self, motion)
+	if g.is_empty():
+		return
+	if first or blend <= 0.0:
+		set_weapon_grip(g["grip"])
+		_grip_t = -1.0
+	else:
+		_grip_from = _grip
+		_grip_to = g["grip"]
+		_grip_blend = blend
+		_grip_t = 0.0
+
+
+## 동작을 dt 초 진행한다(AnimationPlayer 를 손으로 돌릴 때 — 게임은 초당 12번 모아서). 돌려주는 값 = 반복 동작이 한 바퀴 돌았나
+func step_motion(dt: float) -> bool:
+	if _ap == null:
+		return false
+	var before := _ap.current_animation_position
+	_ap.advance(dt)
+	var wrapped := _ap.current_animation_position < before
+	if _grip_t >= 0.0:
+		_grip_t += dt
+		var k := clampf(_grip_t / maxf(_grip_blend, 0.001), 0.0, 1.0)
+		set_weapon_grip(_grip_from.interpolate_with(_grip_to, k))
+		if k >= 1.0:
+			_grip_t = -1.0
+	return wrapped
+
+
+## 동작마다 무기 그립을 미리 계산(로딩 때). DRGripFit 캐시라 같은 몸 · 무기 · 동작 묶음이면 병사 수와 상관없이 한 번.
+## 처음 계산은 자세를 잠깐 바꿨다 되돌리므로 재생 중이 아닐 때 부른다
+func precompute_grips() -> void:
+	if _weapon_mi == null or _ap == null:
+		return
+	for n in _ap.get_animation_list():
+		if String(n) != "RESET":
+			DRGripFit.fit_anim(self, String(n))
+
+
+## 동작 묶음의 동작 이름(RESET 뺌)
+func motion_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	if _ap != null:
+		for n in _ap.get_animation_list():
+			if String(n) != "RESET":
+				out.append(String(n))
+	return out
+
+
+func current_motion() -> String:
+	return _motion
+
+
+# ---------------------------------------------------------------- 만들기
+
 ## 몸 glb 를 인스턴스해 구조를 그대로 두고, 원래 통메시를 빼고 슬롯 메시 셋(기본 몸 = 내복)을 붙인다. 다시 부르면 처음부터.
-func setup(body_model: String = BODY_DEFAULT) -> bool:
+## 프리팹으로 쓸 때는 build() 가 칸(body_model …)대로 부른다
+func setup(model_path: String = BODY_DEFAULT) -> bool:
 	_clear()
-	var e := load_entry(body_model)
+	var e := load_entry(model_path)
 	if e.is_empty():
 		return false
-	var ps := load(body_model) as PackedScene
+	var ps := load(model_path) as PackedScene
 	_model = ps.instantiate() as Node3D if ps != null else null
 	if _model == null:
-		push_error("[DRCharacter3D] 몸 모델의 루트가 Node3D 가 아닙니다: %s" % body_model)
+		push_error("[DRCharacter3D] 몸 모델의 루트가 Node3D 가 아닙니다: %s" % model_path)
 		return false
 	add_child(_model)
 	_skel = DRBaker._find_node(_model, "Skeleton3D") as Skeleton3D
 	_ap = DRBaker._find_node(_model, "AnimationPlayer") as AnimationPlayer
 	if _skel == null:
-		push_error("[DRCharacter3D] Skeleton3D 가 없습니다: %s" % body_model)
+		push_error("[DRCharacter3D] Skeleton3D 가 없습니다: %s" % model_path)
 		_clear()
 		return false
 	if _ap == null:                        # 스킨만 받은 몸 — 동작은 set_motions 로 넣는다
@@ -113,7 +325,7 @@ func setup(body_model: String = BODY_DEFAULT) -> bool:
 		mi.skeleton = NodePath("..")
 		_slot_mi[s] = mi
 	_body = e
-	_body_path = body_model
+	_body_path = model_path
 	for s in SLOTS:
 		_put(String(s), e)
 	_apply_shadow()
@@ -256,7 +468,8 @@ func model_aabb() -> AABB:
 	return _body.get("aabb", AABB())
 
 
-func body_model() -> String:
+## 지금 조립한 몸 모델 경로(setup 에 준 것)
+func body_path() -> String:
 	return _body_path
 
 

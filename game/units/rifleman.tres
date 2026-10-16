@@ -3,9 +3,11 @@
 [ext_resource type="Resource" path="res://game/units/rifleman_motions.tres" id="1_r7pbs"]
 [ext_resource type="Script" path="res://game/data/soldier_type.gd" id="2_jtjq3"]
 [ext_resource type="Resource" path="res://game/units/kar98k.tres" id="3_dtbeu"]
+[ext_resource type="PackedScene" path="res://game/units/soldier_base.tscn" id="4_base"]
 
 [resource]
 script = ExtResource("2_jtjq3")
 weapon = ExtResource("3_dtbeu")
+prefab = ExtResource("4_base")
 outfit_json = "res://outfits/uniform_m36/outfit.json"
 motions = ExtResource("1_r7pbs")

@@ -43,19 +43,25 @@ func _run() -> void:
 	var t0 := Time.get_ticks_usec()
 	view.prewarm(type, squads * 2 * type.squad_size)
 	var prewarm_ms := float(Time.get_ticks_usec() - t0) / 1000.0
-	var pool: Array = view._pool3d.get(BattleView3D._type_key(type), [])
+	if type.prefab == null:
+		fails.append("병종에 유닛 프리팹이 없음")
+	var pool: Array = view._pool3d.get(BattleView3D._prefab_key(type), []) if type.prefab != null else []
 	if pool.size() != squads * 2 * type.squad_size:
 		fails.append("미리 만든 캐릭터 수 %d" % pool.size())
 	if not pool.is_empty():
 		var ch := pool[0] as DRCharacter3D
 		var ap := ch.get_animation_player()
-		print("캐릭터  슬롯 %s · 무기 %s · 동작 %d개 · 키 %.3f m · 미리 만들기 %d명 %.0f ms" % [
+		print("캐릭터  프리팹 %s · 슬롯 %s · 무기 %s · 동작 %d개 · 키 %.2f m(모델 %.3f) · 상의 %s · 하의 %s · 미리 만들기 %d명 %.0f ms" % [
+			type.prefab.resource_path.get_file(),
 			str(DRCharacter3D.SLOTS.map(func(sl): return ch.get_slot_node(sl) != null and ch.get_slot_node(sl).mesh != null)),
-			str(ch.get_weapon_node() != null), ap.get_animation_list().size(), ch.model_height(), pool.size(), prewarm_ms])
+			str(ch.get_weapon_node() != null), ap.get_animation_list().size(), ch.height_m, ch.model_height(),
+			ch.worn("top").get_file(), ch.worn("bottom").get_file(), pool.size(), prewarm_ms])
 		if ch.get_weapon_node() == null:
 			fails.append("무기 안 붙음")
 		if ap.get_animation_list().size() < 2:
-			fails.append("동작 묶음 안 들어감(%s)" % type.motion_library)
+			fails.append("동작 묶음 안 들어감(%s)" % (ch.motions.library_path if ch.motions != null else "동작 표 없음"))
+		if ch.worn("top") == "" or ch.worn("bottom") == "":
+			fails.append("프리팹 복장이 안 입혀짐")
 
 	# 2) 전투 — 동작 고르기 · 쓰러짐 · 풀 돌려쓰기 · 그립
 	for i in squads:
@@ -90,8 +96,8 @@ func _run() -> void:
 			elif String(last_motion.get(e.s.id, "")) != e.motion:
 				last_motion[e.s.id] = e.motion
 				played[e.motion] = int(played.get(e.motion, 0)) + 1
-			if e.grip_t >= 0.0 and last_grip.get(e.s.id, Transform3D.IDENTITY) != e.grip_to:
-				last_grip[e.s.id] = e.grip_to
+			if e.ch._grip_t >= 0.0 and last_grip.get(e.s.id, Transform3D.IDENTITY) != e.ch._grip_to:
+				last_grip[e.s.id] = e.ch._grip_to
 				grip_moves += 1
 		for team in 2:
 			if bf.count_fighting(team) == 0:

@@ -4,8 +4,8 @@ class_name MotionTable
 
 ## 동작 표 — "어느 상태일 때 어느 동작을 재생하나".  (보병_추상화.md §2-5 · §2-11)
 ##
-## 10-16 부터 상태마다 동작을 **여러 개 · 비중(%)** 으로 둔다(DRMotionTable). 인스펙터에서 이 파일을 열면 상태별 편집 화면이 나온다
-## (Dot Rigger 의 ui/motion_table_editor.gd): 동작 고르기 · 비중 % · 상하체 합성(하체 + 상체) · 3D 동작 내보내기.
+## 10-16 부터 상태마다 동작을 **여러 개 · 비중(%)** 으로 둔다(DRMotionTable). 인스펙터에서 이 파일을 열면 세트(자세별 묶음) · 상태별 편집 화면이
+## 나온다(Dot Rigger 의 ui/motion_table_editor.gd — ① 유닛 탭에도 같은 화면): 동작 고르기 · 비중 % · 상하체 합성(하체 + 상체) · 3D 동작 내보내기.
 ##   피격: Idle_Hit 50 % · Hit_Chest 50 %  → 맞을 때마다 둘 중 하나
 ##   앉기+사격: 합성(하체 Crouch_Idle + 상체 Firing_Rifle)
 ##
@@ -22,6 +22,8 @@ class_name MotionTable
 const BASES := ["서기", "걷기", "달리기", "앉기", "앉아걷기", "엎드림", "포복"]
 const ACTIONS := ["조준", "사격", "장전", "투척", "근접"]
 const OVERRIDES := ["피격", "제압", "패닉", "사망"]
+## 기본 세트(자세별) — 세트 이름 → 그 세트의 바탕 상태들
+const SET_BASES := {"서기": ["서기", "걷기", "달리기"], "앉기": ["앉기", "앉아걷기"], "엎드림": ["엎드림", "포복"]}
 
 ## 예전 표(10-15 까지: 상태 → 동작 이름 하나). 예전 파일을 불러오면 줄(clips)로 옮기고 비운다 — 인스펙터에는 안 보인다.
 ## "A+B" 이름은 상하체 합성(하체 A + 상체 B, 합성 기본 설정 = 프리셋 첫 합성과 같은 길이 맞춤 2 · 반복 · 상체 방향 유지 1)으로 옮긴다
@@ -58,6 +60,22 @@ func state_names() -> PackedStringArray:
 ## 예전 이름(10-15 까지) — pick 과 같다
 func find(candidates: PackedStringArray, available: PackedStringArray) -> String:
 	return pick(candidates, available)
+
+
+## 기본 세트 = 자세별 셋(10-16). 서기 = 서기 · 걷기 · 달리기(+행동) + 피격 · 제압 · 패닉 · 사망 /
+## 앉기 = 앉기 · 앉아걷기(+행동) + 덮어쓰기+앉기 / 엎드림 = 엎드림 · 포복(+행동) + 덮어쓰기+엎드림. 상태 이름 54개가 빠짐없이 한 번씩 든다
+func default_sets() -> Array[DRMotionSet]:
+	var out: Array[DRMotionSet] = []
+	for set_name in SET_BASES.keys():
+		var st := PackedStringArray()
+		for b in SET_BASES[set_name]:
+			st.append(String(b))
+			for a in ACTIONS:
+				st.append("%s+%s" % [b, a])
+		for o in OVERRIDES:
+			st.append(String(o) if set_name == "서기" else "%s+%s" % [o, set_name])
+		out.append(DRMotionSet.make(String(set_name), st))
+	return out
 
 
 func _migrate_legacy(old: Dictionary) -> void:

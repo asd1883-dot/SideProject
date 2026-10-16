@@ -4,7 +4,8 @@ class_name DRHubWindow
 
 ## Dot Rigger 창 — 한 창에 탭 페이지.  프로젝트 > 도구 > Dot Rigger.
 ##
-##   [ Dot Rigger | ① 캐릭터 굽기 | ② 장비 굽기 | ③ 복장 굽기 ]        Ctrl+1 · 2 · 3
+##   [ Dot Rigger | ① 유닛 | ② 장비 굽기 | ③ 복장 굽기 ]        Ctrl+1 · 2 · 3
+##   (10-16: ① 은 3D 유닛 탭 — 예전 2D 캐릭터 굽기 페이지(main_window.gd)는 사용자 지시로 뺐다)
 ##   ┌───────────────────────── 고른 페이지 ─────────────────────────┐
 ##
 ## - 페이지는 처음 눌렀을 때 만든다(창이 빨리 뜨고, 안 쓰는 페이지는 비용이 없다). 한 번 만든 페이지는 탭을 바꿔도
@@ -17,7 +18,7 @@ class_name DRHubWindow
 
 const META_SECTION := "dot_rigger_hub"
 const PAGES := [
-	{"key": "rig", "title": "① 캐릭터 굽기", "tip": "3D 모델 → 2D 컷아웃 퍼펫(파트 그림 + 뼈 + 동작) · 세트 굽기"},
+	{"key": "unit", "title": "① 유닛", "tip": "유닛 프리팹(3D) — 몸 · 복장 · 무기 · 세트별 동작 표 · 3D 도트 미리보기 · 새 자식 유닛(상속)"},
 	{"key": "equip", "title": "② 장비 굽기", "tip": "무기 · 헬멧을 퍼펫의 세트마다 맞춰 굽기(그립 · 그리기 순서)"},
 	{"key": "outfit", "title": "③ 복장 굽기", "tip": "옷 갈아입히기 — 뼈대에 붙이기 · 부위 칠하기 · 상의/하의 굽기"},
 ]
@@ -51,8 +52,8 @@ func _init() -> void:
 
 static func _make_page(key: String) -> DRPage:
 	match key:
-		"rig":
-			return DRMainWindow.new()
+		"unit":
+			return DRUnitPage.new()
 		"equip":
 			return DREquipWindow.new()
 		"outfit":
@@ -352,14 +353,14 @@ func _show_context() -> void:
 	_ctx_note.tooltip_text = _ctx_note.text.strip_edges()
 
 
-## 창을 띄운다 — key 를 안 주면 마지막에 보던 탭(처음이면 캐릭터 굽기)
+## 창을 띄운다 — key 를 안 주면 마지막에 보던 탭(처음이면 ① 유닛). 예전에 기억한 "rig"(2D 캐릭터 굽기)는 ① 유닛으로
 func open(key: String = "") -> void:
 	if key == "":
 		key = _current
 	if key == "" and Engine.is_editor_hint():
-		key = String(EditorInterface.get_editor_settings().get_project_metadata(META_SECTION, "page", "rig"))
+		key = String(EditorInterface.get_editor_settings().get_project_metadata(META_SECTION, "page", "unit"))
 	if not _buttons.has(key):
-		key = "rig"
+		key = "unit"
 	if not visible:
 		_show_window()
 	else:

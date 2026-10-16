@@ -123,10 +123,48 @@ func _run() -> void:
 	ed._show_empty.button_pressed = true
 	await process_frame
 	await process_frame
-	print("      빈 상태도 보기: 상태 칸 %d개" % ed._list.get_child_count())
-	_check(ed._list.get_child_count() >= MotionTable.all_keys().size(), "빈 상태도 보기")
+	var heads := _state_heads(ed)
+	print("      빈 상태도 보기: 세트 %d개 · 상태 칸 %d개" % [ed._list.get_child_count(), heads])
+	_check(heads >= MotionTable.all_keys().size(), "빈 상태도 보기")
+
+	# 7) 세트 — 기본(자세별 셋이 상태 54개를 한 번씩) · 세트 더하기 · 새 상태 · 옮기기 · 이름 바꾸기 · 지우기
+	var ds := MotionTable.new().default_sets()
+	var cover := {}
+	var dup := 0
+	for s in ds:
+		for st in s.states:
+			dup += 1 if cover.has(st) else 0
+			cover[st] = true
+	print("세트  기본 %s · 상태 %d개(겹침 %d)" % [", ".join(ds.map(func(s): return "%s %d" % [s.name, s.states.size()])), cover.size(), dup])
+	_check(ds.size() == 3 and cover.size() == MotionTable.all_keys().size() and dup == 0, "기본 세트가 상태를 한 번씩 덮지 않음")
+	ed._new_set.text = "설치"
+	ed._on_add_set()
+	ed._add_clip("설치", false, "설치")
+	ed._move_state("피격", "앉기")
+	print("      세트 더하기 · 새 상태 → %s · 설치 상태의 세트 %s · 피격 → %s" % [str(mt.sets.map(func(s): return s.name)), mt.set_of("설치"), mt.set_of("피격")])
+	_check(mt.sets.size() == 4 and mt.set_of("설치") == "설치" and mt.clips_of("설치").size() == 1 and mt.set_of("피격") == "앉기", "세트 더하기 · 새 상태 · 옮기기")
+	ed._rename_set("설치", "거치")
+	_check(mt.set_of("설치") == "거치", "세트 이름 바꾸기")
+	ed._delete_set("거치")
+	_check(mt.sets.size() == 3 and mt.set_of("설치") == "" and mt.clips_of("설치").size() == 1, "세트 지우기(상태 · 줄은 남음)")
+	print("      이름 바꾸기 · 지우기 → 세트 %s · 설치 상태는 세트 없음(줄 %d)" % [str(mt.sets.map(func(s): return s.name)), mt.clips_of("설치").size()])
+	await process_frame
+	await process_frame
+	var e2 := ResourceSaver.save(mt, tmp)
+	var back2 := ResourceLoader.load(tmp, "", ResourceLoader.CACHE_MODE_IGNORE) as MotionTable
+	_check(e2 == OK and back2 != null and back2.sets.size() == 3 and back2.set_of("피격") == "앉기", "세트 저장 · 다시 읽기")
 	ed.queue_free()
 	_finish()
+
+
+## 화면의 상태 칸 수(접기 단추 "▸ 상태" · "▾ 상태" — 세트 단추는 "세트 ·" 가 든다)
+func _state_heads(ed: DRMotionTableEditor) -> int:
+	var n := 0
+	for b in ed._list.find_children("*", "Button", true, false):
+		var t := (b as Button).text
+		if (t.begins_with("▸ ") or t.begins_with("▾ ")) and not t.contains("세트 ·"):
+			n += 1
+	return n
 
 
 func _ws(t: DRMotionTable, st: String) -> String:

@@ -12,6 +12,8 @@ class_name DRMotionTable
 
 ## 줄들(같은 상태의 줄끼리 비중을 나눈다)
 @export var clips: Array[DRMotionClip] = []
+## 세트(상태 이름 묶음 — 자세별 · 장비별). 정리용이라 고르기에는 안 쓰인다. 비면 default_sets()(게임의 표가 자세별 셋을 준다)
+@export var sets: Array[DRMotionSet] = []
 ## 어디에도 안 걸릴 때 재생할 동작(비우면 지금 동작을 그대로 둔다)
 @export var default_motion := ""
 ## 3D 동작 내보내기가 이 표의 동작을 저장할 곳(AnimationLibrary .res). 병종의 motion_library 가 비면 게임이 이것을 읽는다
@@ -36,6 +38,28 @@ func state_names() -> PackedStringArray:
 		if c != null and not out.has(c.state):
 			out.append(c.state)
 	return out
+
+
+## 세트가 비었을 때 보여 줄 기본 세트. 게임의 표가 덮어 쓴다(자세별 서기 · 앉기 · 엎드림). 여기 기본 = 줄에 나온 상태 전부 한 세트
+func default_sets() -> Array[DRMotionSet]:
+	var out: Array[DRMotionSet] = []
+	var st := state_names()
+	if not st.is_empty():
+		out.append(DRMotionSet.make("전체", st))
+	return out
+
+
+## 화면에 보일 세트 — 저장된 세트, 없으면 기본 세트
+func effective_sets() -> Array[DRMotionSet]:
+	return sets if not sets.is_empty() else default_sets()
+
+
+## 그 상태가 든 세트 이름("" = 어느 세트에도 없음)
+func set_of(state: String) -> String:
+	for s in effective_sets():
+		if s.states.has(state):
+			return s.name
+	return ""
 
 
 ## 그 상태의 줄들(표 순서)
@@ -152,21 +176,29 @@ func composite_defs() -> Array:
 	return out
 
 
-## 줄 전부를 값으로(인스펙터의 되돌리기 기록용 — 화면 노드는 인스펙터가 다시 만들면 사라지므로 기록은 표가 들고 있는다)
-func snapshot() -> Array:
-	var out: Array = []
+## 줄 · 세트 전부를 값으로 {clips: [줄 사전 …], sets: [세트 사전 …]} — 인스펙터 · 유닛 탭의 되돌리기 기록용
+## (화면 노드는 인스펙터가 다시 만들면 사라지므로 기록은 표가 들고 있는다). 세트가 비어 있으면 기본 세트를 적어 넣는다(고치면 저장되게)
+func snapshot() -> Dictionary:
+	var cl: Array = []
 	for c in clips:
 		if c != null:
-			out.append(c.to_dict())
-	return out
+			cl.append(c.to_dict())
+	var st: Array = []
+	for s in effective_sets():
+		st.append(s.to_dict())
+	return {"clips": cl, "sets": st}
 
 
-## snapshot() 으로 만든 값으로 줄 전부를 바꾼다(되돌리기 · 다시 하기가 부른다)
-func restore_snapshot(snap: Array) -> void:
+## snapshot() 으로 만든 값으로 줄 · 세트 전부를 바꾼다(되돌리기 · 다시 하기가 부른다)
+func restore_snapshot(snap: Dictionary) -> void:
 	var out: Array[DRMotionClip] = []
-	for d in snap:
+	for d in snap.get("clips", []):
 		out.append(DRMotionClip.from_dict(d as Dictionary))
+	var ss: Array[DRMotionSet] = []
+	for d in snap.get("sets", []):
+		ss.append(DRMotionSet.from_dict(d as Dictionary))
 	clips = out
+	sets = ss
 	emit_changed()
 
 

@@ -49,28 +49,23 @@ class_name SoldierType
 ## 총구 높이(m) — 서기 / 앉기 / 엎드림
 @export var muzzle_heights := Vector3(1.45, 0.95, 0.3)
 
-@export_group("외형")
+@export_group("외형 3D")
+## 유닛 프리팹(씬) — 3D 모습: 몸 · 상의 · 하의 · 무기 · 동작 표 · 키(루트 DRCharacter3D 의 칸).
+## 기본형 군인 = game/units/soldier_base.tscn, 다른 유닛 = 그것을 상속한 자식 씬(Dot Rigger ① 유닛 탭). 숫자(능력치 · 판정)는 이 병종 리소스에
+@export var prefab: PackedScene
+
+@export_group("외형 2D (예전 퍼펫 화면)")
 ## 구운 퍼펫 세트(sets.json) — 2D 화면용
 @export_file("*.json") var sets_json := "res://puppet/sets.json"
-## 복장(outfit.json) — 비우면 몸 그대로. 2D 는 구운 복장 그림, 3D 는 그 파일의 옷 모델(model)과 상의 · 하의 구분(slots)을 쓴다
+## 복장(outfit.json) — 2D 구운 복장 그림
 @export_file("*.json") var outfit_json := ""
-## 이 병종의 키(m) — 화면에 그릴 때 퍼펫 · 3D 캐릭터를 이 키에 맞춘다
+## 이 병종의 키(m) — 2D 퍼펫을 이 키에 맞춘다(3D 는 프리팹의 키)
 @export var height_m := 1.75
 ## 구운 퍼펫에서 발끝~머리끝이 몇 픽셀인가(화면 배율 계산용, 2D)
 @export var puppet_body_px := 200.0
 
-@export_group("외형 3D")
-## 3D 화면의 기본 몸(사람 몸 glb). 옷을 안 입힌 슬롯은 이 몸(내복)이 보인다
-@export_file("*.glb", "*.gltf") var body_model := "res://source3d/characters/human_base/human_base.glb"
-## 3D 동작 묶음(AnimationLibrary). 비우면 동작 표의 library_path — 동작 표 인스펙터의 [3D 동작 내보내기] 가 거기에 저장한다
-@export_file("*.res", "*.tres") var motion_library := ""
-## 상의만 다른 복장으로(outfit.json). 비우면 위의 복장의 상의
-@export_file("*.json") var outfit_top_json := ""
-## 하의만 다른 복장으로(outfit.json). 비우면 위의 복장의 하의
-@export_file("*.json") var outfit_bottom_json := ""
-
 @export_group("동작 표")
-## 어느 상태에 어느 동작을 재생하나(상태마다 여러 개 · 비중 % · 상하체 합성). 열면 상태별 편집 화면
+## 2D 화면의 동작 표(3D 는 프리팹의 동작 표 — 기본형 군인은 같은 표를 쓴다)
 @export var motions: MotionTable
 
 
