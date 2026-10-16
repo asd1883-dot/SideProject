@@ -472,8 +472,14 @@ func _add_forearm_twist() -> int:
 				a.track_set_path(nt, path)
 				a.track_set_interpolation_type(nt, Animation.INTERPOLATION_LINEAR)
 				var rt := skeleton.get_bone_rest(bi).basis.get_rotation_quaternion()
+				var th_prev := 0.0
 				for k in a.track_get_key_count(ti_h):
 					var th := _twist_about(rq.inverse() * (a.track_get_key_value(ti_h, k) as Quaternion), a_h)
+					# θ 는 ±180° 에서 감긴다 — 이웃 키와 가까운 쪽으로 편다(10-15). 안 펴면 손이 180° 근처를 지날 때 비틀림 뼈가 한 프레임에
+					# θ × 비율만큼 뒤집혔다(Crouch_Rifle_Kneel_Hit_To_Back 왼손 −176° → +180° → −167°: 비틀림1 이 174° 튐 — 3D 로 쓰면 아래팔 살이 꼬여 보임)
+					if k > 0:
+						th = th_prev + wrapf(th - th_prev, -PI, PI)
+					th_prev = th
 					a.rotation_track_insert_key(nt, a.track_get_key_time(ti_h, k), (Quaternion(a_l, th * f) * rt).normalized())
 		lib.remove_animation(n)
 		lib.add_animation(n, a)
