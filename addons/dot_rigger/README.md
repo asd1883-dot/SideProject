@@ -497,7 +497,8 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 |---|---|
 | 동작 표 | `DRMotionTable` · `DRMotionClip` — 상태마다 동작 여러 개 · 비중 % · 상하체 합성. 인스펙터에서 열면 상태별 편집 화면(`ui/motion_table_editor.gd`) |
 | 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 동작 표 인스펙터의 `3D 동작 내보내기` · **도구 메뉴 "Dot Rigger — 3D 동작 내보내기"** · `tools/export_motions_cli.gd [--check]` |
-| 병사 한 명 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 무기. `wear(outfit.json, ["top"])` 로 상의 · 하의를 따로 입힌다. 메시 · 재질 · Skin 은 병사끼리 공유 |
+| 병사 한 명 · 유닛 프리팹 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 무기. 씬 루트로 두면 **유닛 프리팹**(인스펙터 칸: 몸 · 상의 · 하의 · 무기 · 동작 표 · 키 — 씬에 들어가면 칸대로 조립). 다른 유닛 = 상속 씬. `play_motion` · `step_motion`(무기 그립 섞기 포함) · `dress` · `wear(outfit.json, ["top"])`. 메시 · 재질 · Skin 은 병사끼리 공유 |
+| ① 유닛 탭 | `ui/unit_page.gd` — 유닛 목록(부모 → 자식) · 새 자식 유닛 · 모습 칸(부모 값 / 바꿈) · 3D 도트 미리보기 · 동작 표. 예전 ① 2D 캐릭터 굽기 창은 10-16 에 지움 |
 | 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑 |
 | 무기 그립 | `DRGripFit` — 장비 창 그립을 지금 몸 · 지금 동작의 두 손에 다시 맞춘다(동작별 캐시) |
 | 도트 화면 | `DRDotView3D` — 2D 캔버스 안의 3D 창(저해상도 · nearest · 도트 격자 스냅 · 외곽선 `shaders/dot_edges.gdshader`) |

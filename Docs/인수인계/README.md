@@ -66,7 +66,7 @@ P="C:/<경로>/SideProject"
 
 "$G" --headless --path "$P" --import                                                     # ① 스크립트 등록 (새 class_name 추가 후에도 필수)
 "$G" --headless --path "$P" --script res://addons/dot_rigger/tools/bake_cli.gd -- --diag   # ② 본→파트 매핑
-"$G" --path "$P" --resolution 1280x860 --script res://addons/dot_rigger/tools/ui_smoke_cli.gd       # ③ 에디터 창 전체
+"$G" --headless --path "$P" --script res://addons/dot_rigger/tools/unit_page_smoke_cli.gd         # ③ ① 유닛 탭(10-16 — 예전 2D 캐릭터 굽기 창의 ui_smoke_cli 는 창과 함께 지움)
 "$G" --path "$P" --resolution 400x300  --script res://addons/dot_rigger/tools/rootbone_check_cli.gd # ④ 파트 피벗
 "$G" --path "$P" --resolution 400x300  --script res://addons/dot_rigger/tools/drift_check_cli.gd    # ⑤ 자세 고정
 "$G" --path "$P" --resolution 400x300  --script res://addons/dot_rigger/tools/layer_check_cli.gd    # ⑥ 발(발가락 합침)/레이어
@@ -90,14 +90,14 @@ python pipeline/check_character.py source3d/characters/uniform_m36/uniform_m36.g
 ```powershell
 $G = "C:\<경로>\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64_console.exe"
 $P = "C:\<경로>\SideProject"
-& $G --path $P --resolution 1280x860 --script res://addons/dot_rigger/tools/ui_smoke_cli.gd
+& $G --headless --path $P --script res://addons/dot_rigger/tools/unit_page_smoke_cli.gd
 ```
 
 | 도구 | 성공 기준 | 최근 결과 |
 |---|---|---|
 | ① `--import` | 출력에 `SCRIPT ERROR` / `Parse Error` / `Script inherits from native type` 없음 | 0건 (09-16) |
 | ② `bake_cli --diag` | 본 65개 → 15파트(발가락은 발에 합침), `(미매핑)` 없음 | ✓ (09-15) |
-| ③ `ui_smoke_cli` | 마지막 줄 `스모크 테스트 전부 통과`, 종료 코드 0 (20번 = 회전 기즈모, 21번 = 부드러운 도트 이동, 22번 = 캐릭터 이동, 23번 = 재생할 애니 분리, 24번 = 레스트 자세 찾기 + 레스트 시점이 베이크까지, 25번 = 재생 속도·스크럽, 26번 = 리깅 애니메이션 세트 편집·프리셋, 27번 = 동작 평면화, 28번 = 레스트 자동, 29번 = 도트 아웃라인 전체 실루엣/파트별, 30번 = 추가 동작 폴더, 31번 = 바인드 포즈·지금 프레임을 레스트로, 32번 = 도트 격자 고정, 33번 = 상하체 합성 팝업, 34번 = 선 색 방식 카툰/픽셀 퍼펙트) | ✓ (09-21. 09-14 에 `puppet_test/` **없는 상태**에서도 통과 = 새 clone 조건) |
+| ③ `unit_page_smoke_cli` | 마지막 줄 `UNIT PAGE SMOKE OK` — 유닛 목록 · 미리보기 조립 · 상태 틀기(합성 포함) · 칸 바꾸기 · 새 자식 유닛(저장한 씬 = 부모 상속 + 바꾼 칸만) · 자기 동작 표. (예전 ③ `ui_smoke_cli` = 2D 캐릭터 굽기 창 검사는 10-16 창과 함께 지움 — 3D 노선, `Docs/게임설계/3D_전환.md`) | ✓ (10-16) |
 | ④ `rootbone_check_cli` | `모든 파트의 루트 본 정상` (Hips = pelvis, Foot = foot) | ✓ (09-15) |
 | ⑤ `drift_check_cli` | `포즈 고정 OK` | ✓ (09-15) |
 | ⑥ `layer_check_cli` | `레이어 검사 전부 통과` — [0] 기본: 15파트, 발가락은 발에 합침, 늘이기는 전 파트 켬, 씬에 발가락 본 없음 · [1]~[4] 발가락 분리 모드: 17파트/15줄, Toe 만 늘이기 끔, z 가 항상 발+1, 구운 씬·rig.json 까지 | ✓ (09-15) |
