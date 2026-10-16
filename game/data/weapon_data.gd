@@ -36,5 +36,7 @@ class_name WeaponData
 @export var suppress_radius_m := 1.2
 
 @export_group("외형")
-## 구운 장비(equip.json) — 비우면 맨손
+## 구운 장비(equip.json) — 비우면 맨손(2D)
 @export_file("*.json") var equip_json := ""
+## 3D 무기 모델(장비 창이 만든 asset.json — 쥐는 자리 포함). 비우면 3D 화면에서 맨손
+@export_file("*.json") var model_asset := ""

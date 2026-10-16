@@ -8,3 +8,4 @@ display_name = "Kar98k"
 range_m = 26.0
 bullet_speed = 400.0
 spread_deg = 1.6
+model_asset = "res://source3d/weapons/kar98k/asset.json"

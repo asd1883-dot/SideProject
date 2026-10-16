@@ -50,14 +50,25 @@ class_name SoldierType
 @export var muzzle_heights := Vector3(1.45, 0.95, 0.3)
 
 @export_group("외형")
-## 구운 퍼펫 세트(sets.json)
+## 구운 퍼펫 세트(sets.json) — 2D 화면용
 @export_file("*.json") var sets_json := "res://puppet/sets.json"
-## 복장(outfit.json) — 비우면 구운 몸 그대로
+## 복장(outfit.json) — 비우면 몸 그대로. 2D 는 구운 복장 그림, 3D 는 그 파일의 옷 모델(model)과 상의 · 하의 구분(slots)을 쓴다
 @export_file("*.json") var outfit_json := ""
-## 이 병종의 키(m) — 화면에 그릴 때 퍼펫을 이 키에 맞춘다
+## 이 병종의 키(m) — 화면에 그릴 때 퍼펫 · 3D 캐릭터를 이 키에 맞춘다
 @export var height_m := 1.75
-## 구운 퍼펫에서 발끝~머리끝이 몇 픽셀인가(화면 배율 계산용)
+## 구운 퍼펫에서 발끝~머리끝이 몇 픽셀인가(화면 배율 계산용, 2D)
 @export var puppet_body_px := 200.0
+
+@export_group("외형 3D")
+## 3D 화면의 기본 몸(사람 몸 glb). 옷을 안 입힌 슬롯은 이 몸(내복)이 보인다
+@export_file("*.glb", "*.gltf") var body_model := "res://source3d/characters/human_base/human_base.glb"
+## 3D 동작 묶음(AnimationLibrary) — 동작 내보내기 도구가 동작 표로 만든 것:
+##   Godot --headless --path <프로젝트> --script res://addons/dot_rigger/tools/export_motions_cli.gd
+@export_file("*.res", "*.tres") var motion_library := "res://game/motions/rifleman_anims.res"
+## 상의만 다른 복장으로(outfit.json). 비우면 위의 복장의 상의
+@export_file("*.json") var outfit_top_json := ""
+## 하의만 다른 복장으로(outfit.json). 비우면 위의 복장의 하의
+@export_file("*.json") var outfit_bottom_json := ""
 
 @export_group("동작 표")
 ## 어느 상태에 어느 동작을 재생하나

@@ -9,9 +9,11 @@ extends Node2D
 ## 빙의(직접 조종): 우리 병사를 마우스 왼쪽 단추로 누르면 그 병사가 된다 · Esc 로 풀고 지휘로 돌아옴
 ##   A · D 이동 · Shift 달리기 · W · S 깊이(안쪽/앞쪽) · C 앉기 · Z 엎드림 · 마우스 조준 · 왼쪽 단추 사격 · R 장전
 ##   (빙의 병사도 제압이 넘치면 강제로 엎드려 조작이 잠깐 잠긴다 — 설계 §2-8)
-## 보기: F1 판정 상자 · F2 상태 글자 · F3 퍼펫
+## 보기: F1 판정 상자 · F2 상태 글자 · F3 병사 그림
+##   3D 화면만: F4 복장 보기(병종 복장 → 상의만 → 하의만 → 내복) · F5 도트 크기(도트 하나 = 화면 1 ~ 4 픽셀)
 ##
-## 구조: 이 씬은 입력과 화면 배치만 한다. 논리 = Battlefield(game/sim) · 그리기 = BattleView(game/view).
+## 화면: 기본은 3D(병사 = 3D 캐릭터, BattleView3D — 10-15 3D 노선). 이 노드의 use_3d 를 끄거나 명령줄 -- --view=2d 면 예전 2D 퍼펫(BattleView).
+## 구조: 이 씬은 입력과 화면 배치만 한다. 논리 = Battlefield(game/sim) · 그리기 = BattleView / BattleView3D(game/view).
 ## 빙의 = 병사 기록의 "의도" 칸을 AI 두뇌 대신 여기서(키보드 · 마우스로) 채우는 것뿐이다.
 
 const TYPE_PATH := "res://game/units/rifleman.tres"
@@ -19,6 +21,9 @@ const TestField := preload("res://game/tools/test_field.gd")
 const AUTO_DEPLOY_EVERY := 25.0
 const AUTO_DEPLOY_BELOW := 12            # 적이 이보다 적으면 새 분대를 보낸다
 const HUD_SQUADS := 6                    # 화면 글자에 적는 분대 수(넘으면 "외 N개")
+
+## 병사를 3D 캐릭터로 그린다(끄면 예전 2D 퍼펫). 명령줄 -- --view=2d / --view=3d 가 이보다 먼저
+@export var use_3d := true
 
 var bf: Battlefield
 var view: BattleView
@@ -39,18 +44,27 @@ var _quit_at := -1.0
 var _start_squads := 2                    # 처음에 양쪽에 투입할 분대 수(--squads)
 var _auto_possess := false                # 검사용: 8초에 우리 병사 하나를 빙의, 16초에 풀기(--possess)
 var _frames := 0
+var _wear_arg := -1                       # 검사용 --wear=type|top|bottom|none (3D 복장 보기)
+var _dot_arg := 0                         # 검사용 --dot=N (3D 도트 크기)
 
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.42, 0.47, 0.42))
 	_type = load(TYPE_PATH) as SoldierType
+	_read_args()
 	bf = Battlefield.new()
 	bf.name = "Battlefield"
 	TestField.build(bf)
 	add_child(bf)
-	view = BattleView.new()
+	view = BattleView3D.new() if use_3d else BattleView.new()
 	view.name = "View"
 	add_child(view)
+	if view is BattleView3D:
+		var v3 := view as BattleView3D
+		if _dot_arg > 0:
+			v3.dot_px = _dot_arg
+		if _wear_arg >= 0:
+			v3.wear_mode = _wear_arg
 	view.setup(bf)
 	cam = Camera2D.new()
 	add_child(cam)
@@ -66,19 +80,24 @@ func _ready() -> void:
 	if _type == null:
 		_label.text = "병종 리소스가 없습니다: %s\nGodot --headless --path <프로젝트> --script res://game/tools/make_default_units.gd 를 먼저 돌리세요" % TYPE_PATH
 		return
-	_read_args()
 	view.prewarm(_type, _start_squads * 2 * _type.squad_size)
 	for i in _start_squads:
 		bf.deploy_squad(0, _type)
 		bf.deploy_squad(1, _type)
 
 
-## 명령줄(검사용): -- --shot=<폴더> [--seconds=30] [--cam=50] [--squads=2] [--possess]
+## 명령줄(검사용): -- --shot=<폴더> [--seconds=30] [--cam=50] [--squads=2] [--possess] [--view=2d|3d] [--wear=type|top|bottom|none] [--dot=2]
 ## 6초마다 화면을 저장하고 닫힌다. --possess = 8초에 우리 병사 하나를 빙의했다가 16초에 푼다(빙의 길에 오류가 없는지)
 func _read_args() -> void:
 	for a in OS.get_cmdline_user_args():
 		var s := String(a).trim_prefix("--")
-		if s.begins_with("shot="):
+		if s.begins_with("view="):
+			use_3d = s.substr(5) != "2d"
+		elif s.begins_with("wear="):
+			_wear_arg = maxi(["type", "top", "bottom", "none"].find(s.substr(5)), 0)
+		elif s.begins_with("dot="):
+			_dot_arg = clampi(int(s.substr(4)), 1, 6)
+		elif s.begins_with("shot="):
 			_shot_dir = s.substr(5)
 			DirAccess.make_dir_recursive_absolute(_shot_dir)
 		elif s.begins_with("seconds="):
@@ -195,8 +214,9 @@ func _capture(path: String) -> void:
 
 func _finish() -> void:
 	await RenderingServer.frame_post_draw
-	print("BATTLE TEST DONE  %.0f초  병사 기록 %d  평균 %.0f fps  z 띠 %d  총알 %d  맞음 %d  사살 %s  패닉 %s" % [bf.time, bf.soldiers.size(),
-		float(_frames) / maxf(bf.time, 0.001), view.get_bands_used(), bf.stats["shots"], bf.stats["hits"], str(bf.stats["kills"]), str(bf.stats["panics"])])
+	print("BATTLE TEST DONE  %s  %.0f초  병사 기록 %d  평균 %.0f fps  z 띠 %d  총알 %d  맞음 %d  사살 %s  패닉 %s" % ["3D" if view is BattleView3D else "2D",
+		bf.time, bf.soldiers.size(), float(_frames) / maxf(bf.time, 0.001), view.get_bands_used(), bf.stats["shots"], bf.stats["hits"],
+		str(bf.stats["kills"]), str(bf.stats["panics"])])
 	get_tree().quit()
 
 
@@ -210,6 +230,8 @@ func _update_hud() -> void:
 		lines.append("A·D 이동  Shift 달리기  W·S 깊이  C 앉기  Z 엎드림  마우스 조준·사격  R 장전  Esc 풀기")
 	else:
 		lines.append("1 분대 투입  2 적 분대  T 적 자동(%s)  Q 전진  W 정지  E 후퇴  A·D 화면  휠 확대  병사 클릭 = 빙의" % ("켬" if _auto_enemy else "끔"))
+	if view is BattleView3D:
+		lines.append("%s   F4 복장 보기  F5 도트 크기" % (view as BattleView3D).status_text())
 	var listed := 0
 	var more := 0
 	for sq in bf.squads:
@@ -258,6 +280,14 @@ func _unhandled_input(ev: InputEvent) -> void:
 			view.show_labels = not view.show_labels
 		KEY_F3:
 			view.show_puppets = not view.show_puppets
+		KEY_F4:
+			if view is BattleView3D:
+				var v3 := view as BattleView3D
+				v3.wear_mode = (v3.wear_mode + 1) % BattleView3D.WEAR_NAMES.size()
+		KEY_F5:
+			if view is BattleView3D:
+				var v3 := view as BattleView3D
+				v3.dot_px = v3.dot_px % 4 + 1
 		KEY_SPACE:
 			bf.running = not bf.running
 		KEY_ESCAPE:

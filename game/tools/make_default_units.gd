@@ -28,6 +28,7 @@ func _init() -> void:
 		weapon.spread_recover_deg = 1.2
 		weapon.suppress_power = 0.3
 		weapon.suppress_radius_m = 1.2
+		weapon.model_asset = "res://source3d/weapons/kar98k/asset.json"
 		_save(weapon, weapon_path)
 	weapon = load(weapon_path) as WeaponData
 
@@ -62,6 +63,8 @@ func _init() -> void:
 		t.motions = motions
 		t.sets_json = "res://puppet/sets.json"
 		t.outfit_json = "res://outfits/uniform_m36/outfit.json"
+		t.body_model = "res://source3d/characters/human_base/human_base.glb"
+		t.motion_library = "res://game/motions/rifleman_anims.res"
 		_save(t, type_path)
 	print("UNITS DONE ", DIR)
 	quit()
