@@ -50,7 +50,8 @@ func _init() -> void:
 			"엎드림+조준": "Prone_Firing_Rifle", "엎드림+사격": "Prone_Firing_Rifle", "엎드림+투척": "Prone_Throw_Grenade",
 			"피격+엎드림": "Rifle_Prone_Hit_Reaction", "사망+엎드림": "Prone_Death",
 		}
-		motions.motions = m
+		motions.motions = m           # 상태마다 동작 하나씩 — 넣는 순간 줄(clips, 비중 100 %)로 옮겨진다. "A+B" = 상하체 합성
+		motions.library_path = "res://game/motions/rifleman_anims.res"
 		_save(motions, motions_path)
 	motions = load(motions_path) as MotionTable
 
@@ -64,8 +65,7 @@ func _init() -> void:
 		t.sets_json = "res://puppet/sets.json"
 		t.outfit_json = "res://outfits/uniform_m36/outfit.json"
 		t.body_model = "res://source3d/characters/human_base/human_base.glb"
-		t.motion_library = "res://game/motions/rifleman_anims.res"
-		_save(t, type_path)
+		_save(t, type_path)          # 3D 동작 묶음(motion_library)은 비워 둔다 = 동작 표의 library_path
 	print("UNITS DONE ", DIR)
 	quit()
 

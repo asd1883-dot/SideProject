@@ -5,18 +5,22 @@ extends EditorPlugin
 ## 창(DRHubWindow) 안에 탭 페이지: ① 캐릭터 굽기 · ② 장비 굽기 · ③ 복장 굽기.
 ## (10-06 이전에는 기능마다 창이 따로였다 — 여러 창을 껐다 켜는 게 번거로워 한 창의 탭으로 합쳤다)
 ## 3D 노선(10-15): 같은 메뉴의 "3D 동작 내보내기" = 게임 동작 표의 동작을 3D 캐릭터용 AnimationLibrary 로 저장(DRMotionExporter).
+## 동작 표(DRMotionTable)를 인스펙터에서 열면 상태별 편집 화면(동작 여러 개 · 비중 % · 상하체 합성 — ui/motion_table_editor.gd, 10-16).
 
 const MENU_ITEM := "Dot Rigger"
 const MENU_RESET := "Dot Rigger — 개발 내용 갱신"
 const MENU_MOTIONS := "Dot Rigger — 3D 동작 내보내기"
 
 var _hub: DRHubWindow
+var _motion_inspector: DRMotionTableInspector
 
 
 func _enter_tree() -> void:
 	add_tool_menu_item(MENU_ITEM, _open)
 	add_tool_menu_item(MENU_RESET, _reopen)
 	add_tool_menu_item(MENU_MOTIONS, _export_motions)
+	_motion_inspector = DRMotionTableInspector.new()
+	add_inspector_plugin(_motion_inspector)
 	# 추가 동작 파일에 BoneMap 자동 지정(DRBoneMapAuto) — 가져오기가 끝날 때마다 + 켤 때 한 번 전체
 	EditorInterface.get_resource_filesystem().resources_reimported.connect(_on_resources_reimported)
 	_auto_bone_map.call_deferred(PackedStringArray())
@@ -26,6 +30,9 @@ func _exit_tree() -> void:
 	remove_tool_menu_item(MENU_ITEM)
 	remove_tool_menu_item(MENU_RESET)
 	remove_tool_menu_item(MENU_MOTIONS)
+	if _motion_inspector != null:
+		remove_inspector_plugin(_motion_inspector)
+		_motion_inspector = null
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs.resources_reimported.is_connected(_on_resources_reimported):
 		fs.resources_reimported.disconnect(_on_resources_reimported)

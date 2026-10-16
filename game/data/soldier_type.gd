@@ -62,16 +62,15 @@ class_name SoldierType
 @export_group("외형 3D")
 ## 3D 화면의 기본 몸(사람 몸 glb). 옷을 안 입힌 슬롯은 이 몸(내복)이 보인다
 @export_file("*.glb", "*.gltf") var body_model := "res://source3d/characters/human_base/human_base.glb"
-## 3D 동작 묶음(AnimationLibrary) — 동작 내보내기 도구가 동작 표로 만든 것:
-##   Godot --headless --path <프로젝트> --script res://addons/dot_rigger/tools/export_motions_cli.gd
-@export_file("*.res", "*.tres") var motion_library := "res://game/motions/rifleman_anims.res"
+## 3D 동작 묶음(AnimationLibrary). 비우면 동작 표의 library_path — 동작 표 인스펙터의 [3D 동작 내보내기] 가 거기에 저장한다
+@export_file("*.res", "*.tres") var motion_library := ""
 ## 상의만 다른 복장으로(outfit.json). 비우면 위의 복장의 상의
 @export_file("*.json") var outfit_top_json := ""
 ## 하의만 다른 복장으로(outfit.json). 비우면 위의 복장의 하의
 @export_file("*.json") var outfit_bottom_json := ""
 
 @export_group("동작 표")
-## 어느 상태에 어느 동작을 재생하나
+## 어느 상태에 어느 동작을 재생하나(상태마다 여러 개 · 비중 % · 상하체 합성). 열면 상태별 편집 화면
 @export var motions: MotionTable
 
 

@@ -1,32 +1,132 @@
 [gd_resource type="Resource" script_class="MotionTable" format=3]
 
+[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_motion_clip.gd" id="1_ggnai"]
 [ext_resource type="Script" path="res://game/data/motion_table.gd" id="1_x1ky6"]
+
+[sub_resource type="Resource" id="Resource_eneax"]
+script = ExtResource("1_ggnai")
+state = "서기"
+anim = "Rifle_Idle"
+
+[sub_resource type="Resource" id="Resource_ykdwo"]
+script = ExtResource("1_ggnai")
+state = "걷기"
+anim = "Walk_With_Rifle"
+
+[sub_resource type="Resource" id="Resource_rokfx"]
+script = ExtResource("1_ggnai")
+state = "달리기"
+anim = "Sprint"
+
+[sub_resource type="Resource" id="Resource_sy5b1"]
+script = ExtResource("1_ggnai")
+state = "서기+조준"
+anim = "Rifle_Aiming_Idle"
+
+[sub_resource type="Resource" id="Resource_85iwe"]
+script = ExtResource("1_ggnai")
+state = "서기+사격"
+anim = "Firing_Rifle"
+
+[sub_resource type="Resource" id="Resource_dhw2d"]
+script = ExtResource("1_ggnai")
+state = "서기+장전"
+anim = "Stand_Reloading"
+
+[sub_resource type="Resource" id="Resource_kkv45"]
+script = ExtResource("1_ggnai")
+state = "서기+투척"
+anim = "Toss_Grenade"
+
+[sub_resource type="Resource" id="Resource_c4rc8"]
+script = ExtResource("1_ggnai")
+state = "피격"
+anim = "Idle_Hit"
+
+[sub_resource type="Resource" id="Resource_7xc0q"]
+script = ExtResource("1_ggnai")
+state = "사망"
+anim = "Stand_Rifle_Hit_To_Back"
+
+[sub_resource type="Resource" id="Resource_cm0b1"]
+script = ExtResource("1_ggnai")
+state = "앉기"
+anim = "Crouch_Idle"
+
+[sub_resource type="Resource" id="Resource_lwb48"]
+script = ExtResource("1_ggnai")
+state = "앉아걷기"
+anim = "Crouch_Fwd"
+
+[sub_resource type="Resource" id="Resource_rd5gd"]
+script = ExtResource("1_ggnai")
+state = "앉기+조준"
+lower = "Crouch_Idle"
+upper = "Rifle_Aiming_Idle"
+
+[sub_resource type="Resource" id="Resource_g8wfn"]
+script = ExtResource("1_ggnai")
+state = "앉기+사격"
+lower = "Crouch_Idle"
+upper = "Firing_Rifle"
+
+[sub_resource type="Resource" id="Resource_vbmeh"]
+script = ExtResource("1_ggnai")
+state = "앉기+장전"
+anim = "Crouch_Reload"
+
+[sub_resource type="Resource" id="Resource_0lkre"]
+script = ExtResource("1_ggnai")
+state = "앉기+투척"
+lower = "Crouch_Idle"
+upper = "Toss_Grenade"
+
+[sub_resource type="Resource" id="Resource_hoe6v"]
+script = ExtResource("1_ggnai")
+state = "피격+앉기"
+anim = "Crouch_Hit"
+
+[sub_resource type="Resource" id="Resource_a0hkq"]
+script = ExtResource("1_ggnai")
+state = "사망+앉기"
+anim = "Crouch_Rifle_Kneel_Hit_To_Back"
+
+[sub_resource type="Resource" id="Resource_s2si2"]
+script = ExtResource("1_ggnai")
+state = "엎드림"
+anim = "Crawl_Idle"
+
+[sub_resource type="Resource" id="Resource_vvxn0"]
+script = ExtResource("1_ggnai")
+state = "포복"
+anim = "Crawl_Fwd"
+
+[sub_resource type="Resource" id="Resource_cc0al"]
+script = ExtResource("1_ggnai")
+state = "엎드림+조준"
+anim = "Prone_Firing_Rifle"
+
+[sub_resource type="Resource" id="Resource_kbv0j"]
+script = ExtResource("1_ggnai")
+state = "엎드림+사격"
+anim = "Prone_Firing_Rifle"
+
+[sub_resource type="Resource" id="Resource_ipdlj"]
+script = ExtResource("1_ggnai")
+state = "엎드림+투척"
+anim = "Prone_Throw_Grenade"
+
+[sub_resource type="Resource" id="Resource_q8p7h"]
+script = ExtResource("1_ggnai")
+state = "피격+엎드림"
+anim = "Rifle_Prone_Hit_Reaction"
+
+[sub_resource type="Resource" id="Resource_icjpi"]
+script = ExtResource("1_ggnai")
+state = "사망+엎드림"
+anim = "Prone_Death"
 
 [resource]
 script = ExtResource("1_x1ky6")
-motions = Dictionary[String, String]({
-"서기": "Rifle_Idle",
-"걷기": "Walk_With_Rifle",
-"달리기": "Sprint",
-"서기+조준": "Rifle_Aiming_Idle",
-"서기+사격": "Firing_Rifle",
-"서기+장전": "Stand_Reloading",
-"서기+투척": "Toss_Grenade",
-"피격": "Idle_Hit",
-"사망": "Stand_Rifle_Hit_To_Back",
-"앉기": "Crouch_Idle",
-"앉아걷기": "Crouch_Fwd",
-"앉기+조준": "Crouch_Idle+Rifle_Aiming_Idle",
-"앉기+사격": "Crouch_Idle+Firing_Rifle",
-"앉기+장전": "Crouch_Reload",
-"앉기+투척": "Crouch_Idle+Toss_Grenade",
-"피격+앉기": "Crouch_Hit",
-"사망+앉기": "Crouch_Rifle_Kneel_Hit_To_Back",
-"엎드림": "Crawl_Idle",
-"포복": "Crawl_Fwd",
-"엎드림+조준": "Prone_Firing_Rifle",
-"엎드림+사격": "Prone_Firing_Rifle",
-"엎드림+투척": "Prone_Throw_Grenade",
-"피격+엎드림": "Rifle_Prone_Hit_Reaction",
-"사망+엎드림": "Prone_Death"
-})
+clips = Array[ExtResource("1_ggnai")]([SubResource("Resource_eneax"), SubResource("Resource_ykdwo"), SubResource("Resource_rokfx"), SubResource("Resource_sy5b1"), SubResource("Resource_85iwe"), SubResource("Resource_dhw2d"), SubResource("Resource_kkv45"), SubResource("Resource_c4rc8"), SubResource("Resource_7xc0q"), SubResource("Resource_cm0b1"), SubResource("Resource_lwb48"), SubResource("Resource_rd5gd"), SubResource("Resource_g8wfn"), SubResource("Resource_vbmeh"), SubResource("Resource_0lkre"), SubResource("Resource_hoe6v"), SubResource("Resource_a0hkq"), SubResource("Resource_s2si2"), SubResource("Resource_vvxn0"), SubResource("Resource_cc0al"), SubResource("Resource_kbv0j"), SubResource("Resource_ipdlj"), SubResource("Resource_q8p7h"), SubResource("Resource_icjpi")])
+library_path = "res://game/motions/rifleman_anims.res"

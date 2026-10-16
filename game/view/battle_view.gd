@@ -323,14 +323,13 @@ func _on_died(s: BattleSoldier) -> void:
 	var p := e.puppet
 	if p == null:
 		return
-	# 죽을 때의 자세에 맞는 사망 동작을 찾는다(기본 동작으로 내려가면 안 되므로 find 를 쓰지 않는다)
+	# 죽을 때의 자세에 맞는 사망 동작을 찾는다(기본 동작으로 내려가면 안 되므로 pick 이 아니라 상태마다 pick_state)
 	var mt: MotionTable = s.type.motions if s.type != null else null
 	var m := ""
 	if mt != null:
 		for key in e.cands:
-			var cand := String(mt.motions.get(key, ""))
-			if cand != "" and e.avail.has(cand):
-				m = cand
+			m = mt.pick_state(key, e.avail)
+			if m != "":
 				break
 	if m != "":
 		p.speed_scale = 1.0
@@ -498,13 +497,18 @@ func _pick_motion(e: Entry) -> void:
 		return
 	if e.avail.is_empty():
 		e.avail = p.get_animations()
-	var m := mt.find(e.cands, e.avail)
+	var m := ""
+	var st := mt.state_of(e.cands, e.avail)
+	if st != "" and e.motion != "" and mt.has_motion(st, e.motion) and String(p.current_animation()) == e.motion:
+		m = e.motion                          # 고른 표 상태의 동작을 이미 틀고 있다 — 이어 간다(같은 상태에서 다시 뽑아 바뀌지 않게)
+	else:
+		m = mt.pick(e.cands, e.avail)         # 상태에 동작이 여럿이면 비중(%)대로 하나
 	if m != "" and (m != e.motion or String(p.current_animation()) != m):
 		p.play(m, 0.1)
 	e.motion = m
 	# 걷기에 달리기 동작을 빌려 쓰는 동안은 걷는 속도만큼 느리게 돌린다(걷기 동작을 따로 구웠으면 그대로)
 	var spd := 1.0
-	if s.move_state == BattleBody.Move.WALK and m != "" and m == String(mt.motions.get("달리기", "")):
+	if s.move_state == BattleBody.Move.WALK and m != "" and not mt.has_motion("걷기", m) and mt.has_motion("달리기", m):
 		spd = s.type.walk_speed / maxf(s.type.run_speed, 0.01)
 		if s.stance == BattleBody.Stance.CROUCH:
 			spd *= s.type.crouch_move_mult

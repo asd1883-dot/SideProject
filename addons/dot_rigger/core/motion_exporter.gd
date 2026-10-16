@@ -43,7 +43,10 @@ const RESET_NAME := "RESET"
 var preset_path := DEFAULT_PRESET
 ## "" 이면 표 없이(export_all 일 때만 의미가 있다)
 var table_path := DEFAULT_TABLE
-var out_path := DEFAULT_OUT
+## 표 객체를 바로 줄 때(인스펙터 — 저장 안 한 고침까지). 주면 table_path 대신 이것
+var table: Resource = null
+## "" 이면 표의 library_path(DRMotionTable), 그것도 비면 DEFAULT_OUT
+var out_path := ""
 ## true = 표와 상관없이 라이브러리의 동작 전부(표의 A+B 합성 · 제자리는 그대로 반영)
 var export_all := false
 ## Animation.compress()(손실) — 기본 끔. 10-15 실측(표 23동작): 1022 KB → 312 KB 로 줄지만 동작 몇 개에서 손 · 발이 튄다
@@ -76,6 +79,7 @@ var file_size := 0
 var _uses: Dictionary = {}       # 동작 이름 -> PackedStringArray(그 동작을 쓰는 상태 키)
 var _order: PackedStringArray    # 표에 처음 나온 순서
 var _defs: Array = []            # setup 에 넘긴 합성 정의(새로 만든 것 포함)
+var _table_defs: Array = []      # 표(DRMotionTable)의 상하체 합성 줄이 준 합성 정의 — 같은 이름이면 프리셋 것보다 먼저
 
 
 ## 내보내기 한 번. host = DRBaker 의 뷰포트를 붙일 노드(CLI 는 SceneTree.root). 결과 요약을 돌려준다.
@@ -97,6 +101,7 @@ func build(host: Node) -> bool:
 	in_place_names = PackedStringArray()
 	_uses = {}
 	_order = PackedStringArray()
+	_table_defs = []
 	var preset := load(preset_path) as DRPreset if ResourceLoader.exists(preset_path) else null
 	if preset == null:
 		warnings.append("프리셋을 열 수 없습니다: %s" % preset_path)
@@ -110,15 +115,22 @@ func build(host: Node) -> bool:
 		if not export_all:
 			warnings.append("동작 표를 열 수 없습니다: %s" % table_path)
 			return false
+	if out_path == "":
+		out_path = DEFAULT_OUT
 	_report_mixed_uses()
 
-	# 합성 — 프리셋 것 + 표에 A+B 꼴로 적혔는데 프리셋에 없는 것(첫 합성의 설정을 본뜸)
+	# 합성 — 표의 상하체 합성 줄(10-16, 인스펙터에서 정한 설정이 이긴다) + 프리셋 것 + 표에 A+B 꼴로 적혔는데 어디에도 없는 것(첫 합성의 설정을 본뜸)
 	_defs = []
 	var have := {}
-	for d in preset.composites:
+	for d in _table_defs:
 		_defs.append((d as Dictionary).duplicate(true))
 		have[DRBaker.composite_name(d)] = true
-	var tpl: Dictionary = (_defs[0] as Dictionary) if _defs.size() > 0 else COMPOSITE_DEFAULT
+	for d in preset.composites:
+		if have.has(DRBaker.composite_name(d)):
+			continue
+		_defs.append((d as Dictionary).duplicate(true))
+		have[DRBaker.composite_name(d)] = true
+	var tpl: Dictionary = (preset.composites[0] as Dictionary) if preset.composites.size() > 0 else COMPOSITE_DEFAULT
 	for m in _order:
 		var plus := m.find("+")
 		if plus <= 0 or plus >= m.length() - 1 or have.has(m):
@@ -348,13 +360,31 @@ func verify(host: Node, path: String = "") -> Dictionary:
 
 # ───────────── 안쪽 ─────────────
 
-## 표를 이름으로만 읽는다(motions: Dictionary[String, String], default_motion: String). 실패면 false
+## 표를 읽는다. DRMotionTable(10-16 — 상태마다 동작 여러 개 · 상하체 합성 줄)이면 줄마다, 예전 표면 이름으로만
+## (motions: Dictionary[String, String], default_motion: String). out_path 가 비면 표의 library_path. 실패면 false
 func _read_table() -> bool:
-	if table_path == "" or not ResourceLoader.exists(table_path):
-		return false
-	var res := load(table_path)
+	var res: Resource = table
+	if res == null:
+		if table_path == "" or not ResourceLoader.exists(table_path):
+			return false
+		res = load(table_path)
 	if res == null:
 		return false
+	if res is DRMotionTable:
+		var t := res as DRMotionTable
+		if out_path == "":
+			out_path = t.library_path
+		for c in t.clips:
+			if c != null:
+				_use(c.play_name(), c.state)
+		if t.default_motion != "":
+			_use(t.default_motion, "(기본 동작)")
+		_table_defs = t.composite_defs()
+		if out_path == "":
+			out_path = DEFAULT_OUT
+		return true
+	if out_path == "":
+		out_path = DEFAULT_OUT
 	var m: Variant = res.get("motions")
 	if not (m is Dictionary):
 		return false

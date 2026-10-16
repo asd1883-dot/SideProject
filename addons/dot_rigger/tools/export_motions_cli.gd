@@ -6,7 +6,7 @@ extends SceneTree
 ## 사용:
 ##   Godot.exe --headless --path <프로젝트> --script res://addons/dot_rigger/tools/export_motions_cli.gd -- \
 ##       --preset=res://UAL1_preset.tres --table=res://game/units/rifleman_motions.tres --out=res://game/motions/rifleman_anims.res
-##   (세 값 모두 위가 기본값 — 인자 없이 돌려도 된다)
+##   (세 값 모두 기본값이 있다 — 인자 없이 돌려도 된다. --out 을 안 주면 표의 library_path, 그것도 비면 위 경로)
 ##
 ## --all          표와 상관없이 라이브러리의 동작 전부(모델 · 추가 동작 폴더 · 합성). 표의 A+B 합성 · 이동 동작 제자리는 그대로 반영
 ## --compress / --nocompress   Animation.compress()(손실) 켬 / 끔. 기본 끔 — 1/3 크기지만 몇 동작에서 손 · 발이 수백 mm 튐(motion_exporter.gd 의 compress)
@@ -41,7 +41,7 @@ func _run() -> void:
 	var ex := DRMotionExporter.new()
 	ex.preset_path = _arg("preset", DRMotionExporter.DEFAULT_PRESET)
 	ex.table_path = _arg("table", DRMotionExporter.DEFAULT_TABLE)
-	ex.out_path = _arg("out", DRMotionExporter.DEFAULT_OUT)
+	ex.out_path = _arg("out", "")
 	ex.export_all = _args.has("all")
 	if _args.has("compress"):
 		ex.compress = true
@@ -49,7 +49,8 @@ func _run() -> void:
 		ex.compress = false
 	ex.loop_rule = DRMotionExporter.LOOP_KEYS if _arg("loop", "source") == "keys" else DRMotionExporter.LOOP_SOURCE
 	ex.add_reset = not _args.has("noreset")
-	print("[동작 내보내기] 프리셋 %s · 표 %s%s → %s" % [ex.preset_path, ex.table_path, " (--all 전부)" if ex.export_all else "", ex.out_path])
+	print("[동작 내보내기] 프리셋 %s · 표 %s%s → %s" % [ex.preset_path, ex.table_path, " (--all 전부)" if ex.export_all else "",
+		ex.out_path if ex.out_path != "" else "(표의 library_path)"])
 	var t0 := Time.get_ticks_msec()
 	var res := ex.run(root)
 	if not bool(res.get("ok", false)):

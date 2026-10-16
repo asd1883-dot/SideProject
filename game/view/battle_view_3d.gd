@@ -57,6 +57,8 @@ class Entry3D extends BattleView.Entry:
 	var grip_to := Transform3D.IDENTITY
 	var grip_t := -1.0                      # 그립을 섞은 시간(−1 = 섞는 중 아님)
 	var fade_q := 16                        # 마지막으로 넣은 사라지기 단계(FADE_STEPS = 다 보임)
+	var state := ""                         # 지금 동작을 고른 동작 표의 상태
+	var reroll := false                     # 그 상태에 고를 동작이 여럿 — 반복 동작이 한 바퀴 돌면 다시 고른다
 
 
 ## 복장 보기 — 바꾸면 화면의 모든 병사(쉬는 캐릭터 포함)를 다시 입힌다
@@ -129,6 +131,13 @@ func _pool3d_for(t: SoldierType) -> Array:
 	return _pool3d[key]
 
 
+## 병종의 3D 동작 묶음 경로 — 병종에 적은 것, 비면 동작 표의 library_path(동작 내보내기가 저장하는 곳)
+static func _lib_path(t: SoldierType) -> String:
+	if t.motion_library != "":
+		return t.motion_library
+	return t.motions.library_path if t.motions != null else ""
+
+
 func _lib_for(path: String) -> AnimationLibrary:
 	if path == "":
 		return null
@@ -151,7 +160,7 @@ func _make_character(t: SoldierType) -> DRCharacter3D:
 		ch.visible = false
 		return ch
 	_dress(ch, t)
-	var lib := _lib_for(t.motion_library)
+	var lib := _lib_for(_lib_path(t))
 	if lib != null:
 		ch.set_motions(lib)
 	var ap := ch.get_animation_player()
@@ -303,15 +312,15 @@ func _on_died(s: BattleSoldier) -> void:
 	if e.ch == null:
 		return
 	e.ch.set_tint(CORPSE_TINT)
-	# 죽을 때의 자세에 맞는 사망 동작(기본 동작으로 내려가면 안 되므로 MotionTable.find 를 쓰지 않는다 — 2D 와 같은 규칙)
+	# 죽을 때의 자세에 맞는 사망 동작(기본 동작으로 내려가면 안 되므로 pick 이 아니라 상태마다 pick_state — 2D 와 같은 규칙)
 	var mt: MotionTable = s.type.motions if s.type != null else null
 	var m := ""
 	if mt != null:
 		for key in e.cands:
-			var cand := String(mt.motions.get(key, ""))
-			if cand != "" and e.avail.has(cand):
-				m = cand
+			m = mt.pick_state(key, e.avail)
+			if m != "":
 				break
+	e.reroll = false
 	if m != "":
 		e.ch.get_animation_player().speed_scale = 1.0
 		_play(e, m, not had_motion)
@@ -386,7 +395,11 @@ func _advance(e: Entry3D, delta: float) -> void:
 	var step := 1.0 / step_hz if step_hz > 0.0 else 0.0
 	if e.acc < step:
 		return
-	e.ch.get_animation_player().advance(e.acc)
+	var ap := e.ch.get_animation_player()
+	var before := ap.current_animation_position
+	ap.advance(e.acc)
+	if e.reroll and ap.current_animation_position < before:
+		_reroll(e)                                   # 반복 동작이 한 바퀴 돌았다 — 그 상태의 동작 중에서 비중대로 다시
 	if e.grip_t >= 0.0:
 		e.grip_t += e.acc
 		var k := clampf(e.grip_t / maxf(blend_sec, 0.001), 0.0, 1.0)
@@ -405,17 +418,36 @@ func _pick_motion(e: Entry) -> void:
 		e3.motion = ""
 		return
 	var ap := e3.ch.get_animation_player()
-	var m := mt.find(e3.cands, e3.avail)
+	var st := mt.state_of(e3.cands, e3.avail)
+	var m := ""
+	if st != "" and st == e3.state and e3.motion != "" and mt.has_motion(st, e3.motion) and String(ap.current_animation) == e3.motion:
+		m = e3.motion                             # 고른 표 상태가 그대로 — 틀던 동작을 이어 간다(바꾸기는 한 바퀴 돌 때 _reroll)
+	else:
+		m = mt.pick_state(st, e3.avail) if st != "" else mt.pick(e3.cands, e3.avail)   # 동작이 여럿이면 비중(%)대로
+	e3.state = st
+	e3.reroll = st != "" and mt.variant_count(st, e3.avail) > 1
 	if m != "" and (m != e3.motion or String(ap.current_animation) != m):
 		_play(e3, m, e3.motion == "")
 	e3.motion = m
 	# 걷기에 달리기 동작을 빌려 쓰는 동안은 걷는 속도만큼 느리게(BattleView 와 같다)
 	var spd := 1.0
-	if s.move_state == BattleBody.Move.WALK and m != "" and m == String(mt.motions.get("달리기", "")):
+	if s.move_state == BattleBody.Move.WALK and m != "" and not mt.has_motion("걷기", m) and mt.has_motion("달리기", m):
 		spd = s.type.walk_speed / maxf(s.type.run_speed, 0.01)
 		if s.stance == BattleBody.Stance.CROUCH:
 			spd *= s.type.crouch_move_mult
 	ap.speed_scale = clampf(spd, 0.1, 1.0)
+
+
+## 반복 동작이 한 바퀴 돌았을 때 — 그 표 상태의 동작 중에서 비중대로 다시 고른다(같은 것이 나오면 그대로 이어 감).
+## 예: 서기 = Rifle_Idle 70 % · Idle_LookAround 30 % 면 대기 중인 병사가 가끔 두리번거린다
+func _reroll(e: Entry3D) -> void:
+	var mt: MotionTable = e.s.type.motions if e.s.type != null else null
+	if mt == null or e.state == "":
+		return
+	var m := mt.pick_state(e.state, e.avail)
+	if m != "" and m != e.motion:
+		_play(e, m, false)
+		e.motion = m
 
 
 ## 3D 는 깊이 버퍼가 겹침을 맡는다 — z 띠를 매기지 않는다
