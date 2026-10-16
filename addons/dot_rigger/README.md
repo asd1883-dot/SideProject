@@ -495,7 +495,8 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 
 | 무엇 | 클래스 · 도구 |
 |---|---|
-| 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 에디터 **도구 메뉴 "Dot Rigger — 3D 동작 내보내기"** 또는 `tools/export_motions_cli.gd [--check]` |
+| 동작 표 | `DRMotionTable` · `DRMotionClip` — 상태마다 동작 여러 개 · 비중 % · 상하체 합성. 인스펙터에서 열면 상태별 편집 화면(`ui/motion_table_editor.gd`) |
+| 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 동작 표 인스펙터의 `3D 동작 내보내기` · **도구 메뉴 "Dot Rigger — 3D 동작 내보내기"** · `tools/export_motions_cli.gd [--check]` |
 | 병사 한 명 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 무기. `wear(outfit.json, ["top"])` 로 상의 · 하의를 따로 입힌다. 메시 · 재질 · Skin 은 병사끼리 공유 |
 | 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑 |
 | 무기 그립 | `DRGripFit` — 장비 창 그립을 지금 몸 · 지금 동작의 두 손에 다시 맞춘다(동작별 캐시) |
