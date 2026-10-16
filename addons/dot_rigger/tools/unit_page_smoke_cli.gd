@@ -80,6 +80,22 @@ func _run() -> void:
 	page._on_save()
 	_check(FileAccess.get_file_as_string(cpath).contains(tpath), "자식 씬이 자기 표를 가리킴")
 
+	print("[5] 도트 느낌(외곽선 · 픽셀 퍼펙트 · 명암 — 게임과 같은 파일)")
+	var st := page._style
+	_check(st != null and page._dots.outline_style == st.outline_style and page._dots.dot_px == st.dot_px, "처음 값이 미리보기 도트 창에(선 방식 %d · 도트 %d px)" % [page._dots.outline_style, page._dots.dot_px])
+	var old_style := st.outline_style
+	var old_bands := st.light_bands
+	st.outline_style = 0
+	st.light_bands = 5
+	st.dot_px = 3
+	page._apply_style()
+	_check(page._dots.outline_style == 0 and page._dots.dot_px == 3 and int(DRCharacter3D.get_shading()["bands"]) == 5 and page._dot_ob.get_selected_id() == 3,
+		"바꾸면 바로: 카툰 · 도트 3 px · 명암 5단(공유 재질) · 도트 칸")
+	st.outline_style = old_style
+	st.light_bands = old_bands
+	st.dot_px = 2
+	page._apply_style()
+
 	# 치우기(시험 파일)
 	page._drop_root()
 	page.queue_free()

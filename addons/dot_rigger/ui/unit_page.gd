@@ -15,7 +15,6 @@ class_name DRUnitPage
 
 const UNITS_DIR := "res://game/units"
 const CHAR_SCRIPT := "res://addons/dot_rigger/runtime/dr_character_3d.gd"
-const STEP_HZ := 12.0
 const POLL_SEC := 0.3
 ## 모습 칸(루트 DRCharacter3D 의 칸) — 이름 · 보이는 이름 · 설명
 const FIELDS := [
@@ -53,13 +52,18 @@ var _facing := 1
 var _acc := 0.0
 var _pv_state := ""
 var _pv_reroll := false
+var _dot_ob: OptionButton
+## 도트 느낌(게임과 같은 파일 — DRDotStyle.DEFAULT_PATH)
+var _style: DRDotStyle
 # 동작 표
 var _motion_ed: DRMotionTableEditor
 
 
 func _init() -> void:
 	page_title = "유닛 (3D)"
+	_style = DRDotStyle.load_default()
 	_build_ui()
+	_apply_style()
 
 
 func _ready() -> void:
@@ -209,13 +213,14 @@ func _build_ui() -> void:
 	var dl := Label.new()
 	dl.text = "도트"
 	ctl.add_child(dl)
-	var dob := OptionButton.new()
-	for i in range(1, 5):
-		dob.add_item("%d px" % i, i)
-	dob.select(1)
-	dob.tooltip_text = "도트 하나 = 화면 몇 픽셀(1 = 도트화 끔) — 게임 화면과 같은 처리"
-	dob.item_selected.connect(func(i: int) -> void: _dots.dot_px = dob.get_item_id(i))
-	ctl.add_child(dob)
+	_dot_ob = OptionButton.new()
+	for i in range(1, 9):
+		_dot_ob.add_item("%d px" % i, i)
+	_dot_ob.tooltip_text = "도트 하나 = 화면 몇 픽셀(1 = 도트화 끔) — 도트 느낌 설정(게임과 같은 파일)"
+	_dot_ob.item_selected.connect(func(i: int) -> void:
+		_style.dot_px = _dot_ob.get_item_id(i)
+		_apply_style())
+	ctl.add_child(_dot_ob)
 	_size = HSlider.new()
 	_size.min_value = 60.0
 	_size.max_value = 320.0
@@ -230,6 +235,7 @@ func _build_ui() -> void:
 	_now.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_now.add_theme_font_size_override("font_size", 12)
 	mid.add_child(_now)
+	_build_style_panel(mid)
 
 	# 오른쪽 — 동작 표
 	var sc := ScrollContainer.new()
@@ -240,6 +246,112 @@ func _build_ui() -> void:
 	_motion_ed.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_motion_ed.exported.connect(_on_exported)
 	sc.add_child(_motion_ed)
+
+
+## 도트 느낌(10-16) — 예전 ① 탭의 도트화 · 외곽선 칸(픽셀 퍼펙트 등)을 3D 로. 게임 화면과 같은 파일(DRDotStyle.DEFAULT_PATH)
+func _build_style_panel(parent: Control) -> void:
+	var head := Button.new()
+	head.flat = true
+	head.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	head.text = "▸ 도트 느낌(외곽선 · 픽셀 퍼펙트 · 명암) — 게임과 같은 설정"
+	parent.add_child(head)
+	var box := VBoxContainer.new()
+	box.visible = false
+	parent.add_child(box)
+	head.pressed.connect(func() -> void:
+		box.visible = not box.visible
+		head.text = ("▾ " if box.visible else "▸ ") + head.text.substr(2))
+	var g := GridContainer.new()
+	g.columns = 4
+	box.add_child(g)
+	var s := _style
+	_style_ctl(g, "외곽선", "외곽선 두께(도트, 0 = 없음)", _opt_ctl(["없음", "1 도트"], s.outline_px, func(i: int) -> void: s.outline_px = i))
+	_style_ctl(g, "선 방식", "카툰 = 한 색 · 픽셀 퍼펙트 = 선 도트마다 바로 옆 몸 도트 색을 톤만큼 어둡게(예전 2D 와 같은 두 방식)",
+		_opt_ctl(["카툰 (한 색)", "픽셀 퍼펙트"], s.outline_style, func(i: int) -> void: s.outline_style = i))
+	var cp := ColorPickerButton.new()
+	cp.color = s.outline_color
+	cp.custom_minimum_size = Vector2(60, 0)
+	cp.color_changed.connect(func(c: Color) -> void:
+		s.outline_color = c
+		_apply_style())
+	_style_ctl(g, "선 색", "카툰일 때 선 색", cp)
+	_style_ctl(g, "톤", "픽셀 퍼펙트일 때 어둡게 하는 정도(0 = 같은 색 · 1 = 검정)", _num_ctl(0.0, 1.0, 0.05, s.outline_tone, func(v: float) -> void: s.outline_tone = v))
+	var inner := CheckBox.new()
+	inner.text = "사이 선"
+	inner.button_pressed = s.inner_outline
+	inner.toggled.connect(func(on: bool) -> void:
+		s.inner_outline = on
+		_apply_style())
+	_style_ctl(g, "겹침", "겹친 캐릭터 사이에도 선", inner)
+	_style_ctl(g, "각도", "카메라가 내려다보는 각(도)", _num_ctl(1.0, 45.0, 0.5, s.pitch_deg, func(v: float) -> void: s.pitch_deg = v))
+	_style_ctl(g, "초당 장수", "동작을 초당 몇 번 새로 그리나 — 12 = 예전 2D 퍼펫과 같은 끊는 맛(0 = 매 프레임)",
+		_num_ctl(0.0, 60.0, 1.0, s.step_hz, func(v: float) -> void: s.step_hz = v))
+	_style_ctl(g, "명암 단계", "명암 단계 수", _num_ctl(2.0, 8.0, 1.0, float(s.light_bands), func(v: float) -> void: s.light_bands = int(v)))
+	_style_ctl(g, "어두운 면", "가장 어두운 면의 밝기(앰비언트)", _num_ctl(0.0, 1.0, 0.05, s.ambient, func(v: float) -> void: s.ambient = v))
+	_style_ctl(g, "빛 감싸기", "빛이 옆면까지 감싸는 정도", _num_ctl(0.0, 1.0, 0.05, s.light_wrap, func(v: float) -> void: s.light_wrap = v))
+	_style_ctl(g, "가장자리 빛", "림 라이트(0 = 끔)", _num_ctl(0.0, 1.0, 0.05, s.rim, func(v: float) -> void: s.rim = v))
+	_style_ctl(g, "옷 속 밝기", "소매 · 깃 속(안쪽 면) 밝기", _num_ctl(0.0, 1.0, 0.05, s.inside_shade, func(v: float) -> void: s.inside_shade = v))
+	for axis in 3:
+		var a := axis
+		_style_ctl(g, "빛 %s" % ["X", "Y", "Z"][a], "빛이 오는 쪽(세상 좌표, +Z = 화면 앞쪽)",
+			_num_ctl(-1.0, 1.0, 0.05, s.light_dir[a], func(v: float) -> void: s.light_dir[a] = v))
+	var row := HBoxContainer.new()
+	box.add_child(row)
+	var sv := Button.new()
+	sv.text = "도트 느낌 저장"
+	sv.tooltip_text = "게임 화면도 이 값으로(%s)" % DRDotStyle.DEFAULT_PATH
+	sv.pressed.connect(func() -> void:
+		var err := ResourceSaver.save(_style, DRDotStyle.DEFAULT_PATH)
+		if Engine.is_editor_hint() and err == OK:
+			EditorInterface.get_resource_filesystem().update_file(DRDotStyle.DEFAULT_PATH)
+		_status.text = ("도트 느낌 저장: %s" % DRDotStyle.DEFAULT_PATH) if err == OK else "저장 실패(%s)" % error_string(err))
+	row.add_child(sv)
+
+
+func _style_ctl(g: GridContainer, label: String, tip: String, ctl: Control) -> void:
+	var l := Label.new()
+	l.text = label
+	l.tooltip_text = tip
+	l.add_theme_font_size_override("font_size", 12)
+	g.add_child(l)
+	ctl.tooltip_text = tip
+	g.add_child(ctl)
+
+
+func _opt_ctl(items: Array, cur: int, on_pick: Callable) -> OptionButton:
+	var ob := OptionButton.new()
+	for it in items:
+		ob.add_item(String(it))
+	ob.select(clampi(cur, 0, items.size() - 1))
+	ob.item_selected.connect(func(i: int) -> void:
+		on_pick.call(i)
+		_apply_style())
+	return ob
+
+
+func _num_ctl(lo: float, hi: float, step: float, cur: float, on_set: Callable) -> SpinBox:
+	var sp := SpinBox.new()
+	sp.min_value = lo
+	sp.max_value = hi
+	sp.step = step
+	sp.custom_minimum_size = Vector2(76, 0)
+	sp.set_value_no_signal(cur)
+	sp.value_changed.connect(func(v: float) -> void:
+		on_set.call(v)
+		_apply_style())
+	return sp
+
+
+## 도트 느낌을 미리보기 도트 창 · 캐릭터 재질(공유)에 넣는다
+func _apply_style() -> void:
+	if _style == null:
+		return
+	_style.apply_to(_dots)
+	_style.apply_shading()
+	if _dot_ob != null:
+		for i in _dot_ob.item_count:
+			if _dot_ob.get_item_id(i) == _style.dot_px:
+				_dot_ob.select(i)
 
 
 func _add_field(grid: GridContainer, prop: String, label: String, tip: String) -> void:
@@ -769,7 +881,7 @@ func _process(delta: float) -> void:
 			_ground.queue_redraw()
 	if _prev_ch != null and _playing:
 		_acc += delta
-		if _acc >= 1.0 / STEP_HZ:
+		if _acc >= (1.0 / _style.step_hz if _style.step_hz > 0.0 else 0.0):
 			if _prev_ch.step_motion(_acc) and _pv_reroll:
 				play_state(_pv_state)
 			_acc = 0.0

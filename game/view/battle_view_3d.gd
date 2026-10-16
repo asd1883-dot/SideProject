@@ -16,6 +16,10 @@ class_name BattleView3D
 ##   - 복장 보기(wear_mode): 유닛 복장 / 상의만 / 하의만 / 내복 — 상의 · 하의를 따로 입히는 3D 슬롯이 도는지 바로 본다
 ## 연산: 노드 · 셰이더 값은 바뀔 때만 넣는다(자리 · 방향 · 사라지기 단계). 무거운 것(슬롯 나누기 · 동작별 그립)은 캐릭터를 만들 때 한 번 · 캐시.
 
+## 도트 느낌(외곽선 · 픽셀 퍼펙트 · 명암 · 도트 크기 · 각도 · 초당 장수) — Dot Rigger ① 유닛 탭이 고치는 것과 같은 파일.
+## 비우면 기본 파일(DRDotStyle.DEFAULT_PATH = res://game/dot_style.tres). 화면을 만들 때 아래 dot_px · pitch_deg · step_hz 도 이 값으로 맞춘다
+@export var dot_style: DRDotStyle
+
 ## 3D 를 저해상도로 그리는 배율 — 도트 하나가 화면 몇 픽셀인가(1 = 도트화 끔). 화면 기준이라 확대하면 캐릭터가 더 촘촘해진다
 @export_range(1, 6, 1) var dot_px := 2:
 	set(v):
@@ -104,8 +108,13 @@ func _ensure_dot() -> void:
 		return
 	_dot = DRDotView3D.new()
 	_dot.name = "Dot3D"
-	_dot.dot_px = dot_px
-	_dot.pitch_deg = pitch_deg
+	if dot_style == null:
+		dot_style = DRDotStyle.load_default()
+	dot_style.apply_to(_dot)                 # 외곽선 · 픽셀 퍼펙트 · 도트 · 각도
+	dot_style.apply_shading()                # 명암(병사 재질 공통)
+	dot_px = dot_style.dot_px
+	pitch_deg = dot_style.pitch_deg
+	step_hz = dot_style.step_hz
 	_sync_dot()
 	_puppet_root.add_child(_dot)            # 땅(z 최소)과 상자 · 글자(z 최대) 사이
 
