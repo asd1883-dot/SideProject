@@ -307,6 +307,10 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
 - **잡기(10-16)** — 무기를 고정할 곳: `오른손`(왼손이 따라감) · `왼손`(오른손이 따라감) · `양손`(받침대 `DRGripMount3D` — 두 손 사이를 `보간`, 두 손이 따라감 · mp40) ·
   `고정`(받침대 — 유닛(땅) 기준, 두 손이 따라감 · 라페테 MG42). 보이는 자리 그대로 받침만 바꾸고 따라갈 손 표지가 없으면 지금 손 자리로 만든다(되돌리기 한 칸).
   손 표지 = `DRHandTarget3D`(`side` 왼손 · 오른손). 받침대 자리는 뼈대 수정자 맨 앞의 풀이 수정자가 동작 자세(IK 전)로 계산(손 ↔ 무기 순환 없음). 동작 표는 손을 골라 본다.
+- **동작별 무기 자리(10-19)** — 미리보기 위 도구 줄 `무기 자리: [모든 동작] [이 동작만]`. 이 동작만이면 기즈모 · 숫자 칸이 지금 동작의 무기 위치 · 회전만 고치고(주황 띠 `✎ 동작 — 차이 …` ·
+  `[맞추기]`(자동 — 손 소켓은 든 손 축으로 돌림, 양손은 두 표지를 두 손바닥에) · `[기본으로]` · `[끝]`), 모든 동작이면 기본 자리만 바뀐다(그 동작 차이는 그대로).
+  오른쪽 동작 표 `무기 자리` 칸(● 따로 · ↳ 상하체 합성의 상체 것 · 기본) — 행 두 번 누름 = 이 동작만, 오른쪽 누름 = 맞추기 · 복사 · 붙여넣기 · 기본 자리로.
+  저장 = 장비 노드 메타 `dr_motion_offsets`(무기 축 기준 — 잡기를 바꿔도 뜻이 같다) · 게임은 동작이 바뀔 때 손 IK 비중과 같이 섞어 옮긴다 · `무기 기본 자리로 저장` 에도 담김.
 - 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd` · `ui/transform_gizmo.gd`(기즈모 — 화면 좌표로 그리고 고르며 끌기는 광선 ↔ 평면, 손잡이 크기는 화면 기준).
 - 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
 - ⚠ kar98k 는 라이선스 확인 전이라 `.gitignore` — 새로 받은 PC 에서는 기본형 군인의 무기가 빠진 채 열린다(오류 메시지는 뜸).
@@ -544,7 +548,7 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 | 슬롯 나누기 | `DRSlotMesh` — 2D 와 같은 파트 경계(웨이트 · 다리 평면 · 부위 칠하기 · 관절 자르기), 겹침 0, 경계 구멍은 어두운 뚜껑. 자르기 전에 노멀을 편다(`smooth_normals` — 도트 느낌 `명암 매끈함`, 기본 6 cm: AI 메시 주름마다 명암 단계가 끊겨 얼룩지던 것, 10-16) |
 | (옛) 무기 그립 | `DRGripFit` — 루트 칸 `weapon_asset` 로 든 무기(소켓이 없을 때만)를 동작마다 두 손에 다시 맞춘다. 소켓 방식이 갈음 |
 | 도트 화면 | `DRDotView3D` — 2D 캔버스 안의 3D 창(저해상도 · nearest · 도트 격자 스냅 · 외곽선 `shaders/dot_edges.gdshader`) |
-| 셰이더 | `shaders/dot_char.gdshader` — 계단 명암 + 병사별 `tint` · `fade`(디더로 사라지기). 텍스처는 밉맵 · **반복 끔 · 비등방**(작게 그릴 때 아틀라스 반대쪽 가장자리 · 옆 UV 조각 색이 섞여 정수리가 비어 보이던 것, 10-16) |
+| 셰이더 | `shaders/dot_char.gdshader` — 계단 명암 + 병사별 `tint` · `fade`(디더로 사라지기). 텍스처는 밉맵 · **반복 끔 · 비등방**(작게 그릴 때 아틀라스 반대쪽 가장자리 · 옆 UV 조각 색이 섞여 정수리가 비어 보이던 것, 10-16) · **안전 밉 지도**(텍스처 옆 `<이름>.safemip.png` 가 있으면 UV 조각 경계 근처만 발자국을 줄여 맞닿은 조각 색이 안 섞임 — 정수리 살색, 10-19 · `pipeline/safe_mip_map.py`) |
 | 검사 | `tools/character3d_check_cli.gd`(차림 · 이음매 · 무기, 창 모드 `--screen 0`) · `test/dot_view_3d_demo.tscn` · 탭 검사(위 도구 표) · `game/tools/view3d_smoke.gd` |
 
 ## 다른 리그 / 다른 종류
