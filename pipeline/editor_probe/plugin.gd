@@ -189,6 +189,40 @@ func _go() -> void:
 		await _frames(30)
 		_expect(to_mount and back and again and ew.get_parent() == parent0 and ew.owner == er,
 			"② 잡기: 양손(받침대 · 오른손 표지 · 두 손 IK) → 탭 창 Ctrl+Z 원래 소켓 · 주인 그대로 → Ctrl+Y 다시 → Ctrl+Z (%s %s %s)" % [to_mount, back, again])
+		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
+		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
+		eqp._select_node(er.get_path_to(ew))
+		eqp.play_motion("Firing_Rifle")
+		eqp._seek(0.3)
+		eqp.set_per_motion(true)
+		await _frames(5)
+		var b0: Transform3D = ew.transform
+		var gp2: Vector2 = giz.handle_point(1)
+		var gd2: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[0] * 0.1) - giz._p(giz.pivot_point())).normalized()
+		_giz_drag(giz, gp2, gp2 + gd2 * 40.0)
+		await _frames(10)
+		var om: Dictionary = DRCharacter3D.motion_offsets(ew)
+		var stored: bool = om.size() == 1 and om.has("Firing_Rifle") and ew.transform.is_equal_approx(b0) \
+			and (eqp._prev_node(ew) as Node3D).transform.is_equal_approx(b0 * (om.get("Firing_Rifle", Transform3D.IDENTITY) as Transform3D))
+		var psm := PackedScene.new()
+		var in_file := false
+		if psm.pack(er) == OK:
+			var stm := psm.get_state()
+			for i in stm.get_node_count():
+				for j in stm.get_node_property_count(i):
+					if String(stm.get_node_property_name(i, j)) == "metadata/dr_motion_offsets":
+						in_file = true
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var gone: bool = not ew.has_meta(DRCharacter3D.MOTION_OFFSETS_META) and (eqp._prev_node(ew) as Node3D).transform.is_equal_approx(b0)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Y))
+		await _frames(30)
+		var redo2: bool = DRCharacter3D.motion_offsets(ew).has("Firing_Rifle")
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		eqp.set_per_motion(false)
+		_expect(stored and in_file and gone and redo2 and not ew.has_meta(DRCharacter3D.MOTION_OFFSETS_META),
+			"② 동작별 자리: 이 동작만 끌기 → 열린 씬 장비 메타(Firing_Rifle)만 · 기본 자리 그대로 · 저장에 담김 → Ctrl+Z 빠짐 → Ctrl+Y → Ctrl+Z (%s %s %s %s)" % [stored, in_file, gone, redo2])
 		eqp._playing = true
 		# 머리 소켓 더하기 → 열린 씬에 붙고 캐릭터가 잇는다 → 되돌리기
 		var n0: int = eqp._sockets().size()
