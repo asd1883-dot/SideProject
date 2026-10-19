@@ -94,6 +94,17 @@ var _mt: Tree
 var _mt_lock := false
 var _last_rep: Array = []                 # 마지막으로 잰 동작별 수치(DREquipHold.motion_report)
 var _rep_stale := false                   # 잰 뒤 무기 · 표지 자리가 바뀜(다시 재야 맞음)
+# 동작별 무기 자리(10-19)
+var _per_motion := false                  # 기즈모 · 숫자 칸이 "이 동작만"(동작별 자리)을 고친다 — false = 모든 동작(기본 자리)
+var _pm_btns: Array[Button] = []          # 무기 자리: 모든 동작 · 이 동작만
+var _pm_banner: PanelContainer            # 미리보기 위 띠(이 동작만일 때)
+var _pm_label: Label
+var _pm_fit_btn: Button
+var _pm_reset_btn: Button
+var _xf_note: Label                       # 숫자 칸 아래 — 동작별 자리 안내
+var _mt_menu: PopupMenu                   # 동작 표 오른쪽 누름
+var _mt_menu_motion := ""
+var _offset_clip: Variant = null          # 복사한 동작별 자리(Transform3D)
 
 
 func _init() -> void:
@@ -262,6 +273,12 @@ func _build_ui() -> void:
 			sp.value_changed.connect(func(_v: float) -> void: _on_xf_changed())
 			grid.add_child(sp)
 			(row[1] as Array).append(sp)
+	_xf_note = Label.new()
+	_xf_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_xf_note.add_theme_font_size_override("font_size", 12)
+	_xf_note.add_theme_color_override("font_color", Color(0.96, 0.7, 0.36))
+	_xf_note.visible = false
+	left.add_child(_xf_note)
 	var erow := HBoxContainer.new()
 	left.add_child(erow)
 	_btn(erow, "에디터에서 고르기", "이 노드를 에디터에서 골라 3D 화면 기즈모로 옮긴다(탭과 같은 노드)", _on_edit_in_editor)
@@ -354,6 +371,30 @@ func _build_ui() -> void:
 	_giz.transform_changed.connect(_on_giz_changed)
 	_giz.transform_end.connect(_on_giz_end)
 	stack.add_child(_giz)                    # 맨 위(돌려 보기에서만 보임 — set_dot_mode)
+	# 이 동작만 띠 — 지금 무엇을 고치는지 늘 보이게(기본 자리를 고치는 줄 알고 끄는 일이 없게) + 그 자리에서 맞추기 · 기본으로 · 끝
+	_pm_banner = PanelContainer.new()
+	_pm_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color = Color(0.86, 0.52, 0.14, 0.92)
+	pbs.content_margin_left = 10
+	pbs.content_margin_right = 6
+	pbs.content_margin_top = 3
+	pbs.content_margin_bottom = 3
+	_pm_banner.add_theme_stylebox_override("panel", pbs)
+	_pm_banner.visible = false
+	var pbh := HBoxContainer.new()
+	_pm_banner.add_child(pbh)
+	_pm_label = Label.new()
+	_pm_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pm_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_pm_label.add_theme_color_override("font_color", Color(0.12, 0.07, 0.02))
+	_pm_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	pbh.add_child(_pm_label)
+	_pm_fit_btn = _btn(pbh, "맞추기", "이 동작에 맞추기(자동) — 지금 동작 · 시점의 손(동작 그대로)에 무기 표지가 오게 이 동작 자리를 잡는다. 손 소켓 무기는 든 손을 축으로 돌리고, " +
+		"양손(두 손 사이) 무기는 두 표지의 가운데 · 방향을 두 손바닥에 맞춘다. 잘 안 맞으면 다른 시점에서 다시 · 기즈모로 다듬기", fit_motion_offset)
+	_pm_reset_btn = _btn(pbh, "기본으로", "이 동작의 따로 자리를 지운다(기본 자리로) — 되돌리기 한 칸", func() -> void: reset_motion_offset(current_motion()))
+	_btn(pbh, "끝", "모든 동작(기본 자리) 고치기로 돌아간다", func() -> void: set_per_motion(false))
+	stack.add_child(_pm_banner)
 	_sync_gizmo_bar()
 	var ctl := HFlowContainer.new()
 	mid.add_child(ctl)
@@ -388,14 +429,14 @@ func _build_ui() -> void:
 	_info.add_theme_font_size_override("font_size", 12)
 	mid.add_child(_info)
 
-	# 오른쪽 — 동작마다 왼손
+	# 오른쪽 — 동작마다 손 · 무기 자리
 	var right := VBoxContainer.new()
-	right.custom_minimum_size = Vector2(380, 0)
+	right.custom_minimum_size = Vector2(440, 0)
 	right_split.add_child(right)
 	var rrow := HBoxContainer.new()
 	right.add_child(rrow)
 	var rl := Label.new()
-	rl.text = "동작마다 손(표지 ↔ 손바닥)"
+	rl.text = "동작마다 손 · 무기 자리"
 	rl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rrow.add_child(rl)
 	_mt_side_ob = OptionButton.new()
@@ -408,29 +449,46 @@ func _build_ui() -> void:
 	rrow.add_child(_mt_side_ob)
 	_btn(rrow, "모든 동작 재기", "동작마다 8 시점에서 그 손바닥 ↔ 표지 거리(IK 전 = 동작 그대로 · IK 뒤) — 미리보기 사본으로 잰다", measure_all)
 	_mt = Tree.new()
+	# 칸: 동작 | 손 ↔ 표지(IK 전 → 뒤 평균 — 최대는 풍선 도움말) | IK 비중 | 무기 자리. 10-19 무기 자리 칸을 넣으며 IK 전 · 뒤 두 칸을 하나로(탭 기본 크기에서 가로로 안 넘치게)
 	_mt.columns = 4
 	_mt.hide_root = true
 	_mt.column_titles_visible = true
 	_mt.set_column_title(0, "동작")
-	_mt.set_column_title(1, "IK 전 cm")
-	_mt.set_column_title(2, "IK 뒤 cm")
-	_mt.set_column_title(3, "IK 비중")
+	_mt.set_column_title(1, "손↔표지 cm")
+	_mt.set_column_title(2, "IK 비중")
+	_mt.set_column_title(3, "무기 자리")
+	_mt.set_column_title_tooltip_text(1, "그 손바닥 ↔ 표지 거리, 8 시점 평균: 동작 그대로(IK 전) → IK 뒤. 최대는 칸의 풍선 도움말 — [모든 동작 재기]")
+	_mt.set_column_title_tooltip_text(2, "그 손을 표지에 붙이는 정도(0 = 동작 그대로 — 총을 놓는 동작)")
+	_mt.set_column_title_tooltip_text(3, "그 동작의 무기 위치 · 회전 — ● 따로 둠(기본 자리에서 거리 · 각) · ↳ 상하체 합성의 상체 동작 것 · 기본")
 	_mt.set_column_expand(0, true)
-	for c in [1, 2, 3]:
-		_mt.set_column_expand(c, false)
-		_mt.set_column_custom_minimum_width(c, 78)
+	_mt.set_column_clip_content(0, true)        # 좁으면 동작 이름을 줄여서(다른 칸이 밀려나지 않게)
+	for cw in [[1, 96], [2, 76], [3, 104]]:
+		_mt.set_column_expand(cw[0], false)
+		_mt.set_column_custom_minimum_width(cw[0], cw[1])
 	_mt.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_mt.allow_rmb_select = true
 	_mt.item_edited.connect(_on_mt_edited)
 	_mt.item_selected.connect(func() -> void:
 		var it := _mt.get_selected()
-		if it != null:
+		if it != null and not _mt_lock:
 			play_motion(it.get_text(0)))
+	_mt.item_activated.connect(func() -> void:          # 두 번 누름 = 그 동작만 고치기
+		var it := _mt.get_selected()
+		if it != null:
+			play_motion(it.get_text(0))
+			set_per_motion(true))
+	_mt.item_mouse_selected.connect(_on_mt_mouse)
 	right.add_child(_mt)
+	_mt_menu = PopupMenu.new()
+	_mt_menu.id_pressed.connect(_on_mt_menu)
+	add_child(_mt_menu)
 	var help := Label.new()
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.add_theme_font_size_override("font_size", 11)
 	help.add_theme_color_override("font_color", Color(0.6, 0.63, 0.67))
-	help.text = "평균 / 최대. IK 비중 0 = 그 동작은 왼손을 표지에 안 붙인다(수류탄 던지기 · 장전 · 맨손 달리기처럼 왼손이 총을 놓는 동작). 비중은 왼손 표지(DRHandTarget3D)의 motion_weights 에 저장된다. 행을 누르면 그 동작을 튼다."
+	help.text = "IK 전 · 뒤 = 평균 / 최대. IK 비중 0 = 그 동작은 그 손을 표지에 안 붙인다(수류탄 던지기 · 장전 · 맨손 달리기처럼 총을 놓는 동작 — 손 표지의 motion_weights). " + \
+		"무기 자리 = 그 동작의 무기 위치 · 회전(● 따로 둠 · ↳ 상하체 합성의 상체 동작 것 · 기본). 행 누름 = 그 동작 틀기 · 두 번 누름 = 이 동작만 고치기 · " + \
+		"오른쪽 누름 = 맞추기 · 복사 · 붙여넣기 · 기본으로."
 	right.add_child(help)
 	_fill_bones(PackedStringArray())
 	_fill_models()
@@ -481,6 +539,26 @@ func _build_gizmo_bar(parent: Control) -> void:
 		sp.value_changed.connect(func(_v: float) -> void: _apply_snap())
 		bar.add_child(sp)
 		_snap_sp.append(sp)
+	# 무기 자리 — 모든 동작(기본 자리) ↔ 이 동작만(동작별 자리, 10-19)
+	bar.add_child(VSeparator.new())
+	var pl := Label.new()
+	pl.text = "무기 자리"
+	pl.tooltip_text = "기즈모 · 숫자 칸이 고치는 무기 자리 — 모든 동작(기본 자리) 또는 지금 동작만(동작별 자리)"
+	pl.mouse_filter = Control.MOUSE_FILTER_STOP
+	bar.add_child(pl)
+	var pg := ButtonGroup.new()
+	for m in [[false, "모든 동작", "기본 자리 — 따로 자리를 안 둔 동작은 모두 이 자리.\n지금 동작에 따로 자리가 있으면 보이는 자리 = 기본 자리 + 그 차이(옮기면 기본 자리가 바뀌고 차이는 그대로)"],
+			[true, "이 동작만", "지금 동작(동작 칸 · 오른쪽 표에서 고른 것)의 무기 자리만 — 기본 자리 · 다른 동작은 그대로. 위치 · 회전만(크기는 기본 자리 것)\n오른쪽 동작 표에서 행을 두 번 눌러도 된다. 게임에서는 동작이 바뀔 때 손 IK 비중과 함께 섞어 옮긴다"]]:
+		var b := Button.new()
+		b.text = String(m[1])
+		b.toggle_mode = true
+		b.button_group = pg
+		b.focus_mode = Control.FOCUS_NONE
+		b.tooltip_text = String(m[2])
+		var on: bool = m[0]
+		b.pressed.connect(func() -> void: set_per_motion(on))
+		bar.add_child(b)
+		_pm_btns.append(b)
 
 
 ## 도구 줄 단추 · 기즈모 칸을 지금 값으로
@@ -544,12 +622,25 @@ func _on_giz_changed(pn: Node3D) -> void:
 	_show_xform_of(pn)
 
 
-## 기즈모를 놓았다 — 미리보기에서 옮긴 자리를 유닛 씬의 같은 노드에(에디터 = 되돌리기 한 칸 · Ctrl+Z)
+## 기즈모를 놓았다 — 미리보기에서 옮긴 자리를 유닛 씬의 같은 노드에(에디터 = 되돌리기 한 칸 · Ctrl+Z).
+## 장비: 이 동작만이면 그 동작의 동작별 자리로, 모든 동작이면 지금 얹힌 이 동작 차이를 빼고 기본 자리로(보이는 자리 = 기본 × 차이)
 func _on_giz_end(pn: Node3D, _before: Transform3D) -> void:
 	var n := _node(_sel) as Node3D
 	if n == null or pn == null or _prev_node(n) != pn:
 		return
 	var after := pn.transform
+	if _is_equip(n) and _prev != null:
+		if _per_motion:
+			var mo := current_motion()
+			if mo == "":
+				_set_status("동작을 고르세요 — 이 동작만 자리는 동작마다 저장된다")
+				_sync_preview()
+				return
+			var what0 := String(TransformGizmo.TOOL_NAMES[_giz.tool_mode])
+			set_motion_offset(n, mo, n.transform.affine_inverse() * after, "장비: %s %s 자리 %s(이 동작만)" % [n.name, mo, what0])
+			_set_status("%s — %s 만 %s %s · %s" % [n.name, mo, what0, _offset_text(n, mo), "Ctrl+Z 로 되돌리기" if _editing() else "적용"])
+			return
+		after = after * _prev.get_equip_offset(pn).affine_inverse()
 	if after.is_equal_approx(n.transform):
 		_show_xform()
 		return
@@ -934,9 +1025,11 @@ func _fill_tree() -> void:
 			var e := c as Node3D
 			var ei := _tree.create_item(si)
 			var src := e.scene_file_path.get_file() if e.scene_file_path != "" else e.get_class()
-			ei.set_text(0, "%s%s  (%s)" % ["⊘ " if not e.visible else "", e.name, src])
+			var po := DRCharacter3D.motion_offsets(e).size()
+			ei.set_text(0, "%s%s  (%s)%s" % ["⊘ " if not e.visible else "", e.name, src, "  · 동작별 자리 %d" % po if po > 0 else ""])
 			ei.set_metadata(0, _root.get_path_to(e))
-			ei.set_tooltip_text(0, "장비%s%s" % [" — 숨김(게임에서는 지운다)" if not e.visible else "", " · 부모 유닛에서 옴" if _is_inherited(e) else ""])
+			ei.set_tooltip_text(0, "장비%s%s%s" % [" — 숨김(게임에서는 지운다)" if not e.visible else "", " · 부모 유닛에서 옴" if _is_inherited(e) else "",
+				"\n동작별 자리: " + ", ".join(PackedStringArray(DRCharacter3D.motion_offsets(e).keys())) if po > 0 else ""])
 			if not e.visible:
 				ei.set_custom_color(0, Color(0.55, 0.57, 0.6))
 			var kind := grip_kind(e)
@@ -1011,9 +1104,18 @@ func _fill_models() -> void:
 		_model_ob.select(0)
 
 
+## 숫자 칸 — 고른 노드(부모 기준). 이 동작만 + 장비면 그 동작의 자리(미리보기 사본 = 기본 × 동작별 자리)
 func _show_xform() -> void:
-	_show_xform_of(_node(_sel) as Node3D)
+	var n := _node(_sel) as Node3D
+	if _per_motion and _is_equip(n) and _prev_node(n) is Node3D:
+		_show_xform_of(_prev_node(n) as Node3D)
+		_xf_title.text = "%s — %s 만(부모 %s 기준)" % [n.name, current_motion() if current_motion() != "" else "동작 없음", n.get_parent().name]
+		for sp in _scl:
+			sp.editable = false                  # 동작별 자리는 위치 · 회전만
+	else:
+		_show_xform_of(n)
 	_update_grip_ui()
+	_update_pm_ui()
 
 
 const GRIP_NAMES := ["오른손", "왼손", "양손", "고정", "뼈"]
@@ -1221,6 +1323,24 @@ func _on_xf_changed() -> void:
 		return
 	var p := Vector3(_pos[0].value, _pos[1].value, _pos[2].value) / 100.0
 	var r := Vector3(_rot[0].value, _rot[1].value, _rot[2].value)
+	if _per_motion and _is_equip(n):           # 이 동작만 — 칸 값 = 그 동작의 자리(크기는 기본 자리 것) → 동작별 자리
+		var mo := current_motion()
+		if mo == "":
+			return
+		var tmp := Node3D.new()                # Node3D 와 같은 오일러 순서 · 크기 곱으로 변환을 만든다
+		tmp.position = p
+		tmp.rotation_degrees = r
+		tmp.scale = n.scale
+		var l := tmp.transform
+		tmp.free()
+		var d := DRCharacter3D.motion_offsets(n).duplicate()
+		var off := _rigid(n.transform.affine_inverse() * l)
+		if off.is_equal_approx(Transform3D.IDENTITY):
+			d.erase(mo)
+		else:
+			d[mo] = off
+		_set_offsets(n, d, "장비: %s %s 자리(이 동작만)" % [n.name, mo], true)
+		return
 	var changes := [[n, "position", p], [n, "rotation_degrees", r]]
 	var s := Vector3(_scl[0].value, _scl[1].value, _scl[2].value)
 	if not _is_marker(n) and not s.is_equal_approx(n.scale.snapped(Vector3.ONE * 0.001)):
@@ -1371,6 +1491,8 @@ func put_model(model_path: String) -> Node3D:
 			var mk := _new_marker(hold["support"], hold["motion_weights"])
 			n.add_child(mk)
 			owned.append(mk)
+		if not (hold["motion_offsets"] as Dictionary).is_empty():
+			n.set_meta(DRCharacter3D.MOTION_OFFSETS_META, (hold["motion_offsets"] as Dictionary).duplicate())   # 동작별 자리(무기 축 기준 — 받침이 같으니 그대로)
 		used_hold = true
 	_begin("장비: %s 넣기" % n.name)
 	for c in sock.get_children():
@@ -1569,7 +1691,7 @@ func save_unit() -> void:
 		_set_status("⚠ 저장 실패: " + _sel_path)
 
 
-## 고른 장비의 자리 · 왼손 표지 · 동작별 비중을 모델 옆 asset.json(socket_hold)에
+## 고른 장비의 자리 · 왼손 표지 · 동작별 비중 · 동작별 자리를 모델 옆 asset.json(socket_hold)에
 func save_hold_default() -> void:
 	var e := _equip_from(_node(_sel))
 	if e == null:
@@ -1584,7 +1706,7 @@ func save_hold_default() -> void:
 		return
 	var mk := DRCharacter3D.find_support(e)
 	var ok := DREquipHold.write_hold(asset, sock.bone_name, e.scene_file_path, e.transform, mk.transform if mk != null else null,
-		(mk as DRHandTarget3D).motion_weights if mk is DRHandTarget3D else {})
+		(mk as DRHandTarget3D).motion_weights if mk is DRHandTarget3D else {}, DRCharacter3D.motion_offsets(e))
 	if ok and Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().update_file(asset)
 	_fill_models()
@@ -1653,28 +1775,12 @@ func _on_prev_updated() -> void:
 		_live = [_prev.support_now(0), _prev.support_now(1)]       # 신호 안 = IK 뒤(손마다)
 
 
-## 미리보기 사본의 노드 자리 · 보이기 · 비중을 유닛 것으로(구조가 같을 때 — 다시 조립하지 않고)
+## 미리보기 사본의 노드 자리 · 보이기 · 비중 · 동작별 자리를 유닛 것으로(구조가 같을 때 — 다시 조립하지 않고. DRCharacter3D.sync_from —
+## 소켓은 뼈가, 두 손 사이 받침대는 두 손이 자리를 정하므로 안 덮는다 · 장비는 기본 자리 + 지금 동작의 동작별 자리)
 func _sync_preview() -> void:
 	if _prev == null or _root == null:
 		return
-	for s in _anchors():
-		var stack: Array[Node] = [s]
-		while not stack.is_empty():
-			var n: Node = stack.pop_back()
-			if n.owner == _root:
-				var pn := _prev.get_node_or_null(_root.get_path_to(n))
-				# 소켓은 뼈가, 두 손 사이 받침대는 두 손이 자리를 정한다 — 덮으면 그 프레임에 원점으로 튐(10-16)
-				var driven := n is BoneAttachment3D or (n is DRGripMount3D and (n as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS)
-				if pn is Node3D and n is Node3D and not driven:
-					(pn as Node3D).transform = (n as Node3D).transform
-				if pn is DRHandTarget3D and n is DRHandTarget3D:
-					(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
-					(pn as DRHandTarget3D).weight = (n as DRHandTarget3D).weight
-				if pn is DRGripMount3D and n is DRGripMount3D:
-					for k in ["blend", "right_offset", "left_offset"]:
-						pn.set(k, n.get(k))
-			stack.append_array(n.get_children())
-	_prev.sync_support()
+	_prev.sync_from(_root)
 	if not _last_rep.is_empty() and not _rep_stale:
 		_rep_stale = true                     # 자리가 바뀌었으니 잰 수치는 지난 값
 		_fill_motion_table.call_deferred()    # 미뤄서 — 표의 칸을 고치는 신호 안에서 표를 비우지 않게
@@ -1711,7 +1817,7 @@ func current_motion() -> String:
 	return _motion_ob.get_item_text(_motion_ob.selected)
 
 
-## 미리보기에서 그 동작을 튼다(섞기 없이 — 그 동작의 왼손 IK 비중)
+## 미리보기에서 그 동작을 튼다(섞기 없이 — 그 동작의 손 IK 비중 · 동작별 무기 자리)
 func play_motion(motion: String) -> void:
 	if _prev == null or motion == "":
 		return
@@ -1720,6 +1826,11 @@ func play_motion(motion: String) -> void:
 			_motion_ob.select(i)
 	_prev.play_motion(motion, 0.0)
 	_acc = 0.0
+	if _per_motion:
+		_show_xform()                          # 숫자 칸 = 이 동작 자리 · 띠 = 이 동작 이름
+	else:
+		_update_pm_ui()
+	_mark_motion_row(motion)
 
 
 func _seek(frac: float) -> void:
@@ -1871,7 +1982,7 @@ func _process(delta: float) -> void:
 		if _giz.target != gt:
 			_giz.cancel_drag()
 			_giz.target = gt
-		_giz.allow_scale = gt != null and not _is_marker(gt)
+		_giz.allow_scale = gt != null and not _is_marker(gt) and not (_per_motion and _is_equip(gt))    # 동작별 자리는 위치 · 회전만
 		_giz.queue_redraw()                    # 동작을 따라 손잡이도 움직인다
 	_draw_marks()
 	_update_info()
@@ -1900,7 +2011,9 @@ func _follow_root() -> void:
 	if xs != _xform_sig:
 		_xform_sig = xs
 		_sync_preview()
+		_fill_tree()                             # 동작별 자리 개수(되돌리기 · 인스펙터로 바뀐 것도)
 		_show_xform()
+		_fill_motion_table()
 
 
 func _make_struct_sig() -> String:
@@ -1937,6 +2050,8 @@ func _make_xform_sig() -> String:
 				continue
 			if n is Node3D:
 				parts.append(str((n as Node3D).transform))
+			if _is_equip(n):
+				parts.append(str(DRCharacter3D.motion_offsets(n)))    # 동작별 자리(10-19 — 되돌리기 · 인스펙터 메타로 바뀐 것도 따라간다)
 			if n is DRHandTarget3D:
 				parts.append(str((n as DRHandTarget3D).motion_weights) + str((n as DRHandTarget3D).weight))
 			stack.append_array(n.get_children())
@@ -1963,6 +2078,9 @@ func _update_info() -> void:
 		var raw := _prev.support_now(side)         # 갱신 밖 = 동작 그대로
 		parts.append("%s: IK 비중 %.2f · 손바닥 ↔ 표지 IK 뒤 %.1f cm(동작 그대로 %.1f) · 회전 차 %.0f°" % [nm, _prev.get_ik_weight(side),
 			float(live.get("dist", 0.0)) * 100.0, float(raw.get("dist", 0.0)) * 100.0, float(live.get("rot", 0.0))])
+	var oe := _offset_equip()
+	if oe != null and DRCharacter3D.offset_key(oe, current_motion()) != "":
+		parts.append("무기 = 이 동작 자리(%s)" % _offset_text(oe, current_motion()))
 	_info.text = " · ".join(parts)
 
 
@@ -2037,34 +2155,40 @@ func _fill_motion_table(report: Array = []) -> void:
 	if _rep_side == _mt_side:                  # 다른 손을 잰 수치는 안 보인다(그 손으로 다시 재기)
 		for r in _last_rep:
 			by[String((r as Dictionary)["motion"])] = r
-	_mt.set_column_title(2, "IK 뒤 cm" + (" (지난 값)" if _rep_stale else ""))
+	_mt.set_column_title(1, "손↔표지 cm" + (" (지난)" if _rep_stale else ""))
 	if _prev != null:
 		var names := _prev.motion_names()
 		names.sort()
 		for n in names:
 			var it := _mt.create_item(top)
 			it.set_text(0, n)
+			it.set_tooltip_text(0, n)
 			if by.has(n):
 				var d: Dictionary = by[n]
-				it.set_text(1, "%.1f / %.0f" % [float(d["raw_avg"]) * 100.0, float(d["raw_max"]) * 100.0])
-				it.set_text(2, "%.1f / %.0f" % [float(d["ik_avg"]) * 100.0, float(d["ik_max"]) * 100.0])
+				it.set_text(1, "%.1f → %.1f" % [float(d["raw_avg"]) * 100.0, float(d["ik_avg"]) * 100.0])
+				var tip := "동작 그대로(IK 전) 평균 %.1f / 최대 %.0f cm → IK 뒤 평균 %.1f / 최대 %.1f cm (8 시점)" % [float(d["raw_avg"]) * 100.0, float(d["raw_max"]) * 100.0,
+					float(d["ik_avg"]) * 100.0, float(d["ik_max"]) * 100.0]
 				if _rep_stale:
-					for c in [1, 2]:
-						it.set_custom_color(c, Color(0.5, 0.52, 0.56))
-						it.set_tooltip_text(c, "잰 뒤 무기 · 표지 자리가 바뀜 — [모든 동작 재기]")
+					it.set_custom_color(1, Color(0.5, 0.52, 0.56))
+					it.set_tooltip_text(1, tip + "\n잰 뒤 무기 · 표지 자리가 바뀜 — [모든 동작 재기]")
 				elif float(d["ik_max"]) > 0.05 and float(d["weight"]) > 0.0:
-					it.set_custom_color(2, Color(0.95, 0.65, 0.3))
-					it.set_tooltip_text(2, "팔이 표지에 안 닿는 시점이 있음(어깨 → 손목 목표 / 팔 길이 최대 %.2f)" % float(d["reach_max"]))
+					it.set_custom_color(1, Color(0.95, 0.65, 0.3))
+					it.set_tooltip_text(1, tip + "\n팔이 표지에 안 닿는 시점이 있음(어깨 → 손목 목표 / 팔 길이 최대 %.2f) — [이 동작만] 으로 무기 자리를 옮기거나 [맞추기]" % float(d["reach_max"]))
+				else:
+					it.set_tooltip_text(1, tip)
 			else:
 				it.set_text(1, "-")
-				it.set_text(2, "-")
+				it.set_tooltip_text(1, "[모든 동작 재기] 를 누르면 동작마다 잰다")
 			if mk is DRHandTarget3D:
-				it.set_cell_mode(3, TreeItem.CELL_MODE_RANGE)
-				it.set_range_config(3, 0.0, 1.0, 0.05)
-				it.set_range(3, (mk as DRHandTarget3D).weight_for(n))
-				it.set_editable(3, true)
+				it.set_cell_mode(2, TreeItem.CELL_MODE_RANGE)
+				it.set_range_config(2, 0.0, 1.0, 0.05)
+				it.set_range(2, (mk as DRHandTarget3D).weight_for(n))
+				it.set_editable(2, true)
 			else:
-				it.set_text(3, "표지 없음" if mk == null else "1(늘)")
+				it.set_text(2, "표지 없음" if mk == null else "1(늘)")
+			_fill_offset_cell(it, n)
+			if n == current_motion():
+				it.select(0)                     # 지금 동작 행(잠금 중이라 다시 틀지 않음)
 	_mt_lock = false
 
 
@@ -2072,9 +2196,9 @@ func _on_mt_edited() -> void:
 	if _mt_lock:
 		return
 	var it := _mt.get_edited()
-	if it == null or _mt.get_edited_column() != 3:
+	if it == null or _mt.get_edited_column() != 2:
 		return
-	set_motion_weight(it.get_text(0), it.get_range(3))
+	set_motion_weight(it.get_text(0), it.get_range(2))
 
 
 ## 동작마다 그 손바닥 ↔ 표지(IK 전 · 뒤, 동작 표가 보이는 손) — 미리보기 사본으로 8 시점씩. 돌려주는 값 = DREquipHold.motion_report
@@ -2098,3 +2222,317 @@ func measure_all() -> Array:
 			worst = String(d["motion"])
 	_set_status("동작 %d개 잼 — IK 를 켠 동작 중 가장 먼 것: %s %.1f cm" % [rep.size(), worst, wv * 100.0] if worst != "" else "동작 %d개 잼" % rep.size())
 	return rep
+
+
+# ───────────── 동작별 무기 자리(10-19) ─────────────
+# 사용자(10-16): "2번 탭은 애니메이션별로 양손이든 왼손이든 오른손이든 총기 위치 회전 오프셋을 지정해 둘 수 있는 리소스 툴인 거지?" → 10-19 "2번 작업도 시행. ui / ux 잘 신경 써 줘"
+# 저장 = 장비 노드 메타(DRCharacter3D.MOTION_OFFSETS_META — {동작: 장비 축 기준 차이}, 유닛 씬에 저장 · 되돌리기 한 칸). 게임은 동작이 바뀔 때 손 IK 비중과
+# 같은 시간 동안 섞어 옮긴다. 고치는 길: 위 도구 줄 [이 동작만](또는 동작 표 행 두 번 누름) → 기즈모 · 숫자 칸 · 띠의 [맞추기], 동작 표 오른쪽 누름 메뉴.
+
+## 받침 바로 아래 노드(장비)인가 — 동작별 자리는 장비에만
+static func _is_equip(n: Node) -> bool:
+	return n is Node3D and n.get_parent() != null and _is_anchor(n.get_parent())
+
+
+## 크기 · 기울임을 뺀 변환(동작별 자리는 위치 · 회전만)
+static func _rigid(t: Transform3D) -> Transform3D:
+	return Transform3D(t.basis.orthonormalized(), t.origin)
+
+
+## 동작별 자리를 고칠 장비 — 고른 노드가 든 장비(표지 · 받침을 골라도 그 장비), 없으면 무기
+func _offset_equip() -> Node3D:
+	var e := _equip_from(_node(_sel))
+	return e if e != null else _weapon_equip()
+
+
+## "차이 2.3 cm · 4°" · "기본 자리" · "상체 Firing_Rifle 자리(차이 …)" — e = 유닛 씬의 장비(transform = 기본 자리)
+func _offset_text(e: Node3D, motion: String) -> String:
+	if e == null or motion == "":
+		return ""
+	var key := DRCharacter3D.offset_key(e, motion)
+	if key == "":
+		return "기본 자리"
+	var sz := DRCharacter3D.offset_size(e.transform, DRCharacter3D.offset_for(e, motion))
+	var t := "차이 %.1f cm · %.0f°" % [sz.x * 100.0, sz.y]
+	return t if key == motion else "상체 %s 자리 — %s" % [key, t]
+
+
+## 기즈모 · 숫자 칸이 고치는 무기 자리 — false = 모든 동작(기본 자리) · true = 지금 동작만(동작별 자리).
+## 켤 때 표지 · 받침을 골라 두었으면 그 장비로 바꿔 고른다(동작별 자리는 장비에만)
+func set_per_motion(on: bool) -> void:
+	if _giz != null and _giz.is_dragging():
+		_giz.cancel_drag()
+	_per_motion = on
+	if on and _root != null:
+		var e := _offset_equip()
+		if e != null and _node(_sel) != e:
+			_select_node(_root.get_path_to(e))
+	_show_xform()
+	_fill_motion_table()
+	if on:
+		var e2 := _offset_equip()
+		_set_status("이 동작만 — %s 의 %s 자리를 고칩니다(기즈모 · 숫자 칸 · 띠의 [맞추기]). 다른 동작 · 기본 자리는 그대로" % [current_motion(), e2.name if e2 != null else "무기"]
+			if current_motion() != "" else "이 동작만 — 동작을 고르세요")
+	else:
+		_set_status("모든 동작 — 기본 자리를 고칩니다")
+
+
+## 위 도구 줄 단추 · 미리보기 띠 · 숫자 칸 아래 안내를 지금 상태로
+func _update_pm_ui() -> void:
+	if _pm_banner == null:
+		return
+	for i in _pm_btns.size():
+		_pm_btns[i].set_pressed_no_signal(i == (1 if _per_motion else 0))
+	if _pm_btns.size() > 1:                     # 눌린 "이 동작만" = 미리보기 띠와 같은 주황(테마 여백은 그대로 — 틀을 덮으면 글자가 잘렸다)
+		_pm_btns[1].self_modulate = Color(1.0, 0.68, 0.32) if _per_motion else Color.WHITE
+	var e := _offset_equip()
+	var mo := current_motion()
+	var key := DRCharacter3D.offset_key(e, mo) if e != null else ""
+	_pm_banner.visible = _per_motion
+	if _per_motion:
+		if e == null:
+			_pm_label.text = "✎ 이 동작만 — 무기(장비)를 고르세요"
+			_pm_label.tooltip_text = _pm_label.text
+		elif mo == "":
+			_pm_label.text = "✎ 이 동작만 — 동작을 고르세요"
+			_pm_label.tooltip_text = _pm_label.text
+		else:
+			var now := _offset_text(e, mo) if key == mo else ("아직 따로 없음 — " + _offset_text(e, mo)) if key != "" else "아직 기본 자리"
+			_pm_label.text = "✎ %s — %s" % [mo, now]             # 좁은 띠에서도 동작 · 차이가 먼저 보이게(장비 이름 · 설명은 풍선 도움말)
+			_pm_label.tooltip_text = "이 동작만 고치는 중: %s 의 %s 자리 — %s\n기즈모 · 숫자 칸 · [맞추기] 가 이 동작에만 저장된다. 기본 자리 · 다른 동작은 그대로" % [mo, e.name, now]
+		_pm_reset_btn.disabled = e == null or key != mo
+		_pm_fit_btn.disabled = e == null or mo == "" or grip_kind(e) == 3 or grip_kind(e) == 4
+	var note := ""
+	if e != null and mo != "" and _is_equip(_node(_sel)):
+		if _per_motion:
+			note = "숫자 칸 = %s 의 무기 자리(위치 · 회전만, 크기는 기본 자리). %s" % [mo, "지금 " + _offset_text(e, mo) if key != "" else "아직 기본 자리와 같음"]
+		elif key != "":
+			note = "지금 동작(%s)은 따로 자리가 있어 미리보기 = 기본 자리 + %s. 기즈모로 옮기면 기본 자리가 바뀌고 이 차이는 그대로" % [mo, _offset_text(e, mo)]
+	_xf_note.text = note
+	_xf_note.visible = note != ""
+
+
+## 장비 e 의 그 동작 자리 차이(장비 축 기준 — 기본 자리 × off)를 넣는다. null · IDENTITY 면 뺀다(기본 자리로). 되돌리기 한 칸
+func set_motion_offset(e: Node3D, motion: String, off: Variant, label: String = "") -> void:
+	if e == null or motion == "":
+		return
+	var d := DRCharacter3D.motion_offsets(e).duplicate()
+	if off is Transform3D and not _rigid(off).is_equal_approx(Transform3D.IDENTITY):
+		d[motion] = _rigid(off)
+	else:
+		d.erase(motion)
+	_set_offsets(e, d, label if label != "" else "장비: %s %s 자리" % [e.name, motion], false)
+
+
+## 장비 e 의 동작별 자리 통째로(빈 것 = 메타를 지움) — set_meta(이름, null) 이 메타를 지운다(set("metadata/…", null) 은 null 값으로 남아 10-19 확인).
+## merge = 숫자 칸처럼 잇달아 바뀌면 되돌리기 한 칸으로 합친다
+func _set_offsets(e: Node3D, d: Dictionary, label: String, merge: bool) -> void:
+	var nm := DRCharacter3D.MOTION_OFFSETS_META
+	var old: Variant = (e.get_meta(nm) as Dictionary).duplicate() if e.has_meta(nm) and e.get_meta(nm) is Dictionary else null
+	var nv: Variant = d if not d.is_empty() else null
+	if _editing():
+		var ur := EditorInterface.get_editor_undo_redo()
+		ur.create_action(label, UndoRedo.MERGE_ENDS if merge else UndoRedo.MERGE_DISABLE, _root)
+		ur.add_do_method(e, "set_meta", nm, nv)
+		ur.add_undo_method(e, "set_meta", nm, old)
+		ur.commit_action()
+	else:
+		e.set_meta(nm, nv)
+	_after_change(false)
+	_fill_motion_table.call_deferred()      # 미뤄서 — 표의 신호 안에서 불릴 수 있다
+
+
+## 그 동작의 따로 자리를 지운다(기본 자리로)
+func reset_motion_offset(motion: String) -> void:
+	var e := _offset_equip()
+	if e == null or DRCharacter3D.offset_key(e, motion) != motion:
+		_set_status("%s 은 따로 자리가 없습니다" % motion)
+		return
+	set_motion_offset(e, motion, null, "장비: %s %s 자리 지우기" % [e.name, motion])
+	_set_status("%s — %s 은 기본 자리로" % [e.name, motion])
+
+
+func copy_motion_offset(motion: String) -> void:
+	var e := _offset_equip()
+	if e == null:
+		return
+	_offset_clip = DRCharacter3D.offset_for(e, motion)
+	_set_status("복사: %s 의 무기 자리(%s) — 다른 동작 행에서 오른쪽 누름 → 붙여넣기" % [motion, _offset_text(e, motion)])
+
+
+func paste_motion_offset(motion: String) -> void:
+	var e := _offset_equip()
+	if e == null or not (_offset_clip is Transform3D):
+		_set_status("붙여 넣을 무기 자리가 없습니다 — 먼저 복사")
+		return
+	set_motion_offset(e, motion, _offset_clip, "장비: %s %s 자리 붙여넣기" % [e.name, motion])
+	_set_status("붙여넣기: %s 의 무기 자리 = %s" % [motion, _offset_text(e, motion)])
+
+
+## 이 동작에 맞추기(자동) — 지금 동작 · 시점의 손(동작 그대로 = IK 전)에 무기 표지가 오게 그 동작 자리를 잡는다.
+##   손 소켓(오른손 · 왼손) 무기: 든 손바닥을 축으로 돌려 따라가는 손 표지를 그 손바닥 쪽으로(무기가 쥔 손에서 안 미끄러진다)
+##   두 손 사이(양손) 무기: 두 표지의 가운데 · 방향을 두 손바닥의 가운데 · 방향으로(남는 길이 차는 두 손 IK 가 나눠 진다)
+##   그 동작에서 한 손만 잡으면(다른 손 IK 비중 0) 그 손 표지를 손바닥 자리로 옮긴다. 고정(땅) · 손 아닌 뼈 소켓은 안 함(무기가 손을 안 따라감)
+## 돌려주는 값 {motion, before: [왼손 cm, 오른손 cm], after: [...]} — 따라가는 손의 IK 뒤 손바닥 ↔ 표지(-1 = 안 따라감). 못 하면 {}
+func fit_motion_offset() -> Dictionary:
+	var e := _offset_equip()
+	var pe := _prev_node(e) as Node3D
+	var mo := current_motion()
+	if e == null or pe == null or _prev == null or mo == "":
+		_set_status("무기와 동작을 고르세요")
+		return {}
+	var kind := grip_kind(e)
+	if kind < 0 or kind >= 3:
+		_set_status("%s — 고정(땅) 받침대 · 손이 아닌 뼈 소켓의 장비는 자동 맞추기가 없습니다(기즈모로)" % e.name)
+		return {}
+	var hold := 1 if kind == 0 else (0 if kind == 1 else -1)          # 무기를 든 손(받침인 손) — 양손이면 없음
+	var t := _time_sl.value
+	_force_pose()
+	var sk := _prev.get_skeleton()
+	var rig: DRRigModel = _prev.get_body_entry()["rig"]
+	var palms: Array = [null, null]                                 # 손바닥(세상) — 갱신 밖이라 동작 그대로(IK 전)
+	for side in 2:
+		var part: DRRigModel.Part = rig.parts.get(String(DRCharacter3D.PALM_PARTS[side]), null)
+		if part != null:
+			palms[side] = sk.global_transform * (sk.get_bone_global_pose(part.root_bone) * (part.tail_local * 0.5))
+	var follow: Array[int] = []
+	var marks: Array[Vector3] = []
+	for side in 2:
+		if side == hold or palms[side] == null:
+			continue
+		var mk := DRCharacter3D.find_hand_marker(pe, side)
+		if mk == null:
+			continue
+		if (mk is DRHandTarget3D and (mk as DRHandTarget3D).weight_for(mo) <= 0.001):
+			continue
+		follow.append(side)
+		marks.append(mk.global_position)
+	if follow.is_empty():
+		_set_status("%s 에서 무기를 따라가는 손이 없습니다(표지 없음 · IK 비중 0) — 기즈모로" % mo)
+		return {}
+	var before := _hand_dists()
+	var c := Transform3D.IDENTITY                                   # 세상 공간 고침
+	if hold >= 0:
+		var pivot: Vector3 = palms[hold]
+		var v1 := marks[0] - pivot
+		var v2: Vector3 = palms[follow[0]] - pivot
+		if v1.length() < 0.01 or v2.length() < 0.01:
+			_set_status("손이 무기 쥔 점과 겹쳐 방향을 못 잡습니다 — 다른 시점에서")
+			return {}
+		c = Transform3D(Basis.IDENTITY, pivot) * Transform3D(Basis(Quaternion(v1.normalized(), v2.normalized())), Vector3.ZERO) * Transform3D(Basis.IDENTITY, -pivot)
+	elif follow.size() >= 2:
+		var cm := (marks[0] + marks[1]) * 0.5
+		var cp: Vector3 = (palms[follow[0]] + palms[follow[1]]) * 0.5
+		var d1 := marks[1] - marks[0]
+		var d2: Vector3 = palms[follow[1]] - palms[follow[0]]
+		var q := Quaternion(d1.normalized(), d2.normalized()) if d1.length() > 0.01 and d2.length() > 0.01 else Quaternion.IDENTITY
+		c = Transform3D(Basis.IDENTITY, cp) * Transform3D(Basis(q), Vector3.ZERO) * Transform3D(Basis.IDENTITY, -cm)
+	else:
+		c = Transform3D(Basis.IDENTITY, palms[follow[0]] - marks[0])
+	var anchor_p := pe.get_parent() as Node3D
+	var l2: Transform3D = anchor_p.global_transform.affine_inverse() * (c * pe.global_transform)     # 받침 기준 새 자리
+	set_motion_offset(e, mo, e.transform.affine_inverse() * l2, "장비: %s %s 자리 맞추기" % [e.name, mo])
+	_seek(t)
+	var after := _hand_dists()
+	var txt := PackedStringArray()
+	for side in follow:
+		txt.append("%s 동작 그대로 %.1f → %.1f cm(IK 뒤 %.1f → %.1f)" % [DRCharacter3D.SIDE_NAMES[side], (before["raw"] as Array)[side], (after["raw"] as Array)[side],
+			(before["ik"] as Array)[side], (after["ik"] as Array)[side]])
+	_set_status("맞춤 — %s %d%% · %s · %s" % [mo, int(t * 100.0), _offset_text(e, mo), " · ".join(txt)])
+	return {"motion": mo, "before": before["ik"], "after": after["ik"], "raw_before": before["raw"], "raw_after": after["raw"]}
+
+
+## 손마다 손바닥 ↔ 표지(cm, 지금 자세) — {raw: 동작 그대로(IK 전), ik: IK 뒤}. 그 손이 무기를 안 따라가면 -1
+func _hand_dists() -> Dictionary:
+	var raw := [-1.0, -1.0]
+	var ik := [-1.0, -1.0]
+	if _prev != null:
+		for side in 2:
+			var r := _prev.support_report(side)
+			if not r.is_empty():
+				raw[side] = float(r["raw"]) * 100.0
+				ik[side] = float(r["ik"]) * 100.0
+	return {"raw": raw, "ik": ik}
+
+
+## 동작 표의 무기 자리 칸 — ● 따로 · ↳ 상체 동작 것 · 기본
+func _fill_offset_cell(it: TreeItem, motion: String) -> void:
+	const C := 3                                # 무기 자리 칸
+	var e := _offset_equip()
+	if e == null:
+		it.set_text(C, "-")
+		return
+	var key := DRCharacter3D.offset_key(e, motion)
+	var hint := "\n두 번 누름 = 이 동작만 고치기 · 오른쪽 누름 = 맞추기 · 복사 · 붙여넣기 · 기본으로"
+	if key == motion:
+		var sz := DRCharacter3D.offset_size(e.transform, DRCharacter3D.offset_for(e, motion))
+		it.set_text(C, "● %.1f cm · %.0f°" % [sz.x * 100.0, sz.y])
+		it.set_custom_color(C, Color(0.96, 0.66, 0.3))
+		it.set_tooltip_text(C, "%s — %s 은 따로 자리(기본 자리에서 %.1f cm · %.0f°)%s" % [e.name, motion, sz.x * 100.0, sz.y, hint])
+	elif key != "":
+		it.set_text(C, "↳ %s" % key)
+		it.set_custom_color(C, Color(0.55, 0.76, 0.96))
+		it.set_tooltip_text(C, "상하체 합성 — 상체 동작 %s 의 자리를 쓴다(%s). 이 동작만 따로 두려면 두 번 누름%s" % [key, _offset_text(e, motion), hint])
+	else:
+		it.set_text(C, "기본")
+		it.set_custom_color(C, Color(0.55, 0.57, 0.6))
+		it.set_tooltip_text(C, "%s — 기본 자리%s" % [e.name, hint])
+
+
+## 동작 표에서 그 동작 행을 고른 모양으로(다시 틀지 않음)
+func _mark_motion_row(motion: String) -> void:
+	if _mt == null or _mt.get_root() == null:
+		return
+	var it := _mt.get_root().get_first_child()
+	_mt_lock = true
+	while it != null:
+		if it.get_text(0) == motion:
+			if not it.is_selected(0):
+				it.select(0)
+			_mt.scroll_to_item(it)
+			break
+		it = it.get_next()
+	_mt_lock = false
+
+
+## 동작 표 오른쪽 누름 — 그 행의 무기 자리 메뉴
+func _on_mt_mouse(_pos: Vector2, button: int) -> void:
+	if button != MOUSE_BUTTON_RIGHT:
+		return
+	var it := _mt.get_selected()
+	var e := _offset_equip()
+	if it == null or e == null:
+		return
+	_mt_menu_motion = it.get_text(0)
+	var own := DRCharacter3D.offset_key(e, _mt_menu_motion) == _mt_menu_motion
+	_mt_menu.clear()
+	_mt_menu.add_item("이 동작만 고치기", 0)
+	_mt_menu.add_item("이 동작에 맞추기(자동)", 1)
+	_mt_menu.set_item_disabled(1, grip_kind(e) < 0 or grip_kind(e) >= 3)
+	_mt_menu.add_separator()
+	_mt_menu.add_item("무기 자리 복사", 2)
+	_mt_menu.add_item("무기 자리 붙여넣기", 3)
+	_mt_menu.set_item_disabled(3, not (_offset_clip is Transform3D))
+	_mt_menu.add_item("기본 자리로(따로 자리 지우기)", 4)
+	_mt_menu.set_item_disabled(4, not own)
+	_mt_menu.reset_size()
+	_mt_menu.popup_on_parent(Rect2i(Vector2i(get_global_mouse_position()), Vector2i.ZERO))
+
+
+func _on_mt_menu(id: int) -> void:
+	var mo := _mt_menu_motion
+	if mo == "":
+		return
+	if mo != current_motion():
+		play_motion(mo)
+	match id:
+		0:
+			set_per_motion(true)
+		1:
+			fit_motion_offset()
+		2:
+			copy_motion_offset(mo)
+		3:
+			paste_motion_offset(mo)
+		4:
+			reset_motion_offset(mo)

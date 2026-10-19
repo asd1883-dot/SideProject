@@ -230,7 +230,7 @@ static func _a2t(a: Variant) -> Transform3D:
 	return Transform3D(Basis(Vector3(a[0], a[1], a[2]), Vector3(a[3], a[4], a[5]), Vector3(a[6], a[7], a[8])), Vector3(a[9], a[10], a[11]))
 
 
-## 무기 기본 자리 읽기 — {bone, scene, weapon(Transform3D), support(Transform3D, 없으면 키 없음), motion_weights{}} 또는 {}
+## 무기 기본 자리 읽기 — {bone, scene, weapon(Transform3D), support(Transform3D, 없으면 키 없음), motion_weights{}, motion_offsets{동작: Transform3D}} 또는 {}
 static func read_hold(asset_json: String) -> Dictionary:
 	if asset_json == "" or not FileAccess.file_exists(asset_json):
 		return {}
@@ -245,13 +245,19 @@ static func read_hold(asset_json: String) -> Dictionary:
 	for k in Dictionary(h.get("motion_weights", {})).keys():
 		mw[String(k)] = float(h["motion_weights"][k])
 	out["motion_weights"] = mw
+	var mo := {}
+	for k in Dictionary(h.get("motion_offsets", {})).keys():
+		mo[String(k)] = _a2t(h["motion_offsets"][k])
+	out["motion_offsets"] = mo
 	return out
 
 
 ## 무기 기본 자리 쓰기 — asset.json 의 다른 칸은 **글자 그대로** 두고 "socket_hold" 칸만 바꾸거나 더한다(기록 history 에 한 줄).
 ## 왜 글로 끼우나: 통째로 읽어 JSON.stringify 로 다시 쓰면 Godot 4.7 이 아주 작은 수를 13 자리로 줄여(옛 equip 그립 6.51925802230835e-08
 ## → 6.519258022e-08, 10-16 실측) 손대지 않은 칸까지 바뀐다
-static func write_hold(asset_json: String, bone: String, scene: String, weapon: Transform3D, support: Variant, motion_weights: Dictionary) -> bool:
+## motion_offsets = 동작별 무기 자리(장비 축 기준 차이 — 받침이 달라도 뜻이 같아 다른 유닛에 그대로 쓴다, 10-19)
+static func write_hold(asset_json: String, bone: String, scene: String, weapon: Transform3D, support: Variant, motion_weights: Dictionary,
+		motion_offsets: Dictionary = {}) -> bool:
 	if asset_json == "" or not FileAccess.file_exists(asset_json):
 		return false
 	var txt := FileAccess.get_file_as_string(asset_json)
@@ -259,11 +265,17 @@ static func write_hold(asset_json: String, bone: String, scene: String, weapon: 
 		return false
 	var at := Time.get_datetime_string_from_system()
 	var h := {
-		"note": "② 장비 탭(3D 소켓) — 이 무기를 소켓에 넣을 때의 기본 자리. transform = 소켓(뼈) 기준 무기, support = 무기 기준 왼손 표지(원점 = 손바닥 점, 기저 = 왼손 뼈 회전), motion_weights = 동작별 왼손 IK 비중(없는 동작 = 1)",
+		"note": "② 장비 탭(3D 소켓) — 이 무기를 소켓에 넣을 때의 기본 자리. transform = 소켓(뼈) 기준 무기, support = 무기 기준 왼손 표지(원점 = 손바닥 점, 기저 = 왼손 뼈 회전), motion_weights = 동작별 왼손 IK 비중(없는 동작 = 1), motion_offsets = 동작별 무기 자리(무기 축 기준 차이 — 무기 자리 = transform × 이 값)",
 		"bone": bone, "scene": scene, "transform": _t2a(weapon), "motion_weights": motion_weights.duplicate(), "at": at,
 	}
 	if support is Transform3D:
 		h["support"] = _t2a(support)
+	if not motion_offsets.is_empty():
+		var mo := {}
+		for k in motion_offsets.keys():
+			if motion_offsets[k] is Transform3D:
+				mo[String(k)] = _t2a(motion_offsets[k])
+		h["motion_offsets"] = mo
 	var block := JSON.stringify(h, "\t", true, true).replace("\n", "\n\t")          # 맨 위 객체 안(들여쓰기 한 칸)
 	# 키(뒤에 콜론)로 찾는다 — 기록 안의 값 "step": "socket_hold" 를 잡지 않게(10-16 두 번째 저장에서 normalize 칸을 덮은 일)
 	var rk := RegEx.create_from_string("\"%s\"\\s*:\\s*\\{" % HOLD_KEY)

@@ -10,6 +10,9 @@ extends SceneTree
 ## [5] 게임처럼 다시 만들기: 숨긴 부모 무기는 지워짐 · 무기 · 헬멧이 뼈를 따라감 · 도트 재질 · fade · 수정자 MANUAL · mp40 왼손 IK
 ## [6] 뼈대 길이 든 사본도 소켓이 뼈를 따라감(02 U38)
 ## [7] 유니티식 기즈모(10-16): 단축키 · 이동(+ 눈금 · 취소 · 왼손 IK 따라옴) · 회전(고리 · 눈금 · 중심 모드) · 크기(축 · 전체 · 표지는 없음) · 눌러서 고르기
+## [8] 잡기(10-16): 오른손 · 왼손 · 양손 · 고정 — 무기 자리 그대로 · 따라가는 손 IK · 게임 길
+## [9] 동작별 무기 자리(10-19): 이 동작만(띠 · 크기 없음) · 끌기 → 그 동작만 · 다른 동작 기본 · 상하체 합성 = 상체 것 · 표 칸 · 모든 동작 끌기 = 기본 자리만 ·
+##     숫자 칸 · 게임 길 섞어 옮기기 · 맞추기(양손 · 소켓) · 복사 · 붙여넣기 · 기본으로 · asset.json 왕복
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -23,7 +26,7 @@ var _fails := PackedStringArray()
 
 
 func _initialize() -> void:
-	create_timer(240.0).timeout.connect(func() -> void:
+	create_timer(420.0).timeout.connect(func() -> void:
 		print("EQUIP PAGE SMOKE FAIL 시간 초과")
 		quit(2))
 	_run.call_deferred()
@@ -362,6 +365,156 @@ func _grip_checks(page: DREquipPage) -> void:
 	page._playing = true
 
 
+## 기즈모로 고른 노드를 긴 축 쪽으로 px 만큼 끈다
+func _drag_long(giz: Control, px: float) -> void:
+	var h: int = _long_axis(giz)
+	var p: Vector2 = giz.handle_point(h)
+	var sd: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[h - Giz.H.AX] * 0.1) - giz._p(giz.pivot_point())).normalized()
+	_drag_on(giz, p, p + sd * px)
+
+
+## 미리보기 사본의 그 장비 자리(받침 기준)
+func _shown(page: DREquipPage, e: Node3D) -> Transform3D:
+	return (page._prev_node(e) as Node3D).transform
+
+
+## [9] 동작별 무기 자리(10-19) — 사용자: "애니메이션별로 양손이든 왼손이든 오른손이든 총기 위치 회전 오프셋을 지정해 둘 수 있는 툴" ·
+## "ui / ux 잘 신경 써 줘". 에디터 밖 = 메모리 인스턴스만 고친다(파일 안 씀 — asset.json 은 임시 사본에)
+func _offset_checks(page: DREquipPage) -> void:
+	print("[9] 동작별 무기 자리 — 이 동작만 · 기본 자리 · 상하체 합성 · 표 · 숫자 칸 · 게임 길 · 맞추기 · 복사 · 기본으로")
+	page.select_unit(BASE)
+	await _frames(3)
+	var giz = page._giz
+	var gw := page._weapon_equip()
+	page._select_node(page._root.get_path_to(gw))
+	page._playing = false
+	page.set_tool(Giz.Tool.MOVE)
+	page.play_motion("Firing_Rifle")
+	page._seek(0.3)
+	await _frames(2)
+	var base0 := gw.transform
+	page.set_per_motion(true)
+	await _frames(2)
+	_check(page._per_motion and page._pm_banner.visible and page._pm_btns[1].button_pressed and page._pm_label.text.contains("Firing_Rifle") and not giz.allow_scale,
+		"이 동작만: 띠「%s」 · 단추 눌림 · 크기 손잡이 없음" % page._pm_label.text.left(48))
+	_drag_long(giz, 30.0)
+	await _frames(1)
+	var offs := DRCharacter3D.motion_offsets(gw)
+	var shown := _shown(page, gw)
+	_check(offs.size() == 1 and offs.has("Firing_Rifle") and gw.transform.is_equal_approx(base0) and shown.is_equal_approx(base0 * (offs["Firing_Rifle"] as Transform3D)),
+		"기즈모 끌기 → Firing_Rifle 만 저장(%s) · 기본 자리 그대로 · 미리보기 = 기본 × 차이" % page._offset_text(gw, "Firing_Rifle"))
+	page.play_motion("Rifle_Idle")
+	var at_idle := _shown(page, gw)
+	page.play_motion("Firing_Rifle")
+	_check(at_idle.is_equal_approx(base0) and _shown(page, gw).is_equal_approx(shown), "Rifle_Idle = 기본 자리 · Firing_Rifle 로 돌아오면 다시 그 자리")
+	page.play_motion("Crouch_Idle+Firing_Rifle")
+	_check(DRCharacter3D.offset_key(gw, "Crouch_Idle+Firing_Rifle") == "Firing_Rifle" and _shown(page, gw).is_equal_approx(shown),
+		"상하체 합성 Crouch_Idle+Firing_Rifle = 상체 Firing_Rifle 자리")
+	page._fill_motion_table()
+	var cells := {}
+	var it := page._mt.get_root().get_first_child()
+	while it != null:
+		cells[it.get_text(0)] = it.get_text(3)
+		it = it.get_next()
+	_check(String(cells.get("Firing_Rifle", "")).begins_with("●") and String(cells.get("Rifle_Idle", "")) == "기본" and String(cells.get("Crouch_Idle+Firing_Rifle", "")).begins_with("↳"),
+		"동작 표 무기 자리 칸: %s · %s · %s" % [cells.get("Firing_Rifle", "-"), cells.get("Rifle_Idle", "-"), cells.get("Crouch_Idle+Firing_Rifle", "-")])
+	page._update_info()
+	_check(page._info.text.contains("무기 = 이 동작 자리(상체 Firing_Rifle"), "정보 줄 끝: …%s" % page._info.text.right(50))
+	# 숫자 칸(이 동작만) — x +1 cm 면 그 동작 자리만 1 cm
+	page.play_motion("Firing_Rifle")
+	await _frames(1)
+	var x0 := page._pos[0].value
+	page._pos[0].value = x0 + 1.0
+	var moved := (base0 * (DRCharacter3D.motion_offsets(gw)["Firing_Rifle"] as Transform3D)).origin.x - shown.origin.x
+	_check(absf(moved - 0.01) < 0.0005 and gw.transform.is_equal_approx(base0), "숫자 칸(이 동작만) x +1 cm → 그 동작 자리만 %.2f cm · 기본 자리 그대로" % (moved * 100.0))
+	shown = _shown(page, gw)
+	# 모든 동작 — 끌면 기본 자리가 바뀌고 이 동작 차이는 그대로
+	var off_keep: Transform3D = DRCharacter3D.motion_offsets(gw)["Firing_Rifle"]
+	page.set_per_motion(false)
+	await _frames(1)
+	_check(not page._pm_banner.visible and giz.allow_scale and page._xf_note.visible, "모든 동작: 띠 없음 · 크기 손잡이 · 안내 줄「%s」" % page._xf_note.text.left(36))
+	_drag_long(giz, 20.0)
+	await _frames(1)
+	var base1 := gw.transform
+	_check(not base1.is_equal_approx(base0) and (DRCharacter3D.motion_offsets(gw)["Firing_Rifle"] as Transform3D).is_equal_approx(off_keep)
+		and _shown(page, gw).is_equal_approx(base1 * off_keep), "모든 동작: 끌면 기본 자리만 바뀌고 Firing_Rifle 차이는 그대로(보이는 자리 = 새 기본 × 차이)")
+	page._set_props_merged("시험: 기본 자리 되돌림", [[gw, "transform", base0]])
+	# 게임 길 — 동작이 바뀔 때 손 IK 비중과 같은 시간 동안 섞어 옮긴다
+	var pk := PackedScene.new()
+	pk.pack(page._root)
+	var g := pk.instantiate() as DRCharacter3D
+	root.add_child(g)
+	await _frames(2)
+	g.get_animation_player().callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	g.play_motion("Rifle_Idle", 0.0)
+	g.step_motion(0.2)
+	var ge := g.get_weapon_node()
+	var g0 := ge.transform
+	g.play_motion("Firing_Rifle", 0.2)
+	g.step_motion(0.1)
+	var mid := ge.transform
+	var want_mid := base0 * Transform3D.IDENTITY.interpolate_with(off_keep, 0.5)
+	g.step_motion(0.15)
+	var end := ge.transform
+	_check(g0.is_equal_approx(base0) and mid.origin.distance_to(want_mid.origin) < 0.0005 and end.is_equal_approx(base0 * off_keep) and float(g.support_report(0).get("ik", 1.0)) < 0.01,
+		"게임 길: Rifle_Idle 기본 → Firing_Rifle 0.2 초 섞기(중간 %.2f mm 차) → 그 자리 · 왼손 IK %.2f cm" % [mid.origin.distance_to(want_mid.origin) * 1000.0, float(g.support_report(0).get("ik", 1.0)) * 100.0])
+	g.queue_free()
+	# 복사 · 붙여넣기 · 기본으로
+	page.copy_motion_offset("Firing_Rifle")
+	page.paste_motion_offset("Rifle_Aiming_Idle")
+	var o2 := DRCharacter3D.motion_offsets(gw)
+	_check(o2.has("Rifle_Aiming_Idle") and (o2["Rifle_Aiming_Idle"] as Transform3D).is_equal_approx(o2["Firing_Rifle"]), "복사 Firing_Rifle → 붙여넣기 Rifle_Aiming_Idle")
+	page.reset_motion_offset("Rifle_Aiming_Idle")
+	page.reset_motion_offset("Firing_Rifle")
+	page.play_motion("Firing_Rifle")
+	_check(not gw.has_meta(DRCharacter3D.MOTION_OFFSETS_META) and _shown(page, gw).is_equal_approx(base0), "기본으로 둘 다 → 메타 지워짐 · 미리보기 기본 자리")
+	# 맞추기 — 오른손 소켓(든 손 축으로 돌림): Rifle_Idle 은 동작의 왼손이 총에서 20 cm 떨어져 있다 → 무기가 그 손 쪽으로 돌아 동작 그대로의 차이가 준다
+	page.play_motion("Rifle_Idle")
+	page._seek(0.3)
+	page.set_per_motion(true)
+	var fr := page.fit_motion_offset()
+	var rb := float((fr.get("raw_before", [0, 0]) as Array)[0])
+	var ra := float((fr.get("raw_after", [99, 99]) as Array)[0])
+	_check(not fr.is_empty() and ra < rb * 0.5 and float((fr["after"] as Array)[0]) < 1.0 and DRCharacter3D.offset_key(gw, "Rifle_Idle") == "Rifle_Idle",
+		"맞추기(오른손 소켓) Rifle_Idle: 왼손 동작 그대로 %.1f → %.1f cm · IK 뒤 %.1f cm · %s" % [rb, ra, float((fr.get("after", [9, 9]) as Array)[0]), page._offset_text(gw, "Rifle_Idle")])
+	page.reset_motion_offset("Rifle_Idle")
+	# 맞추기 — 양손(두 손 사이): 무기를 그 동작에서 팔이 안 닿게 밀어 둔 뒤(사용자 저장 씬의 사격 · 걷기와 같은 일 — 왼팔 6 ~ 8 cm 모자람) 맞추기 → 닿음
+	page.set_per_motion(false)
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	page._force_pose()
+	page.set_grip(2)
+	await _frames(1)
+	gw = page._weapon_equip()
+	page._select_node(page._root.get_path_to(gw))
+	page.play_motion("Firing_Rifle")
+	page._seek(0.4)
+	page.set_per_motion(true)
+	page.set_motion_offset(gw, "Firing_Rifle", Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 0.18)), "시험: 총구 쪽으로 18 cm 밀기")
+	page._seek(0.4)
+	var far := page._hand_dists()
+	var fh := page.fit_motion_offset()
+	var bmax := maxf(float((far["ik"] as Array)[0]), float((far["ik"] as Array)[1]))
+	var amax := maxf(float((fh.get("after", [9, 9]) as Array)[0]), float((fh.get("after", [9, 9]) as Array)[1]))
+	_check(not fh.is_empty() and bmax > 2.0 and amax < 1.0,
+		"맞추기(양손) Firing_Rifle: 밀어 둔 무기(두 손 IK 뒤 최대 %.1f cm — 팔이 안 닿음) → 맞추기 → %.1f cm · %s" % [bmax, amax, page._offset_text(gw, "Firing_Rifle")])
+	page.set_per_motion(false)
+	page.reset_motion_offset("Firing_Rifle")
+	page.set_grip(0)
+	gw = page._weapon_equip()
+	# asset.json 왕복(임시 사본) — 다른 유닛 소켓에 넣을 때 동작별 자리도
+	var tmp := "user://시험_asset.json"
+	var src := DREquipHold.asset_for_model(K98)
+	DirAccess.copy_absolute(ProjectSettings.globalize_path(src), ProjectSettings.globalize_path(tmp))
+	var off_t := Transform3D(Basis(Vector3.UP, 0.1), Vector3(0.01, 0.02, -0.03))
+	var okw := DREquipHold.write_hold(tmp, "RightHand", K98, base0, null, {}, {"Firing_Rifle": off_t})
+	var rh := DREquipHold.read_hold(tmp)
+	_check(okw and (rh.get("motion_offsets", {}) as Dictionary).has("Firing_Rifle") and ((rh["motion_offsets"] as Dictionary)["Firing_Rifle"] as Transform3D).is_equal_approx(off_t),
+		"asset.json socket_hold.motion_offsets 쓰기 → 읽기 같음")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp))
+	page._playing = true
+
+
 func _dot(mi: MeshInstance3D) -> bool:
 	if mi.mesh == null or mi.mesh.get_surface_count() == 0:
 		return false
@@ -528,6 +681,7 @@ func _run() -> void:
 
 	await _gizmo_checks(page)
 	await _grip_checks(page)
+	await _offset_checks(page)
 
 	# 치우기
 	page._drop_root()

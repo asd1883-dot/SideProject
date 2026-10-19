@@ -143,6 +143,7 @@ var _equip_mis: Array[MeshInstance3D] = []     # 장비 메시 중 도트 재질
 var _sock_weapon: Node3D = null                # 든 무기(손 표지가 있는 장비 → 없으면 오른손 소켓의 장비)
 var _hands: Array = [null, null]               # 손마다(0 = 왼손 · 1 = 오른손) HandIK — 그 손 표지가 있고 그 손이 받침이 아닐 때만
 var _solver: SkeletonModifier3D = null         # 받침대 풀이(뼈대 수정자 차례 맨 앞 — 받침대가 있을 때만)
+var _pose_equips: Array[PoseEquip] = []        # 동작별 무기 자리를 얹는 장비(게임 · 미리보기 사본 — 편집 중인 씬은 기본 자리 그대로)
 var _equip_sig := ""                           # 편집 중인 씬에서 받침 구조가 바뀌었나(에디터만)
 var _saved_skel_paths := {}                    # 저장하는 동안 비운 소켓의 뼈대 길(소켓 -> 길)
 var _saved_mount_xf := {}                      # 저장하는 동안 원점에 둔 두 손 사이 받침대의 자리(받침대 -> 변환)
@@ -271,8 +272,8 @@ func dress(top_on: bool, bottom_on: bool) -> void:
 # ---------------------------------------------------------------- 동작 재생(무기 그립 포함)
 
 ## 동작을 튼다(섞는 시간 blend 초).
-## 소켓 · 받침대 무기(정석, 10-16): 무기 자리는 받침 기준으로 고정이고, 그 동작의 손 IK 비중(손 표지마다 동작별 비중)으로 같은 시간 동안 옮긴다 —
-##   `_grip_t` 가 섞기 시간. 두 손 사이 받침대는 그 비중으로 잡은 손만 따른다(풀이 수정자).
+## 소켓 · 받침대 무기(정석, 10-16): 무기 자리는 받침 기준 기본 자리 × 그 동작의 동작별 자리(10-19, 장비 메타 — 없으면 기본 자리 그대로)이고,
+##   그 동작의 손 IK 비중(손 표지마다 동작별 비중)과 함께 같은 시간 동안 옮긴다 — `_grip_t` 가 섞기 시간. 두 손 사이 받침대는 그 비중으로 잡은 손만 따른다(풀이 수정자).
 ## 옛 무기(weapon_asset): 그 동작에 맞춘 그립(DRGripFit — 동작마다 두 손에 다시 맞춘 것, 캐시)으로 같은 시간 동안 옮긴다.
 func play_motion(motion: String, blend: float = 0.1) -> void:
 	if _ap == null or not _ap.has_animation(motion):
@@ -282,7 +283,8 @@ func play_motion(motion: String, blend: float = 0.1) -> void:
 	if first:
 		_ap.advance(0.0)                   # 처음 자세를 바로 — 안 그러면 다음 갱신까지 레스트(T자) 자세로 보인다
 	_motion = motion
-	if _sock_weapon != null or _has_hand_ik():
+	var moving := _aim_offsets(motion, first or blend <= 0.0)
+	if _sock_weapon != null or _has_hand_ik() or moving:
 		if first or blend <= 0.0:
 			for side in 2:
 				_set_hand_weight(side, _hand_weight(side, motion))
@@ -327,6 +329,16 @@ func step_motion(dt: float) -> bool:
 			var h: HandIK = _hands[side]
 			if h != null:
 				_set_hand_weight(side, lerpf(h.w_from, h.w_to, k))
+		var moved := false
+		for pq in _pose_equips:
+			if is_instance_valid(pq.e) and not pq.from.is_equal_approx(pq.to):
+				pq.cur = pq.from.interpolate_with(pq.to, k)
+				pq.e.transform = pq.base * pq.cur
+				if k >= 1.0:
+					pq.from = pq.to
+				moved = true
+		if moved:
+			sync_support()                     # 장비가 움직였으니 손 IK 목표도(표지는 장비 아래)
 		if k >= 1.0:
 			_grip_t = -1.0
 	return wrapped
@@ -934,6 +946,10 @@ const PALM_PARTS := ["L_Hand", "R_Hand"]
 const SIDE_NAMES := ["왼손", "오른손"]
 const SIDE_TAGS := ["Left", "Right"]
 const SOLVER_SCRIPT := preload("res://addons/dot_rigger/runtime/dr_grip_solver_3d.gd")
+## 동작별 무기 자리(10-19) — 장비 노드의 메타 칸 이름. 값 = {동작 이름: Transform3D}, 그 동작에서 장비 자리 = 기본 자리(transform) × 이 값
+## (장비 자신의 축 기준 위치 · 회전 차이 — 받침을 바꿔도(잡기 오른손 → 양손) 뜻이 같다). 동작 표의 상하체 합성 "A+B" 는 제 것이 없으면 상체 B 것을 쓴다.
+## 사용자(10-16): "2번 탭은 애니메이션별로 양손이든 왼손이든 오른손이든 총기 위치 회전 오프셋을 지정해 둘 수 있는 리소스 툴인 거지?" → 10-19 "2번 작업도 시행"
+const MOTION_OFFSETS_META := &"dr_motion_offsets"
 
 
 ## 손 하나의 IK(10-16 — 왼손만이던 것을 두 손으로)
@@ -954,6 +970,15 @@ class HandIK:
 	var w_to := 0.0
 
 
+## 동작별 자리를 얹는 장비 하나(10-19) — base = 기본 자리(씬에 저장된 transform), cur = 지금 얹은 차이, from → to = 섞는 중
+class PoseEquip:
+	var e: Node3D = null
+	var base := Transform3D.IDENTITY
+	var cur := Transform3D.IDENTITY
+	var from := Transform3D.IDENTITY
+	var to := Transform3D.IDENTITY
+
+
 ## 받침 · 장비 · 손 표지를 다시 찾아 지금 몸에 잇는다 — 조립 때 저절로, ② 장비 탭이 노드를 바꾼 뒤, 편집 중인 씬에서 구조가 바뀌면.
 ## 몸이 없으면(조립 전) 아무것도 안 한다
 func refresh_equipment() -> void:
@@ -967,6 +992,10 @@ func refresh_equipment() -> void:
 	var edited := is_inside_tree() and is_part_of_edited_scene()
 	var found := [null, null]            # 손마다 [표지, 받침] — 먼저 찾은 것
 	var hand_equip: Node3D = null        # 오른손 소켓의 첫 장비(표지 있는 장비가 없을 때의 "무기")
+	var old := {}                        # 장비 → PoseEquip(다시 잇기 — 이미 동작별 자리를 얹은 장비의 기본 자리를 지금 transform 으로 착각하지 않게)
+	for pq in _pose_equips:
+		old[pq.e] = pq
+	_pose_equips.clear()
 	for a in find_anchors(self, _model):
 		var abone := ""
 		if a is BoneAttachment3D:
@@ -985,6 +1014,13 @@ func refresh_equipment() -> void:
 					e.queue_free()             # 게임: 자식 프리팹이 숨긴 부모 장비 — 병사마다 남기지 않는다
 				continue
 			_paint_equipment(e, edited)
+			if not edited:                     # 편집 중인 씬은 기본 자리 그대로(얹으면 그 값이 저장된다)
+				var pq: PoseEquip = old.get(e, null)
+				if pq == null:
+					pq = PoseEquip.new()
+					pq.e = e
+					pq.base = e.transform
+				_pose_equips.append(pq)
 			var marked := false
 			for side in 2:
 				var mk := find_hand_marker(e, side)
@@ -1010,10 +1046,139 @@ func refresh_equipment() -> void:
 			_make_ik(side, found[side][0], found[side][1])
 	if _solver != null or _hands[0] != null or _hands[1] != null:
 		_skel.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE if edited else Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL
+	_aim_offsets(_motion, true)                # 지금 동작의 동작별 자리를 바로(안 움직였으면 아래 sync_support 가 손 IK 목표를)
 	sync_support()
 	for side in 2:
 		_set_hand_weight(side, _hand_weight(side, _motion))
 	_equip_sig = _socket_sig()
+
+
+# ---------------------------------------------------------------- 동작별 무기 자리(10-19)
+
+## 장비 e 의 동작별 자리 — {동작: Transform3D}. 없으면 {}
+static func motion_offsets(e: Node) -> Dictionary:
+	if e == null or not e.has_meta(MOTION_OFFSETS_META):
+		return {}
+	var v: Variant = e.get_meta(MOTION_OFFSETS_META)
+	return v if v is Dictionary else {}
+
+
+## 그 동작에 쓰는 동작별 자리의 이름 — 그 동작 것 → 없으면 상하체 합성(A+B)의 상체 B 것 → 없으면 ""(기본 자리)
+static func offset_key(e: Node, motion: String) -> String:
+	var d := motion_offsets(e)
+	if d.is_empty() or motion == "":
+		return ""
+	if d.get(motion) is Transform3D:
+		return motion
+	var plus := motion.rfind("+")
+	if plus > 0 and d.get(motion.substr(plus + 1)) is Transform3D:
+		return motion.substr(plus + 1)
+	return ""
+
+
+## 그 동작의 동작별 자리(장비 축 기준 차이 — 장비 자리 = 기본 자리 × 이 값). 없으면 IDENTITY
+static func offset_for(e: Node, motion: String) -> Transform3D:
+	var k := offset_key(e, motion)
+	if k == "":
+		return Transform3D.IDENTITY
+	return motion_offsets(e)[k]
+
+
+## 동작별 자리 차이의 크기 — [옮긴 거리 m(받침 기준 장비 원점), 돌린 각 °]. base = 기본 자리
+static func offset_size(base: Transform3D, off: Transform3D) -> Vector2:
+	return Vector2((base * off).origin.distance_to(base.origin), rad_to_deg(off.basis.orthonormalized().get_rotation_quaternion().get_angle()))
+
+
+## 동작별 자리를 그 동작 것으로 — instant 면 바로, 아니면 섞기 시작(step_motion 이 옮긴다). 섞어 옮길 것이 있으면 true
+func _aim_offsets(motion: String, instant: bool) -> bool:
+	var moving := false
+	var moved := false
+	for pq in _pose_equips:
+		if not is_instance_valid(pq.e):
+			continue
+		var t := offset_for(pq.e, motion)
+		if instant:
+			if not t.is_equal_approx(pq.cur) or not pq.e.transform.is_equal_approx(pq.base * t):
+				pq.cur = t
+				pq.e.transform = pq.base * t
+				moved = true
+			pq.from = t
+			pq.to = t
+		else:
+			pq.from = pq.cur
+			pq.to = t
+			moving = moving or not t.is_equal_approx(pq.cur)
+	if moved:
+		sync_support()
+	return moving
+
+
+func _pose_of(e: Node) -> PoseEquip:
+	for pq in _pose_equips:
+		if pq.e == e:
+			return pq
+	return null
+
+
+## 장비 e 의 기본 자리를 바꾼다(① ② 탭이 유닛 씬 값을 미리보기 사본에 옮길 때) — 지금 얹은 동작별 자리는 그대로 얹어 놓는다
+func set_equip_base(e: Node3D, base: Transform3D) -> void:
+	var pq := _pose_of(e)
+	if pq == null:
+		e.transform = base
+		return
+	pq.base = base
+	e.transform = base * pq.cur
+
+
+## 장비 e 의 기본 자리(동작별 자리를 얹기 전 — 씬에 저장된 값). 동작별 자리를 안 쓰는 노드(편집 중인 씬)면 지금 transform
+func get_equip_base(e: Node3D) -> Transform3D:
+	var pq := _pose_of(e)
+	return pq.base if pq != null else e.transform
+
+
+## 장비 e 에 지금 얹은 동작별 자리(섞는 중이면 그 사이 값). 없으면 IDENTITY
+func get_equip_offset(e: Node3D) -> Transform3D:
+	var pq := _pose_of(e)
+	return pq.cur if pq != null else Transform3D.IDENTITY
+
+
+## 미리보기 사본 = src(같은 구조의 유닛 — 편집 중인 씬)의 받침 · 장비 · 표지 값으로(다시 조립하지 않고). ① ② 탭이 자리 · 비중 · 보간 ·
+## 동작별 자리만 바뀌었을 때 부른다. 소켓은 뼈가, 두 손 사이 받침대는 두 손이 자리를 정하므로 안 덮는다(덮으면 그 프레임에 원점으로 튐, 10-16).
+## 끝나면 지금 동작의 동작별 자리 · 손 비중을 새 값으로 바로(동작 · 시점은 그대로)
+func sync_from(src: DRCharacter3D) -> void:
+	if src == null:
+		return
+	for s in find_anchors(src, src._model):
+		var stack: Array[Node] = [s]
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			stack.append_array(n.get_children())
+			if n.owner != src:
+				continue
+			var pn := get_node_or_null(src.get_path_to(n))
+			if pn == null:
+				continue
+			var driven := n is BoneAttachment3D or (n is DRGripMount3D and (n as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS)
+			if pn is Node3D and n is Node3D and not driven:
+				if n.get_parent() is BoneAttachment3D or n.get_parent() is DRGripMount3D:      # 장비 — 기본 자리 + 동작별 자리
+					if n.has_meta(MOTION_OFFSETS_META):
+						pn.set_meta(MOTION_OFFSETS_META, (n.get_meta(MOTION_OFFSETS_META) as Dictionary).duplicate())
+					elif pn.has_meta(MOTION_OFFSETS_META):
+						pn.remove_meta(MOTION_OFFSETS_META)
+					set_equip_base(pn as Node3D, (n as Node3D).transform)
+				else:
+					(pn as Node3D).transform = (n as Node3D).transform
+			if pn is DRHandTarget3D and n is DRHandTarget3D:
+				(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
+				(pn as DRHandTarget3D).weight = (n as DRHandTarget3D).weight
+			if pn is DRGripMount3D and n is DRGripMount3D:
+				for k in ["blend", "right_offset", "left_offset"]:
+					pn.set(k, n.get(k))
+	_grip_t = -1.0                             # 섞던 것은 끊고 지금 동작 값으로
+	_aim_offsets(_motion, true)
+	sync_support()
+	for side in 2:
+		_set_hand_weight(side, _hand_weight(side, _motion))
 
 
 ## 이 노드 아래(skip — 몸 모델 — 빼고)의 소켓(BoneAttachment3D)을 씬 순서대로. 소켓 안으로는 더 내려가지 않는다

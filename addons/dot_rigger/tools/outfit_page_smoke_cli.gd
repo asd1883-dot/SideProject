@@ -75,6 +75,16 @@ func _sum(d: Dictionary) -> int:
 	return n
 
 
+## 원래 문서의 첫 crop 정수 — 데이터마다 다르다(10-19: 사본을 커밋 상태로 새로 만들자 "104" 를 박아 둔 검사가 걸림 — 104 는 사용자 로컬 파일 값)
+static func _first_crop(doc: Dictionary) -> int:
+	for s in (doc.get("sets", {}) as Dictionary).values():
+		for p in ((s as Dictionary).get("parts", {}) as Dictionary).values():
+			var c: Variant = (p as Dictionary).get("crop")
+			if c is Array and not (c as Array).is_empty():
+				return int(c[0])
+	return -1
+
+
 func _joint_offset(path: String, key: String) -> float:
 	var v: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if not (v is Dictionary):
@@ -174,7 +184,9 @@ func _run() -> void:
 		"파일: slots.Hips = top · model · id 그대로")
 	_check(d.has("sets") and d.has("sets_json") and JSON.stringify(d["sets"]) == JSON.stringify(before_doc["sets"]) and String(d["sets_json"]) == String(before_doc["sets_json"]),
 		"다른 키(2D 시험장의 sets · sets_json) 그대로")
-	_check(txt.contains("\t\t\t\t\t\t104,") and not txt.contains("104.0"), "정수는 정수 그대로(crop 104 — 104.0 으로 안 바뀜)")
+	var c0 := _first_crop(before_doc)
+	_check(c0 >= 0 and txt.contains("\t\t\t\t\t\t%d," % c0) and RegEx.create_from_string("\\d\\.0\\b").search(txt) == null,
+		"정수는 정수 그대로(crop %d — %d.0 으로 안 바뀜)" % [c0, c0])
 	var ok2: bool = await page.load_outfit(OUTFIT)
 	_check(ok2 and page.get_slots().get("Hips") == "top", "다시 읽기: Hips = 상의")
 	page.set_slot("Hips", "bottom")

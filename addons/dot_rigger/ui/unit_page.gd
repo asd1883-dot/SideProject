@@ -585,6 +585,8 @@ func _equip_walk(xform: bool) -> String:
 				# 소켓 자리는 뼈가, 두 손 사이 받침대 자리는 두 손이 정한다(에디터에서 유닛 씬이 동작을 틀면 계속 바뀜) — 장비 · 표지 · 고정 받침대 자리만
 				var driven := n is BoneAttachment3D or (gm != null and gm.mode == DRGripMount3D.Mode.HANDS)
 				parts.append(str((n as Node3D).transform) if n is Node3D and not driven else "")
+				if n.get_parent() is BoneAttachment3D or n.get_parent() is DRGripMount3D:
+					parts.append(str(DRCharacter3D.motion_offsets(n)))      # 장비의 동작별 자리(② 탭, 10-19)
 				if gm != null:
 					parts.append("%s|%s|%s" % [str(gm.blend), str(gm.right_offset), str(gm.left_offset)])
 				if n is DRHandTarget3D:
@@ -609,7 +611,8 @@ func _equip_summary() -> String:
 				for side in 2:
 					if DRCharacter3D.find_hand_marker(c, side) != null:
 						marks.append(String(DRCharacter3D.SIDE_NAMES[side]))
-				items.append(String(c.name) + (" · %s 표지" % " · ".join(marks) if not marks.is_empty() else ""))
+				var po := DRCharacter3D.motion_offsets(c).size()
+				items.append(String(c.name) + (" · %s 표지" % " · ".join(marks) if not marks.is_empty() else "") + (" · 동작별 자리 %d" % po if po > 0 else ""))
 		var where := (s as BoneAttachment3D).bone_name if s is BoneAttachment3D else \
 			("두 손 사이" if (s as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS else "땅 고정")
 		lines.append("%s(%s) → %s" % [s.name, where, ", ".join(items) if not items.is_empty() else "(비어 있음)"])
@@ -1010,31 +1013,12 @@ func _process(delta: float) -> void:
 				_sync_equip()
 
 
-## 장비 자리 · 손 비중 · 보간만 바뀌었다(기즈모 · ② 탭) — 다시 조립하지 않고 미리보기 사본의 같은 노드만 맞춘다
+## 장비 자리 · 손 비중 · 보간 · 동작별 자리만 바뀌었다(기즈모 · ② 탭) — 다시 조립하지 않고 미리보기 사본의 같은 노드만 맞춘다
+## (DRCharacter3D.sync_from — ② 탭 미리보기와 같은 길. 소켓 · 두 손 사이 받침대는 안 덮는다 · 지금 동작의 손 비중 · 동작별 자리를 다시)
 func _sync_equip() -> void:
 	if _prev_ch == null or not is_instance_valid(_prev_ch):
 		return
-	for s in DRCharacter3D.find_anchors(_root):
-		var stack: Array[Node] = [s]
-		while not stack.is_empty():
-			var n: Node = stack.pop_back()
-			if n.owner == _root:
-				var pn := _prev_ch.get_node_or_null(_root.get_path_to(n))
-				# 소켓은 뼈가, 두 손 사이 받침대는 두 손이 자리를 정한다(덮으면 원점으로 튐)
-				var driven := n is BoneAttachment3D or (n is DRGripMount3D and (n as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS)
-				if pn is Node3D and n is Node3D and not driven:
-					(pn as Node3D).transform = (n as Node3D).transform
-				if pn is DRHandTarget3D and n is DRHandTarget3D:
-					(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
-					(pn as DRHandTarget3D).weight = (n as DRHandTarget3D).weight
-				if pn is DRGripMount3D and n is DRGripMount3D:
-					for k in ["blend", "right_offset", "left_offset"]:
-						pn.set(k, n.get(k))
-			stack.append_array(n.get_children())
-	_prev_ch.sync_support()
-	var mo := _prev_ch.current_motion()
-	if mo != "":
-		_prev_ch.play_motion(mo, 0.0)                  # 손 비중을 지금 동작 것으로 다시
+	_prev_ch.sync_from(_root)
 
 
 func _draw_ground() -> void:
