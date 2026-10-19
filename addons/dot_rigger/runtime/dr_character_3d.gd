@@ -674,10 +674,22 @@ static func char_material(src: Material) -> ShaderMaterial:
 		if bm.albedo_texture != null:
 			sm.set_shader_parameter("albedo_tex", bm.albedo_texture)
 			sm.set_shader_parameter("use_tex", true)
+			# 안전 밉 지도(pipeline/safe_mip_map.py — 텍스처 옆 <이름>.safemip.png): 있으면 UV 조각 경계 근처에서 옆 조각 색이 안 섞이게(10-19)
+			var sp := safe_mip_path(bm.albedo_texture.resource_path)
+			if sp != "" and ResourceLoader.exists(sp):
+				sm.set_shader_parameter("safe_tex", load(sp))
+				sm.set_shader_parameter("use_safe", true)
 	sm.set_shader_parameter("albedo_color", col)
 	_apply_shading(sm)
 	_mats[src] = sm
 	return sm
+
+
+## 그 텍스처의 안전 밉 지도 경로(없으면 ""). 같은 폴더 · 같은 이름 + .safemip.png
+static func safe_mip_path(tex_path: String) -> String:
+	if tex_path == "" or not tex_path.begins_with("res://") or tex_path.contains("::"):
+		return ""
+	return tex_path.get_basename() + ".safemip.png"
 
 
 # ---------------------------------------------------------------- 나누기 캐시

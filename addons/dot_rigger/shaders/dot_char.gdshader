@@ -16,11 +16,19 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 //    · 비등방(anisotropic): 비스듬히 보이는 면(머리 꼭대기 · 어깨 윗면 · 실루엣 가장자리)은 도트 하나가 덮는 텍셀이 길쭉한데, 보통 밉맵은
 //      긴 축으로 단계를 골라(머리 꼭대기 8 단계 = 256 텍셀 네모) 옆 UV 섬 색(피부 · 회색 · 주황)을 섞었다. 비등방은 짧은 축으로 단계를
 //      고르고 긴 축을 따라 여러 번 읽는다(프로젝트 설정 rendering/textures/default_filters/anisotropic_filtering_level, 기본 4×).
+//    · 안전 밉 지도(safe_tex, 10-19): 아틀라스에서 UV 조각끼리 몇 텍셀 사이로 붙어 있으면 밉맵 4 ~ 5 단계부터 옆 조각 색이 섞인다 —
+//      사람 몸은 정수리 앞(머리카락 조각 끝)이 피부 조각과 붙어 있어 도트 2 px 이상에서 정수리에 살색 도트("탈모 형태", 사용자 10-19).
+//      pipeline/safe_mip_map.py 가 텍셀마다 "남의 조각 · 틈까지 거리로 정한, 읽어도 되는 발자국 길이"를 구워 두면
+//      (텍스처 옆 <이름>.safemip.png — DRCharacter3D.char_material 이 넣음) 발자국 긴 축이 그보다 길 때 두 기울기를 같은 비율로 줄여 읽는다.
+//      경계 근처만 또렷해지고 조각 안쪽은 그대로(밉맵 · 비등방 유지). 지도가 없으면 예전과 같다.
 // 공통 값(bands · ambient · light_wrap · light_dir · rim · inside_shade)은 DRCharacter3D.set_shading() 이 모든 재질에 한꺼번에 준다.
 // 명암 단계가 AI 메시의 주름마다 잘게 끊기지 않게 노멀은 메시를 나눌 때 고르게 펴 둔다(DRSlotMesh.smooth_normals — 도트 느낌 "명암 매끈함").
 
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable, hint_default_white;
 uniform bool use_tex = false;
+// 안전 밉 지도 — 값 v 에서 읽어도 되는 발자국 길이(albedo 텍셀) = 2^(8v) − 1. 흰색(기본) = 255 텍셀 = 사실상 제한 없음
+uniform sampler2D safe_tex : filter_nearest, repeat_disable, hint_default_white;
+uniform bool use_safe = false;
 uniform vec4 albedo_color : source_color = vec4(0.8, 0.8, 0.8, 1.0);
 uniform int bands : hint_range(2, 8) = 3;
 uniform float ambient : hint_range(0.0, 1.0) = 0.45;
@@ -50,13 +58,24 @@ void vertex() {
 }
 
 void fragment() {
+	// 텍스처 기울기는 discard 전에(2x2 묶음이 다 살아 있을 때) 잰다
+	vec2 g_x = dFdx(UV);
+	vec2 g_y = dFdy(UV);
 	ivec2 p = ivec2(FRAGCOORD.xy) % 4;
 	if (fade < (BAYER[p.y * 4 + p.x] + 0.5) / 16.0) {
 		discard;
 	}
 	vec4 base = albedo_color;
 	if (use_tex) {
-		base *= texture(albedo_tex, UV);
+		if (use_safe) {
+			float room = exp2(textureLod(safe_tex, UV, 0.0).r * 8.0) - 1.0;
+			vec2 ts = vec2(textureSize(albedo_tex, 0));
+			float big = max(length(g_x * ts), length(g_y * ts));
+			float k = min(1.0, room / max(big, 1e-4));
+			base *= textureGrad(albedo_tex, UV, g_x * k, g_y * k);
+		} else {
+			base *= texture(albedo_tex, UV);
+		}
 	}
 	// 정점 색 — 슬롯 경계 뚜껑(DRSlotMesh._add_caps)만 어둡고 나머지는 흰색. 정점 색이 없는 메시(무기)는 Godot 이 흰색을 준다
 	base.rgb *= COLOR.rgb;
