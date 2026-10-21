@@ -15,7 +15,7 @@ class_name BattleView3D
 ##   - 겹침 순서는 3D 깊이 버퍼가 맡는다(2D 의 z 띠가 필요 없다) · 저해상도 그리기 · 외곽선 = DRDotView3D
 ##   - 복장 보기(wear_mode): 유닛 복장 / 상의만 / 하의만 / 내복 — 상의 · 하의를 따로 입히는 3D 슬롯이 도는지 바로 본다
 ##   - 조준 IK(10-21): 쏘는 표적(Ballistics.aim_point — 두뇌가 고른 적의 겨눌 곳) · 조종 중이면 조준점을 캐릭터에 준다 —
-##     사격 · 조준 동작에서 허리 · 가슴이 돌아 총구 높낮이가 표적으로(DRCharacter3D.set_aim_target)
+##     사격 · 조준 동작에서 팔(견착) · 허리로 총구 높낮이가 표적으로(DRCharacter3D.set_aim_target — 좌우는 동작 그대로)
 ## 연산: 노드 · 셰이더 값은 바뀔 때만 넣는다(자리 · 방향 · 사라지기 단계). 무거운 것(슬롯 나누기 · 동작별 그립)은 캐릭터를 만들 때 한 번 · 캐시.
 
 ## 도트 느낌(외곽선 · 픽셀 퍼펙트 · 명암 · 도트 크기 · 각도 · 초당 장수) — Dot Rigger ① 유닛 탭이 고치는 것과 같은 파일.
@@ -344,8 +344,7 @@ func _advance(e: Entry3D, delta: float, aim := false) -> void:
 
 
 ## 조준 IK 표적(10-21) — 조종 중이면 조준점, 아니면 두뇌가 고른 적의 겨눌 곳(Ballistics.aim_point — 총알이 가는 곳과 같다). 없으면 거둔다.
-## 화면이 병사를 카메라 쪽으로 face_turn_deg 만큼 더 돌려 보이므로 표적도 발을 축으로 그만큼 돌려 준다 — 같은 줄 정면의 적 = 몸 정면
-## (동작이 겨눈 옆 방향 그대로 · 총구 높낮이만 표적으로), 앞뒤 줄이 다르면 그만큼 옆으로 더 돈다
+## 높낮이만 겨누므로(횡스크롤 — 좌우는 동작 그대로) 표적의 깊이(앞뒤 줄)는 쏘는 병사 줄로 둔다 — 높낮이 = 좌우 거리 대 높이 차(Ballistics 와 같은 뜻)
 func _aim(e: Entry3D) -> void:
 	var s := e.s
 	var a := Vector3.INF
@@ -357,9 +356,7 @@ func _aim(e: Entry3D) -> void:
 		if e.ch.has_aim_target():
 			e.ch.clear_aim_target()
 		return
-	var foot := e.ch.position
-	var p := _dot.ground_to_world(to_canvas(a.x, 0.0, a.z)) + Vector3(0.0, a.y, 0.0)
-	e.ch.set_aim_target(foot + (p - foot).rotated(Vector3.UP, e.yaw - float(s.facing if s.facing != 0 else 1) * PI * 0.5))
+	e.ch.set_aim_target(_dot.ground_to_world(to_canvas(a.x, 0.0, s.depth)) + Vector3(0.0, a.y, 0.0))
 
 
 func _pick_motion(e: Entry) -> void:

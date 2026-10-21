@@ -14,8 +14,8 @@ class_name DREquipPage
 ##     Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) 되돌리기 / 다시 · Ctrl+S 저장. 카메라: 휠 · 가운데 끌기(옮기기) · 오른쪽 / Alt+왼쪽 끌기(돌려 보기) · Alt+오른쪽(확대)
 ##     미리보기를 누르면(끌지 않고) 그 자리의 왼손 표지 · 소켓 · 장비를 고른다(빈 곳 = 고르기 풀기). 기즈모를 놓으면 유닛 씬에 되돌리기 한 칸
 ##   오른쪽: 동작마다 왼손(IK 전 · 뒤 cm) · 왼손 IK 비중(0 = 동작 그대로 — 수류탄 · 장전 · 맨손 달리기 등) · 무기 자리 · 조준 비중
-##   조준 IK(10-21): 왼쪽 "조준" 칸(켜기 · 위 · 아래 · 옆 한계 · 빠르기 · 팔 몫 % — 유닛 루트) · 가운데 [조준 미리보기](옆 · 높낮이를 끌면 팔이 견착점(노란 십자)
-##     축으로 총을 들고 허리 · 가슴이 나머지 — 총구 선이 표적 십자로) · 동작 표 "조준" 칸(그 동작의 조준 비중 — 기본 = 동작 표의 사격 · 조준 상태면 1)
+##   조준 IK(10-21): 왼쪽 "조준" 칸(켜기 · 위로 · 아래로 최대 ° · 빠르기 · 팔 몫 % + 설명 — 유닛 루트) · 가운데 [조준 미리보기](표적 높이를 끌면 팔이 견착점(노란 십자)
+##     축으로 총을 들고 허리 · 가슴이 나머지 — 총구 선이 표적 십자로. 좌우는 없음) · 동작 표 "조준" 칸(그 동작의 조준 비중 — 기본 = 동작 표의 사격 · 조준 상태면 1)
 ## 미리보기는 유닛을 pack 한 사본(저장 안 한 고침까지)이라 편집 중인 씬을 건드리지 않는다. 자리만 바뀌면 사본의 노드 자리만 옮긴다.
 
 const UNITS_DIR := "res://game/units"
@@ -108,18 +108,21 @@ var _mt_menu: PopupMenu                   # 동작 표 오른쪽 누름
 var _mt_menu_motion := ""
 var _offset_clip: Variant = null          # 복사한 동작별 자리(Transform3D)
 # 조준 IK(10-21)
-const AIM_FIELDS := [["aim_up_deg", "위 한계 °", 0.0, 80.0, 1.0, "총구를 위로 더 돌릴 수 있는 각(그 동작이 원래 겨눈 높낮이에서) — 표적이 더 높으면 여기서 멈춘다"],
-	["aim_down_deg", "아래 한계 °", 0.0, 80.0, 1.0, "아래로 더 돌릴 수 있는 각"],
-	["aim_side_deg", "옆 한계 °", 0.0, 60.0, 1.0, "옆으로(앞뒤 줄의 표적) 더 돌릴 수 있는 각 — 0 이면 높낮이만 맞춘다"],
-	["aim_speed_deg", "빠르기 °/s", 30.0, 1440.0, 10.0, "표적이 바뀔 때 허리를 돌리는 빠르기(초당 각)"],
-	["aim_arm_share", "팔 몫 %", 0.0, 100.0, 5.0, "높낮이 중 팔이 맡는 몫 — 개머리판을 어깨에 댄 채(견착점 = 노란 십자) 두 팔이 총을 들고 내린다. 나머지는 허리 · 가슴. " +
-		"100 = 팔만 · 0 = 허리 · 가슴만. 옆은 늘 허리 · 가슴", 0.01]]
+## [유닛 칸, 이름, 최소, 최대, 눈금, 풍선 도움말, (보이는 값 × 이 수 = 유닛 값)] — 이름 = 무엇을 바꾸는지 그대로(10-21 사용자 "위 한계는 이해가 가는데 각도 한계잖아?")
+const AIM_FIELDS := [["aim_up_deg", "위로 최대 °", 0.0, 80.0, 1.0, "각도 한계 — 동작이 원래 겨눈 높이에서 총구를 위로 더 들 수 있는 최대 각. 표적이 더 높아도 여기서 멈춘다(크면 몸이 많이 젖혀짐)"],
+	["aim_down_deg", "아래로 최대 °", 0.0, 80.0, 1.0, "각도 한계 — 동작이 원래 겨눈 높이에서 총구를 아래로 더 내릴 수 있는 최대 각"],
+	["aim_speed_deg", "빠르기 °/s", 30.0, 1440.0, 10.0, "표적 높이가 바뀔 때 총구가 따라가는 속도(초당 각) — 240 이면 30° 를 0.13 초에"],
+	["aim_arm_share", "팔 몫 %", 0.0, 100.0, 5.0, "드는 각 중 팔이 맡는 비율 — 개머리판을 어깨에 댄 채(견착점 = 노란 십자) 두 팔이 총을 들고 내린다. 나머지는 허리 · 가슴이 숙이고 젖힌다. " +
+		"100 = 팔만 · 0 = 허리 · 가슴만", 0.01]]
+const AIM_HELP := "사격 · 조준 동작에서 표적 높이에 맞춰 총구를 위아래로 든다(좌우는 동작 그대로).\n" + \
+	"· 위로 · 아래로 최대: 동작이 원래 겨눈 높이에서 더 들 · 내릴 수 있는 최대 각도\n" + \
+	"· 빠르기: 표적 높이가 바뀔 때 총구가 따라가는 속도(초당 °)\n" + \
+	"· 팔 몫: 드는 각 중 팔이 맡는 비율(나머지는 허리 · 가슴)"
 const AIM_MARK_M := 1.5                   # 미리보기 표적 십자 · 총구 선 길이(m)
 var _aim_chk: CheckBox
 var _aim_sp: Dictionary = {}              # 칸 이름 -> SpinBox
 var _aim_lock := false
 var _aim_btn: Button                      # 조준 미리보기
-var _aim_side_sl: HSlider
 var _aim_height_sl: HSlider
 var _aim_lbl: Label
 var _aim_preview := false
@@ -272,18 +275,23 @@ func _build_ui() -> void:
 	_aim_chk = CheckBox.new()
 	_aim_chk.text = "조준"
 	_aim_chk.focus_mode = Control.FOCUS_NONE
-	_aim_chk.tooltip_text = "조준 IK — 사격 · 조준 동작에서 총구가 표적(게임이 주는 적의 겨눌 곳)을 향하게 한다.\n" + \
-		"높낮이 = 팔(개머리판을 어깨에 댄 채 견착점 축으로 총을 듦 — 팔 몫 %) + 허리 · 가슴(나머지), 정확히.\n" + \
-		"옆 = 허리 · 가슴이 몸 정면에서 표적이 벗어난 만큼만(동작이 원래 겨눈 옆 방향은 그대로). 두 손은 총 표지 IK 로 따라온다"
+	_aim_chk.tooltip_text = "조준 IK — 사격 · 조준 동작에서 총구 높낮이가 표적(게임이 주는 적의 겨눌 곳)을 향하게 한다(좌우는 동작 그대로 — 횡스크롤).\n" + \
+		"팔(개머리판을 어깨에 댄 채 견착점 축으로 총을 듦 — 팔 몫 %) + 허리 · 가슴(나머지). 두 손은 총 표지 IK 로 따라온다"
 	_aim_chk.toggled.connect(func(on: bool) -> void: set_aim_setting("aim_enabled", on))
 	arow0.add_child(_aim_chk)
 	var anote := Label.new()
-	anote.text = "사격 때 팔(견착) · 허리로 총구를 표적에"
+	anote.text = "사격 때 표적 높이로 총구를 듦(팔 · 허리)"
 	anote.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	anote.clip_text = true
 	anote.add_theme_font_size_override("font_size", 12)
 	anote.add_theme_color_override("font_color", Color(0.72, 0.8, 0.9))
 	arow0.add_child(anote)
+	var ahelp := Label.new()                    # 칸 설명(10-21 사용자 "설명이 필요한 것 같아")
+	ahelp.text = AIM_HELP
+	ahelp.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ahelp.add_theme_font_size_override("font_size", 11)
+	ahelp.add_theme_color_override("font_color", Color(0.62, 0.66, 0.72))
+	left.add_child(ahelp)
 	var agrid := GridContainer.new()
 	agrid.columns = 4
 	left.add_child(agrid)
@@ -482,38 +490,33 @@ func _build_ui() -> void:
 	_view_btn = _btn(ctl, "도트 보기", "돌려 보기(가까이 · 기준점 맞추기) ↔ 도트 보기(게임 화면과 같은 저해상도 · 외곽선)", func() -> void: set_dot_mode(not _dot_mode))
 	_btn(ctl, "손", "두 손 · 무기를 가까이", func() -> void: focus_hands())
 	_btn(ctl, "전신", "몸 전체", func() -> void: focus_body())
-	# 조준 미리보기(10-21) — 표적 대신 각으로: 옆 = 동작이 원래 겨눈 옆 방향에서 · 높낮이 = 총구 높낮이(수평 0)
+	# 조준 미리보기(10-21) — 표적 대신 높낮이로(총구 높낮이, 수평 0). 좌우는 없다(횡스크롤 — 사용자 "옆은 필요 없는 것 같아")
 	var arow := HFlowContainer.new()
 	mid.add_child(arow)
 	_aim_btn = Button.new()
 	_aim_btn.text = "조준 미리보기"
 	_aim_btn.toggle_mode = true
 	_aim_btn.focus_mode = Control.FOCUS_NONE
-	_aim_btn.tooltip_text = "미리보기 병사가 표적(분홍 십자)을 겨누게 한다 — 옆 · 높낮이를 끌어 팔 · 허리가 어떻게 움직이는지 본다(꺼진 채 끌어도 켜진다).\n" + \
+	_aim_btn.tooltip_text = "미리보기 병사가 표적(분홍 십자)을 겨누게 한다 — 표적 높이를 끌어 팔 · 허리가 어떻게 움직이는지 본다(꺼진 채 끌어도 켜진다).\n" + \
 		"총구 선: 초록 = 표적으로 · 주황 = 한계에서 멈춤 · 노란 십자 = 견착점(팔 몫의 축). 조준 비중이 0 인 동작(서기 · 걷기 · 장전 …)은 안 움직인다 — 오른쪽 표 \"조준\" 칸"
 	_aim_btn.toggled.connect(set_aim_preview)
 	arow.add_child(_aim_btn)
-	for sd in [["옆", -45.0, 45.0, "동작이 원래 겨눈 옆 방향에서 표적이 벗어난 각(앞뒤 줄의 적)"], ["높낮이", -60.0, 60.0, "총구에서 본 표적의 높낮이(수평 = 0, 위 +) — 높은 벽 위 · 참호 아래 · 엎드린 적"]]:
-		var sl := Label.new()
-		sl.text = String(sd[0])
-		arow.add_child(sl)
-		var hs := HSlider.new()
-		hs.min_value = float(sd[1])
-		hs.max_value = float(sd[2])
-		hs.step = 1.0
-		hs.custom_minimum_size = Vector2(110, 0)
-		hs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		hs.tooltip_text = String(sd[3])
-		hs.value_changed.connect(func(_v: float) -> void:
-			if _aim_preview:
-				_apply_aim_preview()
-			else:
-				set_aim_preview(true))           # 꺼진 채 끌면 켠다(끌어도 아무 일이 없는 함정 — 10-21 사용자 "변화 없는데?")
-		arow.add_child(hs)
-		if sd[0] == "옆":
-			_aim_side_sl = hs
+	var hl := Label.new()
+	hl.text = "표적 높이"
+	arow.add_child(hl)
+	_aim_height_sl = HSlider.new()
+	_aim_height_sl.min_value = -60.0
+	_aim_height_sl.max_value = 60.0
+	_aim_height_sl.step = 1.0
+	_aim_height_sl.custom_minimum_size = Vector2(160, 0)
+	_aim_height_sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_aim_height_sl.tooltip_text = "총구에서 본 표적의 높낮이(수평 = 0, 위 +) — 높은 벽 위 · 참호 아래 · 엎드린 적. 좌우는 없다(횡스크롤)"
+	_aim_height_sl.value_changed.connect(func(_v: float) -> void:
+		if _aim_preview:
+			_apply_aim_preview()
 		else:
-			_aim_height_sl = hs
+			set_aim_preview(true))               # 꺼진 채 끌면 켠다(끌어도 아무 일이 없는 함정 — 10-21 사용자 "변화 없는데?")
+	arow.add_child(_aim_height_sl)
 	_aim_lbl = Label.new()
 	_aim_lbl.add_theme_font_size_override("font_size", 12)
 	arow.add_child(_aim_lbl)
@@ -1905,13 +1908,12 @@ func focus_aim() -> void:
 
 
 func _apply_aim_preview() -> void:
-	var side := _aim_side_sl.value if _aim_side_sl != null else 0.0
 	var height := _aim_height_sl.value if _aim_height_sl != null else 0.0
 	_update_aim_label()
 	if _prev == null:
 		return
 	if _aim_preview:
-		_prev.set_aim_angles(side, height, true)
+		_prev.set_aim_elevation(height, true)
 	else:
 		_prev.clear_aim_target(true)
 	_force_pose()
@@ -1921,7 +1923,7 @@ func _apply_aim_preview() -> void:
 func _update_aim_label() -> void:
 	if _aim_lbl == null:
 		return
-	var t := "옆 %+d° · 높낮이 %+d°" % [int(_aim_side_sl.value if _aim_side_sl != null else 0.0), int(_aim_height_sl.value if _aim_height_sl != null else 0.0)]
+	var t := "%+d°" % int(_aim_height_sl.value if _aim_height_sl != null else 0.0)
 	var warn := ""
 	if _aim_preview and _prev != null:
 		if _prev.get_weapon_node() == null:
@@ -2364,8 +2366,8 @@ func _aim_text() -> String:
 	var r := _prev.aim_report()
 	if r.is_empty():
 		return "조준 %d %%" % roundi(w * 100.0)
-	return "조준 %d %% · 위아래 %+.0f°(팔 %+.0f° · 허리 · 가슴 %+.0f°) · 옆 %+.0f°(허리 · 가슴)%s (동작이 원래 겨눈 높낮이 %+.0f°)" % [roundi(w * 100.0), float(r["pitch"]),
-		float(r["arm_pitch"]), float(r["body_pitch"]), float(r["yaw"]), " — 한계에서 멈춤" if bool(r["clamped"]) else "", float(r["base_pitch"])]
+	return "조준 %d %% · 총구를 %+.0f° 듦(팔 %+.0f° · 허리 · 가슴 %+.0f°)%s — 동작이 원래 겨눈 높이 %+.0f°" % [roundi(w * 100.0), float(r["pitch"]),
+		float(r["arm_pitch"]), float(r["body_pitch"]), " · 한계에서 멈춤" if bool(r["clamped"]) else "", float(r["base_pitch"])]
 
 
 ## 미리보기에 표시: 손 표지(초록 — 왼손 · 하늘 — 오른손) · IK 뒤 손바닥(빨강) · 소켓(노랑) · 받침대(주황) ·

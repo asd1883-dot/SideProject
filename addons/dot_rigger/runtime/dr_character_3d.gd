@@ -59,6 +59,8 @@ static var _weapons := {}
 static var _skin_same := {}
 ## 파일 읽기 캐시(10-16) — 병사마다 · 옷을 입힐 때마다 outfit.json 을 다시 읽고 parts.json 의 md5 를 다시 재지 않게. clear_cache() 로 비운다
 static var _json_cache := {}         # 경로 -> Dictionary
+## 무기 메시에서 잰 총구 · 견착점(조준 IK, 10-21): 메시 묶음 열쇠 -> [총구, 견착점](무기 로컬) — 병사마다 다시 재지 않게
+static var _muzzle_geo := {}
 static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
 
 # ---------------------------------------------------------------- 유닛 프리팹(10-16)
@@ -101,18 +103,16 @@ static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
 @export var auto_build := true
 
 @export_group("조준")
-## 조준 IK(10-21) — 사격 · 조준 동작에서 허리 · 가슴(Spine · Chest · UpperChest)을 돌려 총구가 표적을 향하게 한다. 표적은 게임이 준다(set_aim_target).
-## 사용자(10-21): "사격을 할 때 적을 바라보는 벡터 기준으로 허리가 살짝 굽거나 해야 될 것 같아 — 총구가 적을 바라봐야 되니까"
+## 조준 IK(10-21) — 사격 · 조준 동작에서 표적 높이에 맞춰 총구를 위아래로 든다(팔 · 허리). 표적은 게임이 준다(set_aim_target).
+## 좌우는 안 돈다(횡스크롤 — 사용자 10-21 "옆은 필요 없는 것 같아"). 각도는 모두 "그 동작이 원래 겨눈 높이"에서 더 드는 각.
 @export var aim_enabled := true
-## 총구를 위로 더 돌릴 수 있는 한계(그 동작의 총구 방향에서) — 표적이 더 높으면 여기서 멈춘다
+## 위로 최대 각(°) — 동작이 원래 겨눈 높이에서 총구를 더 들 수 있는 각. 표적이 더 높으면 여기서 멈춘다(40° 면 몸이 뒤로 크게 젖혀져 기본 30°)
 @export_range(0.0, 80.0, 1.0, "suffix:°") var aim_up_deg := 30.0
-## 아래로 더 돌릴 수 있는 한계(10-21 그림: 40° 면 몸이 뒤로 크게 젖혀져 기본 30°)
+## 아래로 최대 각(°) — 동작이 원래 겨눈 높이에서 총구를 더 내릴 수 있는 각
 @export_range(0.0, 80.0, 1.0, "suffix:°") var aim_down_deg := 30.0
-## 옆으로(위에서 봐 좌우 — 앞뒤 줄의 표적) 더 돌릴 수 있는 한계. 횡스크롤이라 작게
-@export_range(0.0, 60.0, 1.0, "suffix:°") var aim_side_deg := 20.0
-## 표적이 바뀔 때 허리를 돌리는 빠르기(초당 각)
+## 빠르기(초당 °) — 표적 높이가 바뀔 때 총구가 따라가는 속도
 @export_range(30.0, 1440.0, 10.0, "suffix:°/s") var aim_speed_deg := 240.0
-## 높낮이를 팔이 맡는 몫(0 ~ 1) — 개머리판을 어깨에 댄 채(견착점 축) 두 팔이 총을 들고 내린다. 나머지는 허리 · 가슴, 옆은 허리 · 가슴이 돈다.
+## 팔 몫(0 ~ 1) — 드는 각 중 팔이 맡는 비율: 개머리판을 어깨에 댄 채(견착점 축) 두 팔이 총을 들고 내린다. 나머지는 허리 · 가슴이 숙이고 젖힌다.
 ## 사용자(10-21): "허리가 들리는 것도 있지만 진짜 조준을 할 때 팔 부분이 영향이 제일 많이 가잖아 — 양팔로 인한 견착 위치에 따라"
 @export_range(0.0, 1.0, 0.05) var aim_arm_share := 0.7
 ## 동작마다 조준 비중(0 = 동작 그대로 · 1 = 총구가 표적으로). 없는 동작 = 동작 표에서 "사격" · "조준" 상태에 든 동작이면 1, 아니면 0
@@ -175,13 +175,13 @@ var _aim_shares := PackedFloat32Array()        # 뼈마다 몫(합 1)
 var _muzzle := []                              # 무기 로컬 총구 [자리, 방향] — 무기가 없으면 []
 var _aim_has := false                          # 표적이 있나
 var _aim_point := Vector3.ZERO                 # 표적(세상 좌표)
-var _aim_by_angle := false                     # 표적 대신 각으로(② 탭 미리보기 — set_aim_angles)
-var _aim_angle := Vector2.ZERO                 # 그 각(라디안) x = 동작의 겨눔에서 옆 · y = 총구 높낮이(수평 = 0)
+var _aim_by_angle := false                     # 표적 대신 각으로(② 탭 미리보기 — set_aim_elevation)
+var _aim_elev := 0.0                           # 그 각(라디안) = 총구 높낮이(수평 = 0, 위 +)
 var _aim_on := 0.0                             # 표적이 있는 정도(나타나고 사라질 때 섞음)
 var _aim_w := 0.0                              # 지금 동작의 조준 비중(동작이 바뀔 때 _grip_t 로 섞음)
 var _aim_w_from := 0.0
 var _aim_w_to := 0.0
-var _aim_cur := Vector2.ZERO                   # 지금 돌린 각(라디안, 비중 곱하기 전) x = 옆 · y = 위아래
+var _aim_cur := 0.0                            # 지금 든 각(라디안, 비중 곱하기 전 — 위 +)
 var _aim_valid := false                        # _aim_cur 가 이어 가는 값인가(아니면 다음 풀이에서 바로 그 값으로)
 var _aim_dt := 0.0                             # 지난 풀이 뒤 흐른 시간(step_motion 이 모은다)
 var _aim_refs := {}                            # 동작 -> [총구 자리, 방향](캐릭터 공간, 동작 그대로 시점 평균) 또는 [](조준 못 함)
@@ -816,6 +816,7 @@ static func clear_cache() -> void:
 	_skin_same.clear()
 	_json_cache.clear()
 	_md5_cache.clear()
+	_muzzle_geo.clear()
 
 
 ## JSON 파일(outfit.json · asset.json)을 읽는다 — 경로마다 한 번(캐시). 고친 파일을 다시 읽으려면 clear_cache()
@@ -1263,15 +1264,15 @@ func sync_from(src: DRCharacter3D) -> void:
 ## = 조준 IK(에임 오프셋). 동작 위에 덧씌운다 — 그 동작의 **총구 기준**(동작 그대로 여러 시점 평균 방향)을 표적 쪽으로 한계 안에서
 ## 돌리고, 그 돌림을 허리 · 가슴 뼈에 나눠 준다. 기준이 평균이라 동작의 반동 · 흔들림은 그대로 남는다(매 장면 총구를 표적에 붙이면 반동이 지워진다).
 ## 손 · 무기는 몸을 따라오고 뒤의 받침대 풀이 · 손 IK 가 돌린 자세로 다시 잡는다.
-##   위아래: 총구 높낮이 = 총구에서 표적을 보는 높낮이(정확히).
-##   옆: 몸 정면(+Z)에서 표적이 옆으로 벗어난 만큼만 더 돈다 — 동작이 원래 겨눈 옆 방향(Firing_Rifle 은 총구가 몸 정면에서 약 22° 틀어져 있다)은
-##   그대로 둔다. 그래야 화면이 정한 3/4 방향(BattleView3D.face_turn_deg — 표적을 몸 정면 쪽으로 옮겨 준다)과 동작 모습이 안 깨진다(10-21 실측).
-## 무기 총구 = 장비 아래 "총구" 노드(자리 · +Z 방향)가 있으면 그것, 없으면 무기 +Z(normalize_weapon 규칙: 원점 = 잡는 자리 · +Z = 총구 쪽)의 메시 앞 끝.
+##   위아래만: 총구 높낮이 = 총구에서 표적을 보는 높낮이(정확히). 좌우는 안 돈다 — 횡스크롤이라 동작이 원래 겨눈 좌우 방향 그대로
+##   (10-21 사용자 "옆은 필요 없는 것 같아 — 결국 횡스크롤 게임에 리소스를 3D 만 쓰는 거라". 처음엔 앞뒤 줄 표적으로 몸을 옆으로도 돌렸다).
+## 무기 총구 = 장비 아래 "총구" 노드(자리 · +Z 방향)가 있으면 그것, 없으면 무기 +Z(normalize_weapon 규칙: 원점 = 잡는 자리 · +Z = 총구 쪽) 앞 끝의
+## 총열 축(메시에서 잼 — kar98k 는 원점보다 4.5 cm 위. 처음엔 원점 높이로 잡아 총구 선이 총열 아래에서 나갔다, 10-21 사용자 "조준선과 총구가 안 맞네").
 ## 고정 받침대(땅 — MG42 라페테)에 든 무기는 몸을 돌려 겨누지 않는다(장비를 돌리는 것은 나중).
 ## 팔 · 견착(10-21 저녁, 사용자: "진짜 조준을 할 때 팔 부분이 영향이 제일 많이 가잖아 — 양팔로 인한 견착 위치에 따라"):
-##   높낮이의 aim_arm_share(기본 70 %)는 **견착점(개머리판 끝 — 장비 아래 "견착" 노드, 없으면 −Z 쪽 메시 끝) 축으로 총을 돌려** 팔이 맡는다 —
+##   높낮이의 aim_arm_share(기본 70 %)는 **견착점(개머리판 끝 — 장비 아래 "견착" 노드, 없으면 −Z 쪽 메시 끝의 가운데) 축으로 총을 돌려** 팔이 맡는다 —
 ##   손 소켓 무기 = 든 손을 그 팔 두 마디 IK(DR_AimArmIK)로 돌린 자리에(다른 손은 원래 표지 IK), 두 손 사이 받침대 = 받침대를 돌림(두 손이 표지 IK).
-##   나머지 높낮이와 옆은 허리 · 가슴. 머리는 팔 몫의 AIM_HEAD_SHARE 만큼 따라 숙이고 든다(뺨을 개머리판에).
+##   나머지 높낮이는 허리 · 가슴. 머리는 팔 몫의 AIM_HEAD_SHARE 만큼 따라 숙이고 든다(뺨을 개머리판에).
 
 ## 돌릴 뼈와 몫(아래부터 — 합 1). 몸에 없는 뼈는 빼고 나머지 몫을 다시 나눈다
 const AIM_BONES := [["Spine", 0.3], ["Chest", 0.35], ["UpperChest", 0.35]]
@@ -1282,7 +1283,7 @@ const AIM_FADE_SEC := 0.15
 ## 동작 표 상태 이름에 이 말이 들어 있으면 그 상태의 동작은 기본 조준 비중 1
 const AIM_STATE_WORDS := ["사격", "조준"]
 ## 조준 칸(sync_from 이 옮긴다 — aim_motion_weights 는 따로 복제)
-const AIM_PROPS := ["aim_enabled", "aim_up_deg", "aim_down_deg", "aim_side_deg", "aim_speed_deg", "aim_arm_share"]
+const AIM_PROPS := ["aim_enabled", "aim_up_deg", "aim_down_deg", "aim_speed_deg", "aim_arm_share"]
 const NO_TRACKS := [-1, -1, -1]
 ## 팔 몫 돌림을 머리가 따라가는 정도
 const AIM_HEAD_SHARE := 0.6
@@ -1299,9 +1300,9 @@ func set_aim_target(p: Vector3, instant := false) -> void:
 		_aim_valid = false
 
 
-## 표적 대신 각으로 겨눈다(② 장비 탭 미리보기) — side = 동작이 원래 겨눈 옆 방향에서 더 돌 각, height = 총구 높낮이(수평 = 0, 위 +). 도
-func set_aim_angles(side_deg: float, height_deg: float, instant := false) -> void:
-	_aim_angle = Vector2(deg_to_rad(side_deg), deg_to_rad(height_deg))
+## 표적 대신 높낮이로 겨눈다(② 장비 탭 미리보기) — 총구 높낮이(수평 = 0, 위 +, 도)
+func set_aim_elevation(height_deg: float, instant := false) -> void:
+	_aim_elev = deg_to_rad(height_deg)
 	_aim_by_angle = true
 	_aim_has = true
 	if instant:
@@ -1355,8 +1356,8 @@ func aim_default_weight(motion: String) -> float:
 	return w
 
 
-## 마지막 조준 풀이 — {weight(비중 × 표적), yaw · pitch(지금 돌린 각 °), want_yaw · want_pitch(한계 전 필요한 각 °),
-## base_yaw · base_pitch(동작이 원래 겨눈 옆 · 높낮이 °), err(돌린 총구 기준 ↔ 겨눌 방향 °, 반동 빼고 — 따라가는 중 · 비중을 섞는 중이면 그만큼 남음),
+## 마지막 조준 풀이 — {weight(비중 × 표적), pitch(지금 든 각 °) = arm_pitch(팔) + body_pitch(허리 · 가슴), want_pitch(한계 전 필요한 각 °),
+## base_pitch(동작이 원래 겨눈 높낮이 °), err(돌린 총구 기준 ↔ 겨눌 방향 °, 반동 빼고 — 따라가는 중 · 비중을 섞는 중이면 그만큼 남음),
 ## lag(표적이 바뀌어 아직 덜 돈 각 °, aim_speed_deg 로 따라감), clamped(한계에 걸림),
 ## muzzle · dir(돌린 총구 기준 — 캐릭터 공간) · aim_dir(겨눌 방향 — 캐릭터 공간, 한계 전)}. 조준 안 하면 {}
 func aim_report() -> Dictionary:
@@ -1378,15 +1379,15 @@ func shoulder_world() -> Vector3:
 	return _sock_weapon.global_transform * (_muzzle[2] as Vector3)
 
 
-## 무기 e 의 로컬 [총구 자리, 총구 방향, 견착점] — 아래 "총구" 노드가 있으면 그 자리 · +Z, 없으면 +Z 쪽 메시 앞 끝(보이는 메시만 — 숨긴 탄 클립 빼고).
-## 견착점 = 아래 "견착" 노드 자리, 없으면 −Z 쪽 메시 끝(개머리판 끝 — normalize_weapon 규칙에서 총구 반대쪽)
+## 무기 e 의 로컬 [총구 자리, 총구 방향, 견착점] — 아래 "총구" 노드가 있으면 그 자리 · +Z, 없으면 +Z 쪽 앞 끝의 총열 축(보이는 메시만 — 숨긴 탄 클립 빼고).
+## 견착점 = 아래 "견착" 노드 자리, 없으면 −Z 쪽 끝(개머리판 끝 — normalize_weapon 규칙에서 총구 반대쪽)의 가운데. 메시에서 잰 값은 무기마다 한 번(_muzzle_geo)
 static func find_muzzle(e: Node3D) -> Array:
 	if e == null:
 		return []
-	var front := -INF
-	var back := INF
 	var muzzle: Array = []
 	var butt := Vector3.INF
+	var meshes: Array = []                     # [Mesh, rel]
+	var key := PackedStringArray()
 	var stack: Array = [[e, Transform3D.IDENTITY]]
 	while not stack.is_empty():
 		var it: Array = stack.pop_back()
@@ -1400,18 +1401,58 @@ static func find_muzzle(e: Node3D) -> Array:
 			if not (n as Node3D).visible:
 				continue
 		if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
-			var bb := rel * (n as MeshInstance3D).get_aabb()
-			front = maxf(front, bb.end.z)
-			back = minf(back, bb.position.z)
+			meshes.append([(n as MeshInstance3D).mesh, rel])
+			key.append("%d@%s" % [(n as MeshInstance3D).mesh.get_instance_id(), str(rel)])
 		for c in n.get_children():
 			stack.append([c, rel * (c as Node3D).transform if c is Node3D else rel])
-	if muzzle.is_empty() and front == -INF:
-		return []
-	if muzzle.is_empty():
-		muzzle = [Vector3(0.0, 0.0, front), Vector3.BACK]
-	if butt == Vector3.INF:
-		butt = Vector3(0.0, 0.0, back if back != INF else 0.0)
+	if muzzle.is_empty() or butt == Vector3.INF:
+		var k := ";".join(key)
+		var geo: Array = _muzzle_geo.get(k, [])
+		if geo.is_empty():
+			geo = _measure_weapon(meshes)
+			_muzzle_geo[k] = geo
+		if geo.is_empty():
+			return []
+		if muzzle.is_empty():
+			muzzle = [geo[0], Vector3.BACK]
+		if butt == Vector3.INF:
+			butt = geo[1]
 	return [muzzle[0], muzzle[1], butt]
+
+
+## 무기 메시에서 [총구(앞 끝의 총열 축), 견착점(뒤 끝 가운데)] — 무기 로컬. 앞 끝 바로 뒤 토막(길이의 2 ~ 9 %)의 정점 가운데가 총열 축
+## (맨 끝 토막은 가늠쇠가 올라와 있어 위로 쏠림), 뒤 끝 토막(2 %)의 가운데가 개머리판 끝
+static func _measure_weapon(meshes: Array) -> Array:
+	var pts := PackedVector3Array()
+	for m in meshes:
+		var mesh: Mesh = m[0]
+		var rel: Transform3D = m[1]
+		for si in mesh.get_surface_count():
+			var vs: PackedVector3Array = mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+			for v in vs:
+				pts.append(rel * v)
+	if pts.is_empty():
+		return []
+	var z0 := INF
+	var z1 := -INF
+	for p in pts:
+		z0 = minf(z0, p.z)
+		z1 = maxf(z1, p.z)
+	var ln := maxf(z1 - z0, 0.001)
+	var tip := Vector3.ZERO
+	var nt := 0
+	var bt := Vector3.ZERO
+	var nb := 0
+	for p in pts:
+		if p.z <= z1 - ln * 0.02 and p.z >= z1 - ln * 0.09:
+			tip += p
+			nt += 1
+		elif p.z <= z0 + ln * 0.02:
+			bt += p
+			nb += 1
+	tip = tip / nt if nt > 0 else Vector3.ZERO
+	bt = bt / nb if nb > 0 else Vector3.ZERO
+	return [Vector3(tip.x, tip.y, z1), Vector3(bt.x, bt.y, z0)]
 
 
 ## 조준 수정자를 만든다(무기를 들었을 때 — refresh_equipment). 맨 앞 차례
@@ -1514,31 +1555,26 @@ func _solve_aim(sk: Skeleton3D) -> void:
 	var butt0: Vector3 = ref[2]
 	# 높낮이를 몸(허리 · 가슴)과 팔(견착점 축)이 나눔 — 팔이 못 맡는 받침(머리 소켓 등)이면 몸이 다
 	var arm := clampf(aim_arm_share, 0.0, 1.0) if _aim_arm_hand >= 0 or _sock_weapon.get_parent() is DRGripMount3D else 0.0
-	var yaw0 := atan2(dir0.x, dir0.z)
 	var el0 := asin(clampf(dir0.y, -1.0, 1.0))
-	var lo := Vector2(-deg_to_rad(aim_side_deg), -deg_to_rad(aim_down_deg))
-	var hi := Vector2(deg_to_rad(aim_side_deg), deg_to_rad(aim_up_deg))
-	var raw := Vector2(_aim_angle.x, _aim_angle.y - el0)
-	var want := raw.clamp(lo, hi)
+	var lo := -deg_to_rad(aim_down_deg)
+	var hi := deg_to_rad(aim_up_deg)
+	var raw := _aim_elev - el0
+	var want := clampf(raw, lo, hi)
 	if not _aim_by_angle:
 		var tgt := (global_transform.affine_inverse() if is_inside_tree() else Transform3D.IDENTITY) * _aim_point
-		var dp := tgt - piv
-		raw = Vector2(atan2(dp.x, dp.z), 0.0)  # 옆 = 몸 정면에서 표적이 벗어난 각(동작이 원래 겨눈 옆 방향은 그대로)
-		want = raw.clamp(lo, hi)
 		for it in 3:                           # 총구가 몸 축에서 떨어져 있어 돌리면 총구 자리도 바뀐다 — 그 자리에서 표적 높낮이를 다시
 			var d := tgt - aim_muzzle_at(want, arm, piv, pos0, dir0, butt0)
 			if d.length_squared() < 0.0001:
 				break
-			raw.y = asin(clampf(d.normalized().y, -1.0, 1.0)) - el0
-			want = raw.clamp(lo, hi)
+			raw = asin(clampf(d.normalized().y, -1.0, 1.0)) - el0
+			want = clampf(raw, lo, hi)
 	if not _aim_valid:
 		_aim_cur = want
 		_aim_valid = true
 	else:
-		var step := deg_to_rad(aim_speed_deg) * dt
-		_aim_cur = Vector2(move_toward(_aim_cur.x, want.x, step), move_toward(_aim_cur.y, want.y, step))
+		_aim_cur = move_toward(_aim_cur, want, deg_to_rad(aim_speed_deg) * dt)
 	var cur := _aim_cur * w
-	var b := aim_basis(Vector2(cur.x, cur.y * (1.0 - arm)), dir0)     # 몸 돌림(캐릭터 공간)
+	var b := aim_basis(cur * (1.0 - arm), dir0)     # 몸 돌림(캐릭터 공간)
 	var cb := to_c.basis.orthonormalized()
 	var q := (cb.inverse() * b * cb).get_rotation_quaternion()   # 뼈대 공간으로(배율은 서로 지운다)
 	for i in _aim_bones.size():
@@ -1548,9 +1584,9 @@ func _solve_aim(sk: Skeleton3D) -> void:
 		sk.set_bone_global_pose(bi, g)
 	var db := b * dir0                         # 몸을 돌린 뒤 총구 방향
 	var ba := Basis.IDENTITY
-	var pa := cur.y * arm
+	var pa := cur * arm
 	if absf(pa) > 1e-4:
-		ba = arm_basis(db, pa)                 # 팔 몫(몸을 돌린 총구의 수직면 안에서 위아래)
+		ba = aim_basis(pa, db)                 # 팔 몫(같은 수직면 안에서 위아래 — 축은 몸 돌림과 같다)
 		var qa := (cb.inverse() * ba * cb).get_rotation_quaternion()
 		_aim_arm_q = qa
 		_aim_arm_on = true
@@ -1563,38 +1599,27 @@ func _solve_aim(sk: Skeleton3D) -> void:
 			var butt := hand * (_sock_weapon.transform * (_muzzle[2] as Vector3))
 			_aim_hand.transform = Transform3D(Basis(qa) * hand.basis.orthonormalized(), butt + qa * (hand.origin - butt))
 	_set_aim_arm(_aim_arm_on and _aim_arm_hand >= 0)
-	var ya := yaw0 + raw.x
-	var ea := el0 + raw.y
-	var ideal := Vector3(sin(ya) * cos(ea), sin(ea), cos(ya) * cos(ea))
 	var md := ba * db
-	_aim_last = {"weight": w, "yaw": rad_to_deg(cur.x), "pitch": rad_to_deg(cur.y), "body_pitch": rad_to_deg(cur.y * (1.0 - arm)), "arm_pitch": rad_to_deg(pa),
-		"want_yaw": rad_to_deg(raw.x), "want_pitch": rad_to_deg(raw.y), "base_yaw": rad_to_deg(yaw0), "base_pitch": rad_to_deg(el0), "err": rad_to_deg(md.angle_to(ideal)),
-		"lag": rad_to_deg(maxf(absf(want.x - _aim_cur.x), absf(want.y - _aim_cur.y))),
-		"clamped": not want.is_equal_approx(raw), "muzzle": aim_muzzle_at(cur, arm, piv, pos0, dir0, butt0), "dir": md, "aim_dir": ideal}
+	_aim_last = {"weight": w, "pitch": rad_to_deg(cur), "body_pitch": rad_to_deg(cur * (1.0 - arm)), "arm_pitch": rad_to_deg(pa),
+		"want_pitch": rad_to_deg(raw), "base_pitch": rad_to_deg(el0), "err": rad_to_deg(md.angle_to(aim_basis(raw, dir0) * dir0)),
+		"lag": rad_to_deg(absf(want - _aim_cur)), "clamped": not is_equal_approx(want, raw),
+		"muzzle": aim_muzzle_at(cur, arm, piv, pos0, dir0, butt0), "dir": md, "aim_dir": aim_basis(raw, dir0) * dir0}
 
 
-## 조준 돌림(캐릭터 공간 — 위 = +Y) — 총구 방향 dir0 를 먼저 위아래로 c.y(그 수직면 안에서), 다음 옆으로 c.x(위 축으로)
-static func aim_basis(c: Vector2, dir0: Vector3) -> Basis:
-	var h := Vector3(dir0.x, 0.0, dir0.z)
-	if h.length_squared() < 1e-6:
-		h = Vector3.BACK
-	return Basis(Vector3.UP, c.x) * Basis(h.normalized().cross(Vector3.UP).normalized(), c.y)
-
-
-## 팔 몫 돌림 — 총구 방향 d 의 수직면 안에서 위아래로 a(라디안)
-static func arm_basis(d: Vector3, a: float) -> Basis:
+## 조준 돌림(캐릭터 공간 — 위 = +Y) — 총구 방향 d 를 그 수직면 안에서 위아래로 a(라디안, + = 위). 좌우 방향은 그대로
+static func aim_basis(a: float, d: Vector3) -> Basis:
 	var h := Vector3(d.x, 0.0, d.z)
 	return Basis((h.normalized() if h.length_squared() > 1e-6 else Vector3.BACK).cross(Vector3.UP).normalized(), a)
 
 
-## 돌림 c(옆 · 위아래)를 몸 · 팔(arm 몫)로 나눴을 때 총구 기준 자리(캐릭터 공간) — 몸은 허리(piv) 축, 팔은 몸을 돌린 뒤의 견착점 축
-static func aim_muzzle_at(c: Vector2, arm: float, piv: Vector3, pos0: Vector3, dir0: Vector3, butt0: Vector3) -> Vector3:
-	var b := aim_basis(Vector2(c.x, c.y * (1.0 - arm)), dir0)
+## 높낮이 a 를 몸 · 팔(arm 몫)로 나눴을 때 총구 기준 자리(캐릭터 공간) — 몸은 허리(piv) 축, 팔은 몸을 돌린 뒤의 견착점 축
+static func aim_muzzle_at(a: float, arm: float, piv: Vector3, pos0: Vector3, dir0: Vector3, butt0: Vector3) -> Vector3:
+	var b := aim_basis(a * (1.0 - arm), dir0)
 	var p := piv + b * (pos0 - piv)
-	if arm <= 0.0 or absf(c.y) < 1e-6:
+	if arm <= 0.0 or absf(a) < 1e-6:
 		return p
 	var bt := piv + b * (butt0 - piv)
-	return bt + arm_basis(b * dir0, c.y * arm) * (p - bt)
+	return bt + aim_basis(a * arm, dir0) * (p - bt)
 
 
 ## 뼈대 공간 → 캐릭터 공간(이 노드 로컬) — 트리 밖이어도 되게 부모를 따라 곱한다
