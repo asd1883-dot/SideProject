@@ -4,7 +4,7 @@ class_name BattleBody
 ## 몸 — "어떻게 움직이나". 상태머신 두 영역(이동 · 행동)이 동시에 돌고, 그 위에 덮어쓰기가 있다.  (보병_추상화.md §2-4)
 ##
 ##   이동 영역:  서 있음 · 걷기 · 달리기 · 포복 · 엄폐 중
-##   행동 영역:  없음 · 조준 · 사격 · 장전 · 투척 · 근접
+##   행동 영역:  지금 하는 능력(Ability — 사격 · 장전 …)과 그 단계. 동작 표에 내는 이름 = 없음 · 조준 · 사격 · 장전 · 투척 · 근접
 ##   덮어쓰기:   피격 · 제압 · 패닉 · 사망   (두 영역 위에서 강제로 — 두뇌 · 플레이어 조작보다 위)
 ##   자세(서기 · 앉기 · 엎드림)는 상태가 아니라 속성
 ##
@@ -69,35 +69,15 @@ static func step(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 	# ── 자세(속성) ──
 	s.stance = s.want_stance
 
-	# ── 행동 영역 ──
-	match s.act_state:
-		Act.RELOAD:
-			s.act_timer -= dt
-			if s.act_timer <= 0.0:
-				s.ammo = w.mag_size
-				s.act_state = Act.NONE
-		Act.FIRE:
-			s.act_timer -= dt
-			if s.act_timer <= 0.0:
-				s.act_state = Act.AIM if (s.want_fire and s.ammo > 0) else Act.NONE
-				s.act_timer = 0.0                   # 이미 겨누고 있었으니 다음 발은 연사 간격만 기다린다
-		Act.AIM:
-			if not s.want_fire or s.ammo <= 0:
-				s.act_state = Act.NONE
-			else:
-				s.act_timer -= dt
-				if s.act_timer <= 0.0 and s.fire_cooldown <= 0.0:
-					bf.fire(s)
-					s.act_state = Act.FIRE
-					s.act_timer = FIRE_POSE
-					s.fire_cooldown = w.fire_interval
-		_:
-			if s.want_reload and s.ammo < w.mag_size:
-				s.act_state = Act.RELOAD
-				s.act_timer = w.reload_time
-			elif s.want_fire and s.ammo > 0:
-				s.act_state = Act.AIM
-				s.act_timer = w.aim_time
+	# ── 행동 영역 — 지금 능력의 단계(준비 → 실행 → 마무리, §2-13). 기능 코드는 능력 파일(Ability)에 있다 ──
+	if s.ability != null:
+		if not s.ability.step(s, bf, dt):
+			stop_act(s)
+	else:
+		var next := _pick_ability(s)
+		if next != null:
+			s.ability = next
+			next.begin(s, bf)
 
 	# ── 이동 영역 ──
 	var dir := 0
@@ -150,6 +130,25 @@ static func at_slot(s: BattleSoldier) -> bool:
 	return absf(s.x - s.cover.slot_x[s.slot]) <= ARRIVE_M * 1.5
 
 
-static func _halt(s: BattleSoldier) -> void:
+## 하고 싶은(의도 칸) 능력 중 우선순위가 가장 큰 것. 없으면 null
+static func _pick_ability(s: BattleSoldier) -> Ability:
+	var best: Ability = null
+	for ab in s.abilities():
+		if (best == null or ab.priority > best.priority) and ab.wants(s):
+			best = ab
+	return best
+
+
+## 하던 능력을 끊는다(끝남 · 피격 · 제압 · 패닉 · 사망 · 좌석 바뀜)
+static func stop_act(s: BattleSoldier) -> void:
+	if s.ability != null:
+		var ab := s.ability
+		s.ability = null
+		ab.stop(s)
+	s.phase = 0
 	s.act_state = Act.NONE
+
+
+static func _halt(s: BattleSoldier) -> void:
+	stop_act(s)
 	s.move_state = Move.IDLE

@@ -2,9 +2,11 @@ extends SceneTree
 
 ## 기본 병종 리소스를 만든다(없을 때만 — 이미 있으면 사용자가 인스펙터에서 고친 값이므로 건드리지 않는다).
 ##   Godot --headless --path <프로젝트> --script res://game/tools/make_default_units.gd [-- --force]
-## 만드는 것: game/units/kar98k.tres(무기) · rifleman_motions.tres(동작 표) · rifleman.tres(병종 — 3D 모습은 soldier_base.tscn 프리팹)
+## 만드는 것: game/units/kar98k.tres(무기) · rifleman_motions.tres(동작 표) · rifleman.tres(병종 — 3D 모습은 soldier_base.tscn 프리팹) ·
+##           abilities/*.tres(능력 — 사격 · 장전)
 
 const DIR := "res://game/units"
+const ABIL_DIR := "res://game/units/abilities"
 
 
 func _init() -> void:
@@ -55,12 +57,25 @@ func _init() -> void:
 		_save(motions, motions_path)
 	motions = load(motions_path) as MotionTable
 
+	# 능력(§2-13) — 기능 하나 = 파일 하나. 병종의 `능력` 목록에 끌어다 넣는다
+	var rifle_abilities: Array[Ability] = [
+		_ensure(ABIL_DIR.path_join("fire.tres"), FireAbility.new(), force) as Ability,
+		_ensure(ABIL_DIR.path_join("reload.tres"), ReloadAbility.new(), force) as Ability,
+	]
+
 	var type_path := DIR.path_join("rifleman.tres")
+	if not force and ResourceLoader.exists(type_path):
+		# 예전 병종(10-21 전 — 능력 칸이 없었다)에는 기본 능력(사격 · 장전)을 넣는다. 능력이 비면 아무것도 못 한다
+		var old := load(type_path) as SoldierType
+		if old != null and old.abilities.is_empty():
+			old.abilities = rifle_abilities
+			_save(old, type_path)
 	if force or not ResourceLoader.exists(type_path):
 		var t := SoldierType.new()
 		t.display_name = "소총수"
 		t.squad_size = 6
 		t.weapon = weapon
+		t.abilities = rifle_abilities
 		t.motions = motions
 		t.sets_json = "res://puppet/sets.json"
 		t.outfit_json = "res://outfits/uniform_m36/outfit.json"
@@ -71,6 +86,14 @@ func _init() -> void:
 		_save(t, type_path)
 	print("UNITS DONE ", DIR)
 	quit()
+
+
+## 그 경로에 리소스가 없으면(또는 force) fresh 를 저장하고, 있으면 있는 것을 읽어 돌려준다
+func _ensure(path: String, fresh: Resource, force: bool) -> Resource:
+	if force or not ResourceLoader.exists(path):
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		_save(fresh, path)
+	return load(path)
 
 
 func _save(res: Resource, path: String) -> void:

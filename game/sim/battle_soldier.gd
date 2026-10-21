@@ -23,6 +23,8 @@ var move_state := 0             # BattleBody.Move
 var act_state := 0              # BattleBody.Act
 var override := 0               # BattleBody.Ovr
 var stance := 0                 # BattleBody.Stance (상태가 아니라 속성)
+var ability: Ability = null     # 행동 영역이 지금 하는 능력(§2-13) — 없으면 null
+var phase := 0                  # 그 능력의 단계(Ability.Phase — 준비 · 실행 · 마무리)
 var act_timer := 0.0
 var ovr_timer := 0.0
 var fire_cooldown := 0.0
@@ -62,6 +64,11 @@ var intent_scores: Dictionary = {}
 var alive: bool:
 	get:
 		return override != BattleBody.Ovr.DEAD
+
+
+## 지금 쓸 수 있는 능력 목록 — 병종의 것(배열을 새로 만들지 않고 그대로 돌려준다)
+func abilities() -> Array[Ability]:
+	return type.abilities
 
 
 ## 싸울 수 있나(죽지도 패닉도 아님)

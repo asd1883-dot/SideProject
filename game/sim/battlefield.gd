@@ -257,14 +257,14 @@ func _hit(target: BattleSoldier, dmg: float, shooter: BattleSoldier) -> void:
 	if target.override != BattleBody.Ovr.PANIC:
 		target.override = BattleBody.Ovr.HIT
 		target.ovr_timer = BattleBody.HIT_STUN
-		target.act_state = BattleBody.Act.NONE
+		BattleBody.stop_act(target)
 		add_suppression(target, 0.5)
 
 
 func _kill(s: BattleSoldier, shooter: BattleSoldier) -> void:
 	var was_panic := s.override == BattleBody.Ovr.PANIC
 	s.override = BattleBody.Ovr.DEAD
-	s.act_state = BattleBody.Act.NONE
+	BattleBody.stop_act(s)
 	s.move_state = BattleBody.Move.IDLE
 	s.want_fire = false
 	s.target = null
@@ -291,7 +291,7 @@ func panic(s: BattleSoldier) -> void:
 	if not s.can_fight():
 		return
 	s.override = BattleBody.Ovr.PANIC
-	s.act_state = BattleBody.Act.NONE
+	BattleBody.stop_act(s)
 	s.want_fire = false
 	s.target = null
 	_leave_cover(s)

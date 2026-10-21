@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="FireAbility" format=3]
+
+[ext_resource type="Script" path="res://game/data/abilities/fire_ability.gd" id="1_7kes4"]
+
+[resource]
+script = ExtResource("1_7kes4")
+display_name = "사격"
+intent = "사격"

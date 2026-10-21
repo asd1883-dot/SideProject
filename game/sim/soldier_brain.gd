@@ -3,7 +3,7 @@ class_name SoldierBrain
 
 ## 병사 두뇌 — 가벼운 판단만. 점수제(Utility AI).  (보병_추상화.md §2-3 · §2-7)
 ##
-## 0.2 ~ 0.5 초마다 의도 후보(자리로 · 사격 · 장전 · 숨기 · 대기)에 점수를 매겨 가장 높은 것을 고르고,
+## 0.2 ~ 0.5 초마다 의도 후보(자리로 · 숨기 · 대기 + 가진 능력마다 하나 — 사격 · 장전 …)에 점수를 매겨 가장 높은 것을 고르고,
 ## 그 결과를 병사 기록의 "의도" 칸(want_* · target)에 적는다. 몸(BattleBody)이 그걸 읽어 움직인다.
 ## 분대가 준 자리(goal_x)로 가는 것도 점수 하나일 뿐이라, 제압이 쌓이면 못 나간다(규칙을 따로 넣지 않는다).
 ## 빙의하면 이 두뇌 대신 플레이어가 같은 칸을 채운다.
@@ -18,6 +18,9 @@ const RUN_OVER_M := 5.0             # 자리까지 이보다 멀면 달린다
 const S_STAND := BattleBody.Stance.STAND
 const S_CROUCH := BattleBody.Stance.CROUCH
 const S_PRONE := BattleBody.Stance.PRONE
+
+## 한 번 생각할 때 능력들과 나누는 값 — 하나를 돌려 쓴다(생각마다 만들지 않는다)
+static var _ctx := BrainCtx.new()
 
 
 static func tick(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
@@ -44,37 +47,28 @@ static func tick(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 		return
 
 	_pick_target(s, bf, w)
-	var has_target := s.target != null
-	var dist_goal := absf(s.goal_x - s.x)
-	var arrived := dist_goal <= ARRIVED_M
-	var supp := minf(s.suppression, 1.0)
-	var near_enemy := has_target and absf(s.target.x - s.x) < NEAR_ENEMY_M
-	var at_cover := s.cover != null and s.slot >= 0 and arrived
+	var c := _ctx
+	c.reset()
+	c.has_target = s.target != null
+	c.dist_goal = absf(s.goal_x - s.x)
+	c.arrived = c.dist_goal <= ARRIVED_M
+	c.supp = minf(s.suppression, 1.0)
+	c.near_enemy = c.has_target and absf(s.target.x - s.x) < NEAR_ENEMY_M
+	c.at_cover = s.cover != null and s.slot >= 0 and c.arrived
+	var arrived := c.arrived
+	var supp := c.supp
+	var has_target := c.has_target
+	var dist_goal := c.dist_goal
+	var at_cover := c.at_cover
 
-	# 쏠 수 있는 자세 — 바라는 자세(엄폐의 쏘는 자세 · 맨땅이면 앉기/엎드림)에서 사선이 벽에 막히면 더 일어서 본다. 다 막히면 못 쏜다
-	var fire_stance := -1
-	if has_target and s.ammo > 0:
-		var aim := Ballistics.aim_point(s, s.target)
-		var prefer: int = s.cover.fire_stance() if at_cover else (S_PRONE if supp > 0.4 else S_CROUCH)
-		var st := prefer
-		while st >= S_STAND:
-			if not Ballistics.line_blocked(bf, s, st, aim):
-				fire_stance = st
-				break
-			st -= 1
-	s.can_engage = fire_stance >= 0 or (has_target and s.ammo <= 0)      # 탄이 떨어졌을 뿐이면 교전 중
-
-	# ── 점수 ──
+	# ── 점수 — 고정 의도(자리로 · 숨기 · 대기) + 가진 능력마다 하나(§2-13: 능력이 자기 점수를 낸다) ──
 	var sc := {}
 	sc["자리로"] = 0.0 if arrived else 0.75 - 0.5 * supp
-	sc["사격"] = 0.0
-	if fire_stance >= 0:
-		sc["사격"] = (0.85 if arrived else 0.45) - 0.35 * supp + (0.4 if near_enemy else 0.0)
-	sc["장전"] = 0.0
-	if s.ammo <= 0:
-		sc["장전"] = 0.9
-	elif s.ammo * 10 < w.mag_size * 4 and not has_target:
-		sc["장전"] = 0.5
+	var abl := s.abilities()
+	for ab in abl:
+		if ab.intent != "" and not sc.has(ab.intent):
+			sc[ab.intent] = ab.score(s, bf, c)
+	s.can_engage = c.engage
 	sc["숨기"] = 0.8 * supp if supp > 0.35 else 0.0
 	sc["대기"] = 0.1
 	var best := "대기"
@@ -92,20 +86,20 @@ static func tick(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 		"자리로":
 			s.want_stance = S_STAND
 			s.want_run = dist_goal > RUN_OVER_M or has_target
-			s.want_fire = s.type.fire_while_walking and fire_stance == S_STAND      # 특성이 있을 때만 걸으며 쏜다
+			s.want_fire = s.type.fire_while_walking and c.fire_stance == S_STAND      # 특성이 있을 때만 걸으며 쏜다
 			if s.want_fire:
 				s.want_run = false
-		"사격":
-			s.want_fire = true
-			s.want_stance = fire_stance
-		"장전":
-			s.want_reload = true
-			s.want_stance = s.cover.hide_stance() if at_cover else S_CROUCH
 		"숨기":
 			s.want_stance = s.cover.hide_stance() if at_cover else S_PRONE
-		_:
-			s.want_reload = s.ammo < w.mag_size
+		"대기":
+			for ab in abl:
+				ab.idle(s, c)                  # 예: 장전 — 덜 찬 탄창을 채운다
 			s.want_stance = s.cover.fire_stance() if at_cover else S_STAND
+		_:
+			for ab in abl:
+				if ab.intent == best:
+					ab.apply(s, c)
+					break
 
 
 ## 표적 고르기 — 가까울수록 · 드러나 있을수록 · 쏘던 표적일수록 점수가 높다
