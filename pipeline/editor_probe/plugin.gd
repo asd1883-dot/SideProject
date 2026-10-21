@@ -249,6 +249,26 @@ func _go() -> void:
 		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
 		await _frames(30)
 		eqp.set_aim_preview(false)
+		# 조준 표지(10-21): [총구 표지] → 열린 씬 무기 아래(주인 = 루트) · 기즈모 X 화살표 끌기 → 표지 · 미리보기 레이 옮겨짐 → Ctrl+Z 자리 → Ctrl+Z 표지 빠짐
+		eqp._select_node(er.get_path_to(ew))
+		var amk = eqp.make_aim_marker(DRCharacter3D.MUZZLE_NAME)
+		await _frames(10)
+		var made: bool = amk != null and amk.get_parent() == ew and amk.owner == er and giz.target == eqp._prev_node(amk)
+		var ray_a: Vector3 = eqp._prev.muzzle_world()[0]
+		var p_a: Vector3 = amk.position if amk != null else Vector3.ZERO
+		var gp3: Vector2 = giz.handle_point(1)
+		var gd3: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[0] * 0.1) - giz._p(giz.pivot_point())).normalized()
+		_giz_drag(giz, gp3, gp3 + gd3 * 40.0)
+		await _frames(10)
+		var dragged: bool = amk != null and not amk.position.is_equal_approx(p_a) and not (eqp._prev.muzzle_world()[0] as Vector3).is_equal_approx(ray_a)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var back_pos: bool = amk != null and amk.position.is_equal_approx(p_a)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var gone_mk: bool = DRCharacter3D.find_aim_marker(ew, DRCharacter3D.MUZZLE_NAME) == null
+		_expect(made and dragged and back_pos and gone_mk,
+			"② 총구 표지: 만들기 → 열린 씬 무기 아래 · 기즈모 끌기 → 표지 · 미리보기 레이 옮겨짐 → Ctrl+Z 자리 → Ctrl+Z 표지 빠짐 (%s %s %s %s)" % [made, dragged, back_pos, gone_mk])
 		_expect(aimed and set_ok and undo_up and undo_w and redo_w and er.aim_motion_weights.is_empty(),
 			"② 조준: 미리보기 사본만 돎 · 조준 비중 · 위 한계 → 열린 씬 루트 → Ctrl+Z 한계 · Ctrl+Z 비중 빠짐(미리보기도) → Ctrl+Y → Ctrl+Z (%s %s %s %s %s)" % [aimed, set_ok, undo_up, undo_w, redo_w])
 		eqp._playing = true

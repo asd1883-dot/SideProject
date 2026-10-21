@@ -635,9 +635,83 @@ func _aim_checks(page: DREquipPage) -> void:
 		"조준 끔 → 유닛 · 미리보기 사본 · 안 돎 · 표 칸 · 숫자 칸 잠김")
 	page._aim_chk.button_pressed = true
 	await _frames(1)
+	await _aim_marker_checks(page)
 	page.set_aim_preview(false)
 	_check(not page._aim_btn.button_pressed and page._prev.aim_report().is_empty() and _mark_count(page) == marks_off, "조준 미리보기 끔 → 동작 그대로 · 표시 없음")
 	page._playing = true
+
+
+## 미리보기 무기 기준 지금 레이(총구 선) [시작점, 방향] — 무기 로컬
+func _ray_local(page: DREquipPage) -> Array:
+	var w := page._prev.get_weapon_node()
+	var mw := page._prev.muzzle_world()
+	var inv := w.global_transform.affine_inverse()
+	return [inv * (mw[0] as Vector3), (inv.basis * (mw[1] as Vector3)).normalized()]
+
+
+## [10] 이어서 — 조준 표지(총구 · 견착) 기즈모 연동(10-21 사용자 "조준선과 총구 위치(즉 레이 기능) — 그 위치를 조정할 수 있는 기즈모 기능 연동도 필요해")
+func _aim_marker_checks(page: DREquipPage) -> void:
+	var r0 := page._root
+	var wn := page._weapon_equip()
+	page._select_node(r0.get_path_to(wn))
+	var ray0 := _ray_local(page)
+	var mk := page.make_aim_marker(DRCharacter3D.MUZZLE_NAME)
+	await _frames(2)
+	var items := page._all_items(page._tree.get_root())
+	var in_tree := false
+	for it in items:
+		in_tree = in_tree or it.get_text(0).contains("총구 표지")
+	_check(mk != null and mk.get_parent() == wn and mk.owner == r0 and mk.position.distance_to(ray0[0] as Vector3) < 0.001 and page._node(page._sel) == mk
+		and page._gizmo_target() == page._prev_node(mk) and DREquipPage._is_marker(mk) and in_tree and page._giz.tool_mode == Giz.Tool.MOVE,
+		"[총구 표지] → 무기 아래 Marker3D(주인 = 유닛) · 지금 레이 자리에 · 골라짐 · 기즈모 대상 · 이동 도구 · 크기 없음 · 나무 줄")
+	page._pos[1].value = page._pos[1].value + 2.0          # 숫자 칸 y +2 cm(기즈모와 같은 길 — 고른 노드 자리)
+	await _frames(2)
+	page._force_pose()
+	var ray1 := _ray_local(page)
+	_check(absf((ray1[0] as Vector3).y - (ray0[0] as Vector3).y - 0.02) < 0.001, "총구 표지 y +2 cm → 미리보기 레이 시작점도 %+.1f cm" % (((ray1[0] as Vector3).y - (ray0[0] as Vector3).y) * 100.0))
+	page._rot[0].value = page._rot[0].value + 10.0
+	await _frames(2)
+	page._force_pose()
+	var ray2 := _ray_local(page)
+	var turned := rad_to_deg((ray2[1] as Vector3).angle_to(ray0[1] as Vector3))
+	_check(absf(turned - 10.0) < 0.5, "총구 표지 x 회전 +10° → 레이 방향 %.1f° 바뀜(파란 축 = 방향)" % turned)
+	page._set_props_merged("시험: 총구 표지 직접", [[mk, "position", (ray0[0] as Vector3) + Vector3(0.0, 0.0, 0.05)], [mk, "rotation_degrees", Vector3.ZERO]])
+	await _frames(2)
+	var pm := page._prev_node(mk) as Node3D
+	pm.position = (ray0[0] as Vector3) + Vector3(0.0, 0.03, 0.05)       # 기즈모로 끄는 중(미리보기 사본만) — 레이가 바로 따라오나
+	page._on_giz_changed(pm)
+	var ray3 := _ray_local(page)
+	_check((ray3[0] as Vector3).distance_to((ray0[0] as Vector3) + Vector3(0.0, 0.03, 0.05)) < 0.001, "기즈모로 끄는 중에도 레이가 따라옴(놓기 전 — 미리보기 사본)")
+	page._sync_preview()
+	page.set_aim_preview(true)
+	page._aim_height_sl.value = 10.0
+	await _frames(2)
+	var marks := _mark_count(page)
+	page.set_aim_preview(false)
+	page._select_node(r0.get_path_to(mk))
+	var marks_sel := _mark_count(page)
+	_check(marks_sel >= 8 and marks_sel < marks, "미리보기를 꺼도 총구 표지를 고르면 레이 · 견착점을 그림(선 정점 %d — 미리보기 중 %d)" % [marks_sel, marks])
+	var shk := page.make_aim_marker(DRCharacter3D.SHOULDER_NAME)
+	await _frames(2)
+	page._force_pose()
+	var sw := page._prev.shoulder_world()
+	_check(shk != null and shk.get_parent() == wn and sw.distance_to((page._prev_node(shk) as Node3D).global_position) < 0.001 and shk.position.y < -0.01,
+		"[견착 표지] → 개머리판 끝 가운데(y %.1f cm) · 미리보기 견착점 = 그 표지" % (shk.position.y * 100.0 if shk != null else 0.0))
+	# asset.json 왕복(임시 사본) — 다른 유닛에 넣을 때 따라감
+	var tmp := "user://시험_조준_asset.json"
+	DirAccess.copy_absolute(ProjectSettings.globalize_path(DREquipHold.asset_for_model(K98)), ProjectSettings.globalize_path(tmp))
+	var aims := {DRCharacter3D.MUZZLE_NAME: mk.transform, DRCharacter3D.SHOULDER_NAME: shk.transform}
+	var okw := DREquipHold.write_hold(tmp, "RightHand", K98, wn.transform, null, {}, {}, aims)
+	var rh := DREquipHold.read_hold(tmp)
+	var am: Dictionary = rh.get("aim_markers", {})
+	_check(okw and am.size() == 2 and (am[DRCharacter3D.MUZZLE_NAME] as Transform3D).is_equal_approx(mk.transform), "asset.json socket_hold.aim_markers 쓰기 → 읽기 같음(총구 · 견착)")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp))
+	page.clear_aim_markers()
+	await _frames(2)
+	page._force_pose()
+	var ray4 := _ray_local(page)
+	_check(DRCharacter3D.find_aim_marker(wn, DRCharacter3D.MUZZLE_NAME) == null and DRCharacter3D.find_aim_marker(wn, DRCharacter3D.SHOULDER_NAME) == null
+		and (ray4[0] as Vector3).distance_to(ray0[0] as Vector3) < 0.001, "[자동으로] → 표지 지움 · 레이가 메시에서 잰 자리로 돌아옴")
 
 
 func _dot(mi: MeshInstance3D) -> bool:
