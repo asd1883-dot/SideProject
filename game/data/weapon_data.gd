@@ -18,6 +18,9 @@ class_name WeaponData
 ## 총알 속도(m/s) — 맞은 결과를 비행 시간만큼 늦게 적용한다
 @export var bullet_speed := 500.0
 @export var damage := 60.0
+## 점사 — 이만큼 쏘면 burst_pause 초 쉰다(0 = 끊지 않음). 기관총처럼 연사 간격이 짧은 무기(운용 장비의 장비 사격이 본다)
+@export var burst := 0
+@export var burst_pause := 0.0
 
 @export_group("퍼짐 원")
 ## 퍼짐 원의 반지름(도). 좁을수록 잘 맞는다 — 각도라서 먼 표적일수록 원이 커진다

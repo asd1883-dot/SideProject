@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="SoldierType" format=3]
+
+[ext_resource type="Script" path="res://game/data/ability.gd" id="1_8s6ix"]
+[ext_resource type="Resource" path="res://game/units/abilities/fire.tres" id="2_qnxgg"]
+[ext_resource type="Resource" path="res://game/units/abilities/reload.tres" id="3_talg2"]
+[ext_resource type="Resource" path="res://game/units/rifleman_motions.tres" id="4_wxjxq"]
+[ext_resource type="PackedScene" path="res://game/units/soldier_base.tscn" id="5_wwhcq"]
+[ext_resource type="Script" path="res://game/data/soldier_type.gd" id="6_35t00"]
+[ext_resource type="Resource" path="res://game/units/kar98k.tres" id="7_g7lna"]
+
+[resource]
+script = ExtResource("6_35t00")
+display_name = "기관총수"
+abilities = Array[ExtResource("1_8s6ix")]([ExtResource("2_qnxgg"), ExtResource("3_talg2")])
+skills = Dictionary[StringName, float]({
+&"MG42": 1.0
+})
+squad_size = 3
+weapon = ExtResource("7_g7lna")
+prefab = ExtResource("5_wwhcq")
+outfit_json = "res://outfits/uniform_m36/outfit.json"
+motions = ExtResource("4_wxjxq")

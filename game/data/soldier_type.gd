@@ -28,6 +28,8 @@ class_name SoldierType
 ## 이 병종이 할 수 있는 기능(사격 · 장전 …) — 하나 = 능력 파일 하나(game/units/abilities/*.tres). 끌어다 넣고 빼면 그 기능을 얻고 잃는다(§2-13).
 ## 순서 = 두뇌가 묻는 순서(점수가 같으면 앞의 것)
 @export var abilities: Array[Ability] = []
+## 숙련도 — 운용 장비 종류(EquipmentType.skill_key, 예: MG42)마다 0 ~ 1. 없으면 0(그 장비의 최소 효율로 운용)
+@export var skills: Dictionary[StringName, float] = {}
 
 @export_group("분대")
 ## 투입할 때 한 분대의 인원(단독 병종이면 1)

@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="CrewFireAbility" format=3]
+
+[ext_resource type="Script" path="res://game/data/abilities/crew_fire_ability.gd" id="1_cybgf"]
+
+[resource]
+script = ExtResource("1_cybgf")
+display_name = "장비 사격"
+intent = "사격"

@@ -23,6 +23,11 @@ var posture := Posture.ADVANCE
 var morale := 0.8               # 0 ~ 1
 var routed := false             # 패주 — 분대 덮어쓰기(두뇌보다 위)
 
+## 분대가 운용하는 장비(§2-13 — MG42 팀의 MG42 · 주운 버려진 장비)
+var equipment: Array[BattleEquipment] = []
+## 분대가 적을 보는 거리 — 투입할 때 구성원 무기 · 장비 무기의 가장 긴 사거리(병종 하나면 그 무기 사거리)
+var range_m := 0.0
+
 var cover: BattleCover = null   # 예약한 엄폐물
 var goal_x := 0.0               # 목표 지점(m)
 var brain_timer := 0.0
@@ -36,6 +41,14 @@ func active() -> Array[BattleSoldier]:
 		if s.can_fight() and not s.detached:
 			out.append(s)
 	return out
+
+
+## 부릴 수 있는 병사가 한 명이라도 있나(배열을 만들지 않는다 — 매 걸음 부르는 곳용)
+func has_active() -> bool:
+	for s in members:
+		if s.can_fight() and not s.detached:
+			return true
+	return false
 
 
 ## 분대의 자리 = 부릴 수 있는 병사들의 x 평균

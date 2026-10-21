@@ -106,6 +106,8 @@ static func step(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 			s.move_state = Move.RUN
 		else:
 			s.move_state = Move.WALK
+		if s.carrying != null:
+			speed *= s.carrying.type.carry_speed_mult              # 운용 장비를 들고 간다(§2-13)
 		s.x = clampf(s.x + float(dir) * minf(speed * dt, remain), 0.0, bf.length_m)
 		s.in_cover = false
 		if not busy:
@@ -121,11 +123,13 @@ static func step(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 		if absf(ax - s.x) > 0.05:
 			s.facing = 1 if ax > s.x else -1
 	elif dir == 0 and s.controller == 0:
-		s.facing = bf.forward(s.team)
+		s.facing = s.seat_eq.facing if s.seat_eq != null else bf.forward(s.team)     # 좌석 병사는 장비의 총구 쪽
 
 
-## 배정된 엄폐 칸에 도착해 있나
+## 배정된 엄폐 칸에 도착해 있나. 운용 장비의 좌석 병사 = 장비를 엄폐물에 설치했고 좌석 자리에 와 있나
 static func at_slot(s: BattleSoldier) -> bool:
+	if s.seat_eq != null:
+		return s.seat_eq.cover != null and s.seat_eq.at_seat(s)
 	if s.cover == null or s.slot < 0 or s.slot >= s.cover.slot_x.size():
 		return false
 	return absf(s.x - s.cover.slot_x[s.slot]) <= ARRIVE_M * 1.5

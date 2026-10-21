@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3]
+
+[ext_resource type="Script" path="res://game/data/weapon_data.gd" id="1_d00g3"]
+
+[resource]
+script = ExtResource("1_d00g3")
+display_name = "MG42"
+range_m = 45.0
+aim_time = 1.0
+fire_interval = 0.1
+mag_size = 50
+reload_time = 5.0
+bullet_speed = 450.0
+damage = 40.0
+burst = 8
+burst_pause = 0.8
+spread_deg = 1.4
+spread_move_mult = 1.0
+spread_per_shot_deg = 0.18
+spread_recover_deg = 3.0
+suppress_power = 0.4
+suppress_radius_m = 1.8

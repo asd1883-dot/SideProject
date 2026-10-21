@@ -30,7 +30,7 @@ static func tick(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 	s.brain_timer = bf.rng.randf_range(THINK_MIN, THINK_MAX)
 	if not s.can_fight():
 		return
-	var w := s.type.weapon
+	var w := s.weapon_now()                 # 좌석에 앉았으면 장비의 무기(사거리)
 	s.use_goal = true
 
 	# 패주 — 분대 덮어쓰기. 명령 무시 · 사격 없이 뒤로 달린다(§2-8)
@@ -100,6 +100,9 @@ static func tick(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 				if ab.intent == best:
 					ab.apply(s, c)
 					break
+	# 운용 장비의 좌석 — 쏘고 · 장전하고 · 기다리는 자세는 좌석의 자세(숨기 · 자리로 가기는 그대로)
+	if s.seat_eq != null and best != "숨기" and best != "자리로":
+		s.want_stance = s.seat_eq.type.seats[s.seat_idx].stance
 
 
 ## 표적 고르기 — 가까울수록 · 드러나 있을수록 · 쏘던 표적일수록 점수가 높다

@@ -46,6 +46,11 @@ var cover: BattleCover = null   # 분대가 배정해 준 엄폐물
 var slot := -1                  # 그 엄폐물의 칸 번호
 var in_cover := false           # 자리에 도착해 엄폐를 받는 중
 
+# ── 운용 장비(§2-13) — 좌석에 앉으면 병종의 능력 대신 좌석의 능력을 쓴다 ──
+var seat_eq: BattleEquipment = null
+var seat_idx := -1
+var carrying: BattleEquipment = null    # 들고 옮기는 장비(손이 차서 아무 능력도 못 쓴다)
+
 # ── 의도(§2-3): 조종자(AI 두뇌 또는 플레이어)가 채우고, 몸이 읽는다. 누가 채우든 모양이 같다 ──
 var controller := 0             # 0 = AI 두뇌 · 1 = 플레이어(빙의)
 var use_goal := true            # true = goal_x 까지 간다(AI) · false = move_dir 방향으로 간다(플레이어)
@@ -72,9 +77,29 @@ var alive: bool:
 		return override != BattleBody.Ovr.DEAD
 
 
-## 지금 쓸 수 있는 능력 목록 — 병종의 것(배열을 새로 만들지 않고 그대로 돌려준다)
+## 장비를 들고 있을 때의 능력 목록(손이 찼다)
+static var _no_abilities: Array[Ability] = []
+
+
+## 지금 쓸 수 있는 능력 목록 — 좌석에 앉았으면 좌석의 것, 장비를 들고 있으면 없음, 아니면 병종의 것(배열을 새로 만들지 않는다)
 func abilities() -> Array[Ability]:
+	if carrying != null:
+		return _no_abilities
+	if seat_eq != null:
+		return seat_eq.type.seats[seat_idx].abilities
 	return type.abilities
+
+
+## 지금 겨누는 무기 — 좌석에 앉았으면 장비의 무기(표적 고르기 사거리 등), 아니면 병종의 무기
+func weapon_now() -> WeaponData:
+	if seat_eq != null and seat_eq.type.weapon != null:
+		return seat_eq.type.weapon
+	return type.weapon
+
+
+## 그 장비 종류의 숙련도(0 ~ 1) — 병종의 skills, 없으면 0
+func skill(key: StringName) -> float:
+	return float(type.skills.get(key, 0.0))
 
 
 # ───────────── 수정자 · 최종 수치 ─────────────

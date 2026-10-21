@@ -18,19 +18,11 @@ const OWN_COVER_NEAR_M := 6.0       # 분대 엄폐물에서 이 안에 있으�
 const LEAN_M := 1.2                 # 총구에서 이 안에 있는 벽은 기대어 쏘는 것으로 본다
 
 
+## 병사가 자기 무기(병종의 무기)로 한 발 — 사격 능력(FireAbility)이 부른다
 static func fire(bf: Battlefield, s: BattleSoldier) -> void:
 	var t := s.type
 	var w := t.weapon
-	# 조준점 — AI 는 표적의 드러난 부분 가운데, 플레이어는 커서(aim_*)
-	var aim := Vector3(s.aim_x, s.aim_h, s.aim_depth)
-	if s.controller == 0 and s.target != null:
-		aim = aim_point(s, s.target)
-	var dir := 1 if aim.x >= s.x else -1
-	var mx := s.x + float(dir) * MUZZLE_AHEAD_M
-	var mh := t.muzzle_height(s.stance)
-	var md := s.depth
-	var dist := maxf(absf(aim.x - mx), 0.5)
-
+	var aim := aim_of(s)
 	# 퍼짐 원(도) = 무기 기본 × 자세 × (걸으며 쏘면) × 제압 + 연사로 넓어진 양
 	var moving := s.move_state == BattleBody.Move.WALK or s.move_state == BattleBody.Move.RUN or s.move_state == BattleBody.Move.CRAWL
 	var spread := s.stat(StatMod.SPREAD, w.spread_deg) * t.spread_stance_mult(s.stance)
@@ -38,14 +30,29 @@ static func fire(bf: Battlefield, s: BattleSoldier) -> void:
 		spread *= w.spread_move_mult
 	spread *= 1.0 + t.spread_suppressed_add * clampf(s.suppression, 0.0, 1.0)
 	spread += s.bloom_deg
+	shoot(bf, s, w, s.x, MUZZLE_AHEAD_M, t.muzzle_height(s.stance), s.depth, spread, aim)
+	s.ammo -= 1
+	s.bloom_deg += w.spread_per_shot_deg
+
+
+## 조준점 — AI 는 표적의 드러난 부분 가운데, 플레이어는 커서(aim_*)
+static func aim_of(s: BattleSoldier) -> Vector3:
+	if s.controller == 0 and s.target != null:
+		return aim_point(s, s.target)
+	return Vector3(s.aim_x, s.aim_h, s.aim_depth)
+
+
+## 한 발 — 쏘는 자리(ox: 몸 · 장비의 x, ahead: 총구가 앞에 있는 거리, mh: 총구 높이, md: 깊이)와 퍼짐 원(도)으로.
+## 탄 · 연사 퍼짐은 부른 쪽(능력)이 줄이고 늘린다 — 병사의 소총이면 병사의 것, 운용 장비면 장비의 것
+static func shoot(bf: Battlefield, s: BattleSoldier, w: WeaponData, ox: float, ahead: float, mh: float, md: float, spread: float, aim: Vector3) -> void:
+	var dir := 1 if aim.x >= ox else -1
+	var mx := ox + float(dir) * ahead
+	var dist := maxf(absf(aim.x - mx), 0.5)
 	# 원 안의 고른 한 점 → 방향의 어긋남(위아래 · 깊이)
 	var ang := bf.rng.randf() * TAU
 	var rad := sqrt(bf.rng.randf()) * deg_to_rad(spread)
 	var slope_h := (aim.y - mh) / dist + tan(cos(ang) * rad)                        # x 1 m 에 높이가 얼마나 변하나
 	var slope_d := (aim.z - md) / dist + tan(sin(ang) * rad) / bf.depth_width_m     # x 1 m 에 깊이(0~1)가 얼마나 변하나
-
-	s.ammo -= 1
-	s.bloom_deg += w.spread_per_shot_deg
 	bf.stats["shots"] += 1
 
 	var res := trace(bf, s, mx, mh, md, dir, slope_h, slope_d, w.range_m * RANGE_OVERSHOOT, w.suppress_radius_m)
@@ -62,6 +69,7 @@ static func fire(bf: Battlefield, s: BattleSoldier) -> void:
 		"team": s.team,
 		"hit": hit,
 		"blocked": bool(res["blocked"]),
+		"weapon": w,
 	})
 
 
@@ -69,15 +77,22 @@ static func fire(bf: Battlefield, s: BattleSoldier) -> void:
 static func _is_own_cover(c: BattleCover, s: BattleSoldier) -> bool:
 	if c == s.cover and s.in_cover:
 		return true
+	if s.seat_eq != null and c == s.seat_eq.cover:
+		return true                                 # 운용 장비를 설치한 엄폐물 — 총구가 벽 위에 걸쳐 있다
+
 	return s.squad != null and not s.detached and c == s.squad.cover and absf(s.x - c.center_x()) < OWN_COVER_NEAR_M
 
 
 ## 그 자세로 쏘면 조준점까지 가는 곧은 길이 벽에 막히나(퍼짐은 빼고). 두뇌가 쏘기 전에 본다 —
 ## 안 보면 칸을 못 얻고 뒤에 선 병사들이 아군 모래주머니에 대고 쏜다(10-13 시험: 1377발 중 15발 명중)
 static func line_blocked(bf: Battlefield, s: BattleSoldier, stance: int, aim: Vector3) -> bool:
-	var dir := 1 if aim.x >= s.x else -1
-	var mx := s.x + float(dir) * MUZZLE_AHEAD_M
-	var mh := s.type.muzzle_height(stance)
+	return line_blocked_at(bf, s, s.x, MUZZLE_AHEAD_M, s.type.muzzle_height(stance), aim)
+
+
+## line_blocked 의 쏘는 자리를 직접 주는 판 — 운용 장비(총구 = 장비 자리 · 장비의 총구 높이)
+static func line_blocked_at(bf: Battlefield, s: BattleSoldier, ox: float, ahead: float, mh: float, aim: Vector3) -> bool:
+	var dir := 1 if aim.x >= ox else -1
+	var mx := ox + float(dir) * ahead
 	var dist := maxf(absf(aim.x - mx), 0.5)
 	var slope_h := (aim.y - mh) / dist
 	for c in bf.covers:

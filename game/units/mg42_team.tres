@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="SquadComp" format=3]
+
+[ext_resource type="Script" path="res://game/data/equipment_type.gd" id="1_3u8kg"]
+[ext_resource type="Resource" path="res://game/units/mg42.tres" id="2_k063y"]
+[ext_resource type="Script" path="res://game/data/soldier_type.gd" id="3_pfpj3"]
+[ext_resource type="Resource" path="res://game/units/mg_gunner.tres" id="4_cubif"]
+[ext_resource type="Script" path="res://game/data/squad_comp.gd" id="5_afdke"]
+
+[resource]
+script = ExtResource("5_afdke")
+members = Array[ExtResource("3_pfpj3")]([ExtResource("4_cubif"), ExtResource("4_cubif"), ExtResource("4_cubif")])
+equipment = Array[ExtResource("1_3u8kg")]([ExtResource("2_k063y")])

@@ -4,16 +4,18 @@ class_name Battlefield
 ## 전장 관리자 — 병사 · 분대 · 엄폐물 기록을 배열로 들고 논리를 돌린다. 병사마다 논리 노드를 두지 않는다.  (보병_추상화.md §2-6)
 ##
 ## 한 걸음(step)의 순서:
-##   구역 나누기 → 분대(사기 · 패주 · 분대 두뇌) → 병사(병사 두뇌 → 몸) → 늦게 도착하는 총알 결과 적용
+##   구역 나누기 → 분대(사기 · 패주 · 분대 두뇌 · 장비 두뇌) → 병사(병사 두뇌 → 몸) → 운용 장비(설치 · 해체 · 운반 · 버려짐) → 늦게 도착하는 총알 결과 적용
+## 운용 장비(§2-13 — MG42 라페테 …)는 병사와 따로인 기록(BattleEquipment)이다. 병사가 좌석에 앉아 운용한다.
 ## 화면은 BattleView 가 이 기록을 읽어서 그린다. 여기엔 그림 코드가 없다.
 ##
 ## 단위: x = m(전선 방향, 0 ~ length_m) · 깊이 = 0 ~ 1 · 높이 = m(땅 = 0)
 
-## 총알 한 발. {from: Vector3(x, 높이, 깊이), to: Vector3, flight: 초, team: int, hit: BattleSoldier 또는 null, blocked: bool}
+## 총알 한 발. {from: Vector3(x, 높이, 깊이), to: Vector3, flight: 초, team: int, hit: BattleSoldier 또는 null, blocked: bool, weapon: WeaponData}
 signal shot_fired(shot: Dictionary)
 signal soldier_spawned(s: BattleSoldier)
 signal soldier_died(s: BattleSoldier)
 signal soldier_panicked(s: BattleSoldier)
+signal equipment_added(eq: BattleEquipment)
 
 @export var length_m := 120.0
 ## 깊이 0 ~ 1 이 실제로 몇 m 인가(퍼짐 원을 깊이로 바꿀 때 · 근처를 지나간 총알의 거리)
@@ -30,15 +32,17 @@ var time := 0.0
 var soldiers: Array[BattleSoldier] = []
 var squads: Array[BattleSquad] = []
 var covers: Array[BattleCover] = []
+var equipments: Array[BattleEquipment] = []
 var rng := RandomNumberGenerator.new()
 ## 디버그 통계
-var stats := {"shots": 0, "hits": 0, "blocked": 0, "kills": [0, 0], "panics": [0, 0]}
+var stats := {"shots": 0, "hits": 0, "blocked": 0, "kills": [0, 0], "panics": [0, 0], "claims": 0, "abandoned": 0}
 
 var _buckets: Dictionary = {}       # 구역 번호 -> Array[BattleSoldier]
 var _pending: Array = []            # 날아가는 중인 총알의 결과 [{t, target, dmg, shooter, near, power}]
 var _next_id := 1
 var _prune_timer := PRUNE_EVERY
 var _next_squad_id := 1
+var _next_eq_id := 1
 
 
 func _physics_process(delta: float) -> void:
@@ -58,6 +62,8 @@ func step(dt: float) -> void:
 		if s.controller == 0:
 			SoldierBrain.tick(s, self, dt)
 		BattleBody.step(s, self, dt)
+	if not equipments.is_empty():
+		_update_equipment(dt)
 	_apply_pending()
 	_prune_timer -= dt
 	if _prune_timer <= 0.0:
@@ -94,9 +100,20 @@ func clear() -> void:
 		s.squad = null
 		s.cover = null
 		s.target = null
+		s.seat_eq = null
+		s.carrying = null
+		s.ability = null
+		s.mods.clear()
 	for sq in squads:
 		sq.members.clear()
+		sq.equipment.clear()
 		sq.cover = null
+	for eq in equipments:
+		eq.squad = null
+		eq.carrier = null
+		eq.cover = null
+		eq.reloader = null
+		eq.seats.clear()
 	for c in covers:
 		c.slot_owner.clear()
 	_pending.clear()
@@ -104,6 +121,7 @@ func clear() -> void:
 	soldiers.clear()
 	squads.clear()
 	covers.clear()
+	equipments.clear()
 
 
 func _notification(what: int) -> void:
@@ -136,18 +154,36 @@ func add_cover(x0: float, x1: float, kind: int, wall_side: int, slots: int = 0) 
 	return c
 
 
-## 분대 투입 — 그 편의 맵 끝에서 분대째로 나온다(§2-7 고정 분대 · 안건 E)
+## 분대 투입 — 그 편의 맵 끝에서 분대째로 나온다(§2-7 고정 분대 · 안건 E). 병종 하나 × 그 병종의 분대 인원
 func deploy_squad(team: int, type: SoldierType, order: int = BattleSquad.Order.ADVANCE) -> BattleSquad:
+	var types: Array[SoldierType] = []
+	for i in maxi(type.squad_size, 1):
+		types.append(type)
+	var none: Array[EquipmentType] = []
+	return _deploy(team, types, none, order)
+
+
+## 섞인 분대 투입(§2-13 ④) — 분대 구성(SquadComp)의 병사들 + 운용 장비("MG42 팀 = 기관총수 3 + MG42")
+func deploy_comp(team: int, comp: SquadComp, order: int = BattleSquad.Order.ADVANCE) -> BattleSquad:
+	if comp == null or comp.members.is_empty():
+		push_warning("[Battlefield] 분대 구성에 병사가 없습니다: %s" % (comp.resource_path if comp != null else "null"))
+		return null
+	return _deploy(team, comp.members, comp.equipment, order)
+
+
+func _deploy(team: int, types: Array[SoldierType], equips: Array[EquipmentType], order: int) -> BattleSquad:
 	var sq := BattleSquad.new()
 	sq.id = _next_squad_id
 	_next_squad_id += 1
 	sq.team = team
-	sq.type = type
+	sq.type = types[0]
 	sq.order = order
 	var fwd := forward(team)
 	var base_x := home_x(team) + float(fwd) * 1.5
-	var size := maxi(type.squad_size, 1)
+	var size := types.size()
 	for i in size:
+		var type := types[i]
+		sq.range_m = maxf(sq.range_m, type.weapon.range_m if type.weapon != null else 0.0)
 		var s := BattleSoldier.new()
 		s.id = _next_id
 		_next_id += 1
@@ -158,7 +194,7 @@ func deploy_squad(team: int, type: SoldierType, order: int = BattleSquad.Order.A
 		s.depth = clampf((float(i) + 0.5) / float(size) + rng.randf_range(-0.04, 0.04), 0.03, 0.97)
 		s.facing = fwd
 		s.hp = type.max_hp
-		s.ammo = type.weapon.mag_size
+		s.ammo = type.weapon.mag_size if type.weapon != null else 0
 		s.goal_x = s.x
 		s.goal_depth = s.depth
 		s.brain_timer = rng.randf() * 0.4
@@ -167,7 +203,40 @@ func deploy_squad(team: int, type: SoldierType, order: int = BattleSquad.Order.A
 		soldier_spawned.emit(s)
 	sq.goal_x = base_x
 	squads.append(sq)
+	for et in equips:
+		if et != null:
+			_add_equipment(sq, et)
 	return sq
+
+
+## 분대에 운용 장비를 딸린다 — 숙련도가 가장 높은 병사가 들고 나온다(운반)
+func _add_equipment(sq: BattleSquad, et: EquipmentType) -> BattleEquipment:
+	var eq := BattleEquipment.new()
+	eq.id = _next_eq_id
+	_next_eq_id += 1
+	eq.type = et
+	eq.team = sq.team
+	eq.squad = sq
+	eq.facing = forward(sq.team)
+	eq.mod_tag = "seat:%d" % eq.id
+	eq.setup_seats()
+	eq.ammo = eq.mag_size()
+	if et.weapon != null:
+		sq.range_m = maxf(sq.range_m, et.weapon.range_m)
+	var best: BattleSoldier = null
+	for s in sq.members:
+		if s.carrying == null and (best == null or s.skill(et.skill_key) > best.skill(et.skill_key)):
+			best = s
+	eq.state = BattleEquipment.State.CARRIED
+	eq.carrier = best
+	if best != null:
+		best.carrying = eq
+		eq.x = best.x
+		eq.depth = best.depth
+	equipments.append(eq)
+	sq.equipment.append(eq)
+	equipment_added.emit(eq)
+	return eq
 
 
 # ───────────── 조회 ─────────────
@@ -268,6 +337,7 @@ func _kill(s: BattleSoldier, shooter: BattleSoldier) -> void:
 	s.move_state = BattleBody.Move.IDLE
 	s.want_fire = false
 	s.target = null
+	CrewBrain.release(s)                    # 좌석에서 내리고 · 들고 있던 장비는 그 자리에 놓인다(§2-13)
 	_leave_cover(s)
 	if shooter != null:
 		stats["kills"][shooter.team] += 1
@@ -294,11 +364,43 @@ func panic(s: BattleSoldier) -> void:
 	BattleBody.stop_act(s)
 	s.want_fire = false
 	s.target = null
+	CrewBrain.release(s)
 	_leave_cover(s)
 	stats["panics"][s.team] += 1
 	if s.squad != null:
 		s.squad.morale = maxf(0.0, s.squad.morale - 0.08)       # 분대는 사상자처럼 센다
 	soldier_panicked.emit(s)
+
+
+# ───────────── 운용 장비 (§2-13) ─────────────
+
+## 장비의 시간 흐름 — 운반 중이면 운반병을 따라가고, 설치 · 해체는 사수가 자리에 있을 때만 흐르고, 연사 · 퍼짐이 돌아온다.
+## 운용하던 분대가 없어지면(전멸 · 패주 · 아무도 못 싸움) 버려진 장비가 된다
+func _update_equipment(dt: float) -> void:
+	for eq in equipments:
+		var sq := eq.squad
+		if sq != null and (sq.routed or not sq.has_active()):
+			CrewBrain.abandon(self, eq)
+		var w := eq.type.weapon
+		eq.fire_cooldown = maxf(0.0, eq.fire_cooldown - dt)
+		if w != null:
+			eq.bloom_deg = maxf(0.0, eq.bloom_deg - w.spread_recover_deg * dt)
+		match eq.state:
+			BattleEquipment.State.CARRIED:
+				var c := eq.carrier
+				if c != null and c.carrying == eq:
+					eq.x = c.x
+					eq.depth = c.depth
+			BattleEquipment.State.SETUP:
+				if eq.gunner_in_place():
+					eq.timer -= dt
+					if eq.timer <= 0.0:
+						eq.state = BattleEquipment.State.READY
+			BattleEquipment.State.TEARDOWN:
+				if eq.gunner_in_place():
+					eq.timer -= dt
+					if eq.timer <= 0.0:
+						CrewBrain.pack(eq)
 
 
 # ───────────── 사기 · 패주 (§2-8) ─────────────
@@ -347,6 +449,7 @@ func possess(s: BattleSoldier) -> bool:
 	s.goal_depth = s.depth
 	s.intent_name = "직접 조종"
 	s.intent_scores = {}
+	CrewBrain.release(s)                    # 빙의한 병사는 운용에서 빠진다(분대가 다른 병사를 앉힌다)
 	_leave_cover(s)
 	return true
 

@@ -41,7 +41,7 @@ static func tick(sq: BattleSquad, bf: Battlefield, dt: float) -> void:
 	# ── 입력 ──
 	var fwd := bf.forward(sq.team)
 	var anchor := sq.anchor_x()
-	var enemies := bf.enemies_near(sq.team, anchor, sq.type.weapon.range_m)
+	var enemies := bf.enemies_near(sq.team, anchor, sq.range_m)
 	var has_enemy := not enemies.is_empty()
 	var supp := sq.avg_suppression()
 	var alive_ratio := float(act.size()) / float(maxi(sq.members.size(), 1))
@@ -129,6 +129,8 @@ static func tick(sq: BattleSquad, bf: Battlefield, dt: float) -> void:
 				_take_cover(sq, null)
 				sq.goal_x = clampf(anchor - float(fwd) * 15.0, 3.0, bf.length_m - 3.0)
 	_assign(sq, act, fwd, hold_in_place)
+	if not sq.equipment.is_empty() or not bf.equipments.is_empty():
+		CrewBrain.tick(sq, bf, act, contact)            # 운용 장비 — 좌석 · 설치 · 운반 · 버려진 장비 줍기(§2-13)
 
 
 ## 엄폐물을 고른다. from_x 에서 search_dir 쪽으로 max_dist 안, protect_dir 쪽(적 쪽)에 벽이 있는 것 중 가장 가까운 것
@@ -183,6 +185,8 @@ static func _assign(sq: BattleSquad, act: Array[BattleSoldier], fwd: int, hold_i
 	var queued := 0
 	for i in count:
 		var s := act[i]
+		if s.seat_eq != null:
+			continue                                     # 운용 장비의 좌석 병사 — 자리는 장비 두뇌(CrewBrain)가 정한다
 		if sq.cover != null:
 			if s.cover != sq.cover or s.slot < 0:
 				if s.cover != null:

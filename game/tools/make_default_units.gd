@@ -3,7 +3,8 @@ extends SceneTree
 ## 기본 병종 리소스를 만든다(없을 때만 — 이미 있으면 사용자가 인스펙터에서 고친 값이므로 건드리지 않는다).
 ##   Godot --headless --path <프로젝트> --script res://game/tools/make_default_units.gd [-- --force]
 ## 만드는 것: game/units/kar98k.tres(무기) · rifleman_motions.tres(동작 표) · rifleman.tres(병종 — 3D 모습은 soldier_base.tscn 프리팹) ·
-##           abilities/*.tres(능력 — 사격 · 장전)
+##           abilities/*.tres(능력 — 사격 · 장전 · 장비 사격 · 장비 장전 · 대신 장전) ·
+##           mg42_weapon.tres · mg42.tres(운용 장비 — 좌석 사수 · 부사수) · mg_gunner.tres(기관총수) · mg42_team.tres(분대 구성 = 기관총수 3 + MG42)
 
 const DIR := "res://game/units"
 const ABIL_DIR := "res://game/units/abilities"
@@ -84,8 +85,80 @@ func _init() -> void:
 		if ResourceLoader.exists(base_path):
 			t.prefab = load(base_path) as PackedScene
 		_save(t, type_path)
+	_make_mg42(weapon, rifle_abilities, motions, force)
 	print("UNITS DONE ", DIR)
 	quit()
+
+
+## 운용 장비 MG42 라페테(§2-13) — 무기 수치 · 좌석(사수 · 부사수) · 장비 능력 · 기관총수 병종 · MG42 팀 분대 구성.
+## 숫자는 임시값(시험하며 맞춤). 모습 프리팹은 없다(10-21 — MG42 모델은 아직 안 구움, 화면엔 자리 표시만)
+func _make_mg42(rifle: WeaponData, rifle_abilities: Array[Ability], motions: MotionTable, force: bool) -> void:
+	var crew_fire := _ensure(ABIL_DIR.path_join("crew_fire.tres"), CrewFireAbility.new(), force) as Ability
+	var crew_reload := _ensure(ABIL_DIR.path_join("crew_reload.tres"), CrewReloadAbility.new(), force) as Ability
+	var backup := CrewReloadAbility.new()
+	backup.display_name = "대신 장전"
+	backup.backup = true
+	var crew_backup := _ensure(ABIL_DIR.path_join("crew_reload_backup.tres"), backup, force) as Ability
+
+	var mw := WeaponData.new()
+	mw.display_name = "MG42"
+	mw.range_m = 45.0
+	mw.aim_time = 1.0
+	mw.fire_interval = 0.1
+	mw.mag_size = 50
+	mw.reload_time = 5.0
+	mw.bullet_speed = 450.0
+	mw.damage = 40.0
+	mw.burst = 8
+	mw.burst_pause = 0.8
+	mw.spread_deg = 1.4
+	mw.spread_move_mult = 1.0
+	mw.spread_per_shot_deg = 0.18
+	mw.spread_recover_deg = 3.0
+	mw.suppress_power = 0.4
+	mw.suppress_radius_m = 1.8
+	var mg_weapon := _ensure(DIR.path_join("mg42_weapon.tres"), mw, force) as WeaponData
+
+	var gunner := SeatData.new()
+	gunner.role = "사수"
+	gunner.abilities = [crew_fire, crew_backup]
+	gunner.governs = [StatMod.SPREAD, StatMod.AIM_TIME, StatMod.TRAVERSE]
+	gunner.offset = Vector2(-0.7, 0.0)
+	gunner.stance = BattleBody.Stance.CROUCH
+	var loader := SeatData.new()
+	loader.role = "부사수"
+	loader.abilities = [crew_reload]
+	loader.governs = [StatMod.RELOAD_TIME]
+	loader.loader = true
+	loader.offset = Vector2(-0.7, 0.09)
+	loader.stance = BattleBody.Stance.CROUCH
+	var et := EquipmentType.new()
+	et.display_name = "MG42 라페테"
+	et.skill_key = &"MG42"
+	et.min_efficiency = 0.75
+	et.weapon = mg_weapon
+	et.seats = [gunner, loader]
+	var mg := _ensure(DIR.path_join("mg42.tres"), et, force) as EquipmentType
+
+	var gt := SoldierType.new()
+	gt.display_name = "기관총수"
+	gt.squad_size = 3
+	gt.weapon = rifle                     # 좌석에 안 앉았을 때(운반 · 빈 좌석 없음)는 소총
+	gt.abilities = rifle_abilities
+	gt.skills = {&"MG42": 1.0}
+	gt.motions = motions
+	gt.sets_json = "res://puppet/sets.json"
+	gt.outfit_json = "res://outfits/uniform_m36/outfit.json"
+	var base_path := "res://game/units/soldier_base.tscn"
+	if ResourceLoader.exists(base_path):
+		gt.prefab = load(base_path) as PackedScene
+	var gunner_type := _ensure(DIR.path_join("mg_gunner.tres"), gt, force) as SoldierType
+
+	var comp := SquadComp.new()
+	comp.display_name = "MG42 팀"
+	comp.members = [gunner_type, gunner_type, gunner_type]
+	comp.equipment = [mg]
+	_ensure(DIR.path_join("mg42_team.tres"), comp, force)
 
 
 ## 그 경로에 리소스가 없으면(또는 force) fresh 를 저장하고, 있으면 있는 것을 읽어 돌려준다

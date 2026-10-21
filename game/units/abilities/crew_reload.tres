@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="CrewReloadAbility" format=3]
+
+[ext_resource type="Script" path="res://game/data/abilities/crew_reload_ability.gd" id="1_gyrb3"]
+
+[resource]
+script = ExtResource("1_gyrb3")
+display_name = "장비 장전"
+intent = "장전"
+priority = 1
