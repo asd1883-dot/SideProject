@@ -317,6 +317,7 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
   왼쪽 `☑ 조준` + 설명 · `위로 최대 ° · 아래로 최대 ° · 빠르기 °/s · 팔 몫 %`(유닛 루트 — 기본 30 · 30 · 240 · 70, 각도는 동작이 원래 겨눈 높이에서 더 드는 각) · 가운데 `[조준 미리보기]` + `옆` · `높낮이` 끌기(분홍 십자 = 표적 ·
   총구 선 초록 = 표적으로 · 주황 = 한계 · 노란 십자 = 견착점, 꺼진 채 끌어도 켜짐 · 비중 0 동작이면 조준하는 동작으로 바꿈) · 오른쪽 동작 표 `조준` 칸(그 동작의 조준 비중 — 흐림 = 기본: 동작 표의 "사격" · "조준" 상태면 1). 게임: `ch.set_aim_target(세상 좌표)`
   (BattleView3D 가 두뇌 표적의 겨눌 곳을 넘김) · `clear_aim_target()` · `aim_report()`. 고정 받침대 무기는 몸으로 안 겨눔.
+  **레이(총구 선) · 견착점 위치 = `[총구 표지]` · `[견착 표지]`**(무기 아래 Marker3D — 기즈모로 옮김, 총구 +Z = 방향 · `[자동으로]` = 지우고 메시에서 다시 잼 · asset.json `aim_markers`).
 - 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · "조준 IK" 절 · `runtime/dr_aim_solver_3d.gd` · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd` · `ui/transform_gizmo.gd`(기즈모 — 화면 좌표로 그리고 고르며 끌기는 광선 ↔ 평면, 손잡이 크기는 화면 기준).
 - 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `tools/aim_check_cli.gd`(조준 IK) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
 - kar98k(모델 · 무기 씬 · 구운 그림)는 10-21 부터 저장소에 있다 — 새로 받은 PC 도 기본형 군인이 무기를 든 채 열린다.
@@ -546,7 +547,7 @@ Unity 의 **Humanoid** 에 해당하는 것이 Godot 의 **BoneMap + SkeletonPro
 | 무엇 | 클래스 · 도구 |
 |---|---|
 | 동작 표 | `DRMotionTable` · `DRMotionClip` — 상태마다 동작 여러 개 · 비중 % · 상하체 합성. 인스펙터에서 열면 상태별 편집 화면(`ui/motion_table_editor.gd`) |
-| 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 동작 표 인스펙터의 `3D 동작 내보내기` · **도구 메뉴 "Dot Rigger — 3D 동작 내보내기"** · `tools/export_motions_cli.gd [--check]` |
+| 동작 | `DRMotionExporter` — 프리셋 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작을 AnimationLibrary 로. 동작 표 화면(인스펙터 · ① 유닛 탭)의 `3D 동작 내보내기`(지금 보는 표 — 10-21 도구 메뉴 항목은 뺐다) · `tools/export_motions_cli.gd [--check]` |
 | 병사 한 명 · 유닛 프리팹 | `DRCharacter3D` — 몸 glb + 슬롯 메시(top · bottom · base) + 소켓 장비. 씬 루트로 두면 **유닛 프리팹**(인스펙터 칸: 몸 · 상의 · 하의 · 동작 표 · 키 — 씬에 들어가면 칸대로 조립, 장비는 자식 소켓 노드). 다른 유닛 = 상속 씬. `play_motion` · `step_motion`(왼손 IK 비중 섞기 포함) · `dress` · `wear(outfit.json, ["top"])`. 메시 · 재질 · Skin 은 병사끼리 공유 |
 | 소켓 · 장비 · 왼손 | BoneAttachment3D 소켓 → 모델 씬 인스턴스 → `DRHandTarget3D`(왼손 표지, 동작별 IK 비중). 왼팔 = 내장 `TwoBoneIK3D`. `core/equip_hold.gd`(`DREquipHold`) — 모델 목록 · 맞추기 · asset.json `socket_hold`. 위 "② 장비 탭" |
 | ① 유닛 탭 | `ui/unit_page.gd` — 유닛 목록(부모 → 자식) · 새 자식 유닛 · 모습 칸(부모 값 / 바꿈) · 장비 요약(+ ② 탭 단추) · 3D 도트 미리보기(유닛 사본 — 소켓 장비까지) · 동작 표 · 도트 느낌 |
