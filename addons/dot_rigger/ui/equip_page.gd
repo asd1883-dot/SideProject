@@ -8,8 +8,10 @@ class_name DREquipPage
 ##   · 왼손 표지 = 장비 아래 DRHandTarget3D(왼팔 두 마디 IK 의 목표 — DRCharacter3D 가 조립 때 붙인다)
 ## 이 탭과 씬 독 · 인스펙터 · 3D 화면 기즈모가 **같은 노드**를 고친다(에디터 = 열린 유닛 씬 · 되돌리기 Ctrl+Z, 에디터 밖 = 인스턴스를 바로).
 ##
-##   왼쪽: 유닛 · 소켓 나무(소켓 → 장비 → 표지) · 소켓 더하기(뼈) · 장비 넣기/바꾸기/빼기 · 고른 노드 자리(cm · ° · 크기) · 맞추기 · 저장
-##   가운데: 미리보기 — 돌려 보기 + **유니티식 기즈모**(ui/transform_gizmo.gd, 10-16) / 도트 보기(게임과 같은 DRDotView3D) · 동작 재생 · 손 ↔ 표지 거리
+##   왼쪽(하는 차례 — 10-21 사용자 "직관적인 UI/UX, 에디터로서 훌륭하게"): 1 무기 · 소켓(나무 · 모델 · + 소켓) → 2 잡기(오른손 · 왼손 · 양손 · 고정 ·
+##     손 표지 = 모든 동작 공통) → 3 무기 자리(**적용 범위 스위치 하나** — 모든 동작 / 이 동작만 · [손에 맞추기] 하나 · 숫자 칸) → 4 조준(칸 · 표지 · 미리보기)
+##   가운데: 도구 줄(기즈모 · 눈금 · 보기) · 미리보기 — 돌려 보기 + **유니티식 기즈모**(ui/transform_gizmo.gd, 10-16) / 도트 보기(게임과 같은 DRDotView3D) ·
+##     이 동작만이면 주황 테두리 + 꼬리표 · 타임라인(재생 / 멈춤 Space · 동작 이름 · 프레임 · 초) · 상태 줄 · 손 ↔ 표지 거리
 ##     단축키(유니티와 같음): Q 보기 · W 이동 · E 회전 · R 크기 · Y 변환 · X 로컬/글로벌 · Z 피벗/중심 · F 고른 것 보기 · Ctrl 끌기 = 눈금 ·
 ##     Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) 되돌리기 / 다시 · Ctrl+S 저장. 카메라: 휠 · 가운데 끌기(옮기기) · 오른쪽 / Alt+왼쪽 끌기(돌려 보기) · Alt+오른쪽(확대)
 ##     미리보기를 누르면(끌지 않고) 그 자리의 왼손 표지 · 소켓 · 장비를 고른다(빈 곳 = 고르기 풀기). 기즈모를 놓으면 유닛 씬에 되돌리기 한 칸
@@ -76,9 +78,11 @@ var _pitch := 10.0
 var _dist := 1.0
 var _target := Vector3(0.0, 1.25, 0.15)
 var _drag := 0
-var _motion_ob: OptionButton
+var _cur_motion := ""                     # 미리보는 동작(오른쪽 표에서 고름 — 10-21 아래 동작 칸은 표와 겹쳐 뺐다)
+var _motion_lbl: Label                    # 타임라인의 동작 이름
 var _play_btn: Button
 var _time_sl: HSlider
+var _time_lbl: Label                      # 타임라인의 초(지금 / 길이)
 var _view_btn: Button
 var _playing := true
 var _acc := 0.0
@@ -98,11 +102,14 @@ var _last_rep: Array = []                 # 마지막으로 잰 동작별 수치
 var _rep_stale := false                   # 잰 뒤 무기 · 표지 자리가 바뀜(다시 재야 맞음)
 # 동작별 무기 자리(10-19)
 var _per_motion := false                  # 기즈모 · 숫자 칸이 "이 동작만"(동작별 자리)을 고친다 — false = 모든 동작(기본 자리)
-var _pm_btns: Array[Button] = []          # 무기 자리: 모든 동작 · 이 동작만
-var _pm_banner: PanelContainer            # 미리보기 위 띠(이 동작만일 때)
+var _pm_btns: Array[Button] = []          # 3 무기 자리의 적용 범위: 모든 동작 · 이 동작만(이 탭에서 범위를 바꾸는 곳은 여기 하나)
+var _pm_banner: PanelContainer            # 미리보기 왼쪽 위 꼬리표(이 동작만일 때 — 단추 없음)
 var _pm_label: Label
-var _pm_fit_btn: Button
+var _pm_frame: Panel                      # 미리보기 둘레 주황 테두리(이 동작만일 때)
+var _scope_note: Label                    # 적용 범위 아래 — 지금 무엇을 고치는지 한 줄
+var _pm_fit_btn: Button                   # [손에 맞추기] — 범위대로(모든 동작 = 기본 자리 · 이 동작만 = 그 동작 자리)
 var _pm_reset_btn: Button
+var _marker_btns: Array[Button] = []      # 표지(손 · 총구 · 견착 — 모든 동작 공통)를 고치는 단추 — 이 동작만이면 잠김
 var _xf_note: Label                       # 숫자 칸 아래 — 동작별 자리 안내
 var _mt_menu: PopupMenu                   # 동작 표 오른쪽 누름
 var _mt_menu_motion := ""
@@ -170,13 +177,15 @@ func _build_ui() -> void:
 	split.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(split)
 
-	# 왼쪽 — 유닛 · 소켓 · 장비 · 자리
+	# 왼쪽 — 하는 차례대로: 1 무기 · 소켓 → 2 잡기 → 3 무기 자리 → 4 조준(10-21 사용자 "직관적인 UI/UX — 에디터로서 훌륭하게").
+	# 같은 일을 하는 단추는 한 곳에만 — 적용 범위(모든 동작 / 이 동작만) = 3 의 스위치 하나 · 손에 맞추기 = 3 의 단추 하나
 	var lsc := ScrollContainer.new()
 	lsc.custom_minimum_size = Vector2(370, 0)
 	lsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	split.add_child(lsc)
 	var left := VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.add_theme_constant_override("separation", 6)
 	lsc.add_child(left)
 	var urow := HBoxContainer.new()
 	left.add_child(urow)
@@ -189,16 +198,30 @@ func _build_ui() -> void:
 	_unit_ob.tooltip_text = "소켓 · 장비를 고칠 유닛 프리팹(game/units — ① 유닛 탭과 같은 목록)"
 	_unit_ob.item_selected.connect(func(i: int) -> void: select_unit(String(_unit_ob.get_item_metadata(i))))
 	urow.add_child(_unit_ob)
-	_btn(urow, "다시 찾기", "game/units 의 유닛 씬을 다시 찾는다", scan_units)
-	var tl := Label.new()
-	tl.text = "소켓 → 장비 → 왼손 표지 (씬 독과 같은 노드)"
-	left.add_child(tl)
+	_btn(urow, "↻", "game/units 의 유닛 씬을 다시 찾는다", scan_units)
+	_btn(urow, "씬 열기", "에디터에 이 유닛 씬을 연다", func() -> void:
+		if _sel_path != "" and Engine.is_editor_hint():
+			EditorInterface.open_scene_from_path(_sel_path))
+	_btn(urow, "저장", "이 유닛 씬을 저장(Ctrl+S)", save_unit)
+
+	# 1 무기 · 소켓
+	_section(left, "1", "무기 · 소켓", "어느 뼈(소켓)에 어떤 장비를 넣나 — 씬 독 · 인스펙터와 같은 노드")
 	_tree = Tree.new()
 	_tree.hide_root = true
 	_tree.allow_search = false              # 글자를 치면 찾기로 먹어 버려 W · E · R 단축키가 안 간다
-	_tree.custom_minimum_size = Vector2(0, 170)
+	_tree.custom_minimum_size = Vector2(0, 150)
 	_tree.item_selected.connect(_on_tree_selected)
 	left.add_child(_tree)
+	var mrow := HBoxContainer.new()
+	left.add_child(mrow)
+	_model_ob = OptionButton.new()
+	_model_ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_model_ob.clip_text = true
+	_model_ob.tooltip_text = "넣을 장비 모델(source3d/weapons/** 의 무기 씬 · glb). 무기 기본 자리(asset.json)가 있으면 그 자리 · 손 표지로 넣는다"
+	mrow.add_child(_model_ob)
+	_btn(mrow, "넣기 · 바꾸기", "고른 소켓(또는 고른 장비의 소켓)에 이 모델을 넣는다. 이미 있으면 바꾼다 — 부모 유닛에서 온 장비는 지울 수 없어 숨긴다", func() -> void:
+		put_model(String(_model_ob.get_item_metadata(_model_ob.selected)) if _model_ob.selected >= 0 else ""))
+	_btn(mrow, "빼기", "고른 장비(또는 소켓)를 뺀다 — 부모 유닛에서 온 것은 숨긴다", remove_selected)
 	var srow := HBoxContainer.new()
 	left.add_child(srow)
 	_sock_name = LineEdit.new()
@@ -212,20 +235,9 @@ func _build_ui() -> void:
 	srow.add_child(_bone_ob)
 	_btn(srow, "+ 소켓", "고른 뼈에 소켓(BoneAttachment3D)을 더한다 — 유닛 씬에 노드로 들어간다", func() -> void:
 		add_socket(_sock_name.text, String(_bone_ob.get_item_metadata(_bone_ob.selected)) if _bone_ob.selected >= 0 else ""))
-	var mrow := HBoxContainer.new()
-	left.add_child(mrow)
-	_model_ob = OptionButton.new()
-	_model_ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_model_ob.clip_text = true
-	_model_ob.tooltip_text = "넣을 장비 모델(source3d/weapons/** 의 무기 씬 · glb). 무기 기본 자리(asset.json)가 있으면 그 자리 · 왼손 표지로 넣는다"
-	mrow.add_child(_model_ob)
-	_btn(mrow, "넣기 · 바꾸기", "고른 소켓(또는 고른 장비의 소켓)에 이 모델을 넣는다. 이미 있으면 바꾼다 — 부모 유닛에서 온 장비는 지울 수 없어 숨긴다", func() -> void:
-		put_model(String(_model_ob.get_item_metadata(_model_ob.selected)) if _model_ob.selected >= 0 else ""))
-	_btn(mrow, "빼기", "고른 장비(또는 소켓)를 뺀다 — 부모 유닛에서 온 것은 숨긴다", remove_selected)
-	# 잡기 — 고정할 곳(10-16 사용자: "오른손 · 왼손 · 양손 — 조인트 느낌, 어느 부분(소켓)을 고정할지")
-	var gl := Label.new()
-	gl.text = "잡기 — 무기를 고정할 곳(나머지 손은 표지를 따라감)"
-	left.add_child(gl)
+
+	# 2 잡기 — 고정할 곳(10-16 사용자: "오른손 · 왼손 · 양손 — 조인트 느낌, 어느 부분(소켓)을 고정할지")
+	_section(left, "2", "잡기", "무기를 어디에 붙이나 — 나머지 손은 총의 손 표지를 따라감(IK). 다른 잡기에 갔다 와도 그때 자리 그대로")
 	var grow := HBoxContainer.new()
 	left.add_child(grow)
 	var gg := ButtonGroup.new()
@@ -239,7 +251,8 @@ func _build_ui() -> void:
 		b.button_group = gg
 		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.tooltip_text = String(g[2]) + "\n지금 미리보기에 보이는 자리 그대로 받침만 바꾼다. 따라갈 손의 표지가 없으면 그 손의 지금 자리로 만든다(되돌리기 한 칸)"
+		b.tooltip_text = String(g[2]) + "\n전에 쓰던 잡기로 돌아가면 그때 자리 그대로. 처음 가는 잡기는 지금 보이는 자리 그대로 받침만 바꾸고(두 손이 총에 있는 프레임에서 고르세요), " + \
+			"따라갈 손의 표지가 없으면 그 손의 지금 자리로 만든다(되돌리기 한 칸)"
 		var kv: int = g[0]
 		b.pressed.connect(func() -> void: set_grip(kv))
 		grow.add_child(b)
@@ -258,40 +271,87 @@ func _build_ui() -> void:
 	_blend_sl.tooltip_text = "양손 — 무기가 두 손 사이 어디를 따라갈지(0 % = 오른손 쪽 · 100 % = 왼손 쪽). 그 동작에서 총을 놓은 손(IK 비중 0)은 빼고 잡은 손만 따른다"
 	_blend_sl.value_changed.connect(set_blend)
 	brow2.add_child(_blend_sl)
-	_grip_info = Label.new()
-	_grip_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_grip_info.add_theme_font_size_override("font_size", 12)
-	_grip_info.add_theme_color_override("font_color", Color(0.72, 0.8, 0.9))
-	left.add_child(_grip_info)
+	_grip_info = _note(left, "", Color(0.72, 0.8, 0.9), 12)
+	_note(left, "손 표지 — 총의 어디를 쥐나 · 모든 동작 공통", Color(0.88, 0.9, 0.94), 13)
 	var frow := HFlowContainer.new()
 	left.add_child(frow)
-	_btn(frow, "지금 자세로 왼손 표지", "미리보기의 지금 동작 · 시점에서 왼손(동작 그대로) 자리 · 회전을 고른 장비의 왼손 표지로(없으면 만든다)", func() -> void: make_hand_marker(0))
-	_btn(frow, "지금 자세로 오른손 표지", "미리보기의 지금 동작 · 시점에서 오른손(동작 그대로) 자리 · 회전을 고른 장비의 오른손 표지로(없으면 만든다) — 무기가 왼손 · 양손 · 고정일 때 오른손이 따라감", func() -> void: make_hand_marker(1))
-	_btn(frow, "지금 동작으로 무기 맞추기", "지금 동작 · 시점의 두 손바닥으로 무기 방향을 다시 잡는다(쥐는 점 = 지금 오른 손바닥 자리, 표지가 있으면 그 점이 왼손 쪽) — 손 소켓에 든 무기만", fit_weapon)
-	# 조준 IK(10-21) — 유닛 루트 칸. 사용자: "사격할 때 적을 바라보는 벡터 기준으로 허리가 살짝 굽거나 — 총구가 적을 바라봐야 되니까"
-	left.add_child(HSeparator.new())
-	var arow0 := HBoxContainer.new()
-	left.add_child(arow0)
+	_marker_btn(frow, "왼손 표지 ← 지금 손", "지금 프레임의 왼손(동작 그대로) 자리 · 회전을 고른 장비의 왼손 표지로(없으면 만든다) — 모든 동작에 쓰인다.\n" +
+		"두 손이 총에 있는 프레임(예: Rifle_Aiming_Idle)에서 누르세요", func() -> void: make_hand_marker(0))
+	_marker_btn(frow, "오른손 표지 ← 지금 손", "지금 프레임의 오른손(동작 그대로) 자리 · 회전을 고른 장비의 오른손 표지로(없으면 만든다) — 모든 동작에 쓰인다.\n" +
+		"무기가 왼손 · 양손 · 고정일 때 오른손이 이 표지를 따라간다", func() -> void: make_hand_marker(1))
+
+	# 3 무기 자리 — 적용 범위 하나가 기즈모 · 숫자 칸 · 손에 맞추기 모두를 정한다(10-21 사용자 "전체 동작 · 이 동작만 — 버튼이 단일화")
+	_section(left, "3", "무기 자리", "몸(소켓 · 두 손) 기준 총 위치 · 회전. 적용 범위가 기즈모 · 숫자 칸 · [손에 맞추기] 모두에 걸린다")
+	var prow := HBoxContainer.new()
+	left.add_child(prow)
+	var pl := Label.new()
+	pl.text = "적용 범위"
+	prow.add_child(pl)
+	var pg := ButtonGroup.new()
+	for m in [[false, "모든 동작", "기본 자리 — 따로 자리를 안 둔 동작은 모두 이 자리.\n지금 동작에 따로 자리가 있으면 보이는 자리 = 기본 자리 + 그 차이(옮기면 기본 자리가 바뀌고 차이는 그대로)"],
+			[true, "✎ 이 동작만", "지금 동작(오른쪽 표에서 고른 것)의 무기 자리만 — 기본 자리 · 다른 동작은 그대로. 위치 · 회전만(크기는 기본 자리 것).\n" +
+				"오른쪽 표에서 행을 두 번 눌러도 된다. 손 표지 · 조준 표지는 모든 동작 공통이라 이때는 잠긴다"]]:
+		var b := Button.new()
+		b.text = String(m[1])
+		b.toggle_mode = true
+		b.button_group = pg
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.tooltip_text = String(m[2])
+		var on: bool = m[0]
+		b.pressed.connect(func() -> void: set_per_motion(on))
+		prow.add_child(b)
+		_pm_btns.append(b)
+	_scope_note = _note(left, "", Color(0.72, 0.8, 0.9), 12)
+	var fitrow := HBoxContainer.new()
+	left.add_child(fitrow)
+	_pm_fit_btn = _btn(fitrow, "🤚 손에 맞추기", "", fit_to_hands)
+	_pm_fit_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pm_fit_btn.clip_text = true
+	_pm_reset_btn = _btn(fitrow, "↺ 이 동작 기본으로", "이 동작의 따로 자리를 지운다(기본 자리로) — 되돌리기 한 칸", func() -> void: reset_motion_offset(current_motion()))
+	_xf_title = Label.new()
+	_xf_title.text = "고른 노드 —"
+	_xf_title.clip_text = true
+	left.add_child(_xf_title)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	left.add_child(grid)
+	for row in [["위치 cm", _pos, 0.1, -500.0, 500.0], ["회전 °", _rot, 0.5, -360.0, 360.0], ["크기", _scl, 0.01, 0.01, 100.0]]:
+		var l := Label.new()
+		l.text = String(row[0])
+		grid.add_child(l)
+		for k in 3:
+			var sp := SpinBox.new()
+			sp.step = float(row[2])
+			sp.min_value = float(row[3])
+			sp.max_value = float(row[4])
+			var is_scl := is_same(row[1], _scl)     # 빈 배열끼리는 == 가 참이라 같은 배열인지로
+			sp.allow_greater = true
+			sp.allow_lesser = not is_scl
+			sp.custom_minimum_size = Vector2(88, 0)
+			sp.prefix = ["x", "y", "z"][k]
+			sp.tooltip_text = "부모 기준(소켓 아래 장비 = 손 뼈 기준, 표지 = 장비 기준). 인스펙터의 position · rotation_degrees · scale 과 같은 값" + \
+				(" — 크기는 장비만(손 표지 · 소켓은 없음)" if is_scl else "")
+			sp.value_changed.connect(func(_v: float) -> void: _on_xf_changed())
+			grid.add_child(sp)
+			(row[1] as Array).append(sp)
+	_xf_note = _note(left, "", Color(0.96, 0.7, 0.36), 12)
+	_xf_note.visible = false
+	var erow := HFlowContainer.new()
+	left.add_child(erow)
+	_btn(erow, "에디터에서 고르기", "이 노드를 에디터에서 골라 3D 화면 기즈모로 옮긴다(탭과 같은 노드)", _on_edit_in_editor)
+	_btn(erow, "무기 기본 자리로 저장", "고른 장비의 자리 · 손 표지 · 동작별 비중 · 동작별 자리 · 조준 표지(총구 · 견착)를 모델 옆 asset.json(socket_hold)에 — 다른 유닛 소켓에 넣을 때 처음 자리", save_hold_default)
+
+	# 4 조준 IK(10-21) — 유닛 루트 칸. 사용자: "사격할 때 적을 바라보는 벡터 기준으로 허리가 살짝 굽거나 — 총구가 적을 바라봐야 되니까"
+	_section(left, "4", "조준", "사격 · 조준 동작에서 표적 높이로 총구를 듦 — 팔(견착점 축)이 주로, 나머지 허리 · 가슴. 좌우는 동작 그대로")
 	_aim_chk = CheckBox.new()
-	_aim_chk.text = "조준"
+	_aim_chk.text = "조준 IK 켜기"
 	_aim_chk.focus_mode = Control.FOCUS_NONE
 	_aim_chk.tooltip_text = "조준 IK — 사격 · 조준 동작에서 총구 높낮이가 표적(게임이 주는 적의 겨눌 곳)을 향하게 한다(좌우는 동작 그대로 — 횡스크롤).\n" + \
 		"팔(개머리판을 어깨에 댄 채 견착점 축으로 총을 듦 — 팔 몫 %) + 허리 · 가슴(나머지). 두 손은 총 표지 IK 로 따라온다"
 	_aim_chk.toggled.connect(func(on: bool) -> void: set_aim_setting("aim_enabled", on))
-	arow0.add_child(_aim_chk)
-	var anote := Label.new()
-	anote.text = "사격 때 표적 높이로 총구를 듦(팔 · 허리)"
-	anote.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	anote.clip_text = true
-	anote.add_theme_font_size_override("font_size", 12)
-	anote.add_theme_color_override("font_color", Color(0.72, 0.8, 0.9))
-	arow0.add_child(anote)
-	var ahelp := Label.new()                    # 칸 설명(10-21 사용자 "설명이 필요한 것 같아")
-	ahelp.text = AIM_HELP
-	ahelp.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ahelp.add_theme_font_size_override("font_size", 11)
-	ahelp.add_theme_color_override("font_color", Color(0.62, 0.66, 0.72))
-	left.add_child(ahelp)
+	left.add_child(_aim_chk)
+	_note(left, AIM_HELP, Color(0.62, 0.66, 0.72), 11)          # 칸 설명(10-21 사용자 "설명이 필요한 것 같아")
 	var agrid := GridContainer.new()
 	agrid.columns = 4
 	left.add_child(agrid)
@@ -316,64 +376,45 @@ func _build_ui() -> void:
 	# 조준 표지(10-21) — 레이(총구 선)가 나가는 자리 · 팔 몫의 축을 기즈모로. 사용자: "그 위치를 조정할 수 있는 기즈모 기능 연동도 필요해"
 	var amrow := HFlowContainer.new()
 	left.add_child(amrow)
-	_btn(amrow, "총구 표지", "레이(총구 선)가 나가는 자리 · 방향 — 무기 아래 \"총구\" 표지를 만들고(없으면 지금 잰 총열 끝에) 고른다. 기즈모 W 이동 · E 회전(파란 축 = 방향)\n" +
+	_marker_btn(amrow, "총구 표지", "레이(총구 선)가 나가는 자리 · 방향 — 무기 아래 \"총구\" 표지를 만들고(없으면 지금 잰 총열 끝에) 고른다. 기즈모 W 이동 · E 회전(파란 축 = 방향)\n" +
 		"유닛 씬에 저장 · [무기 기본 자리로 저장] 이면 asset.json 에도(다른 유닛에 넣을 때 따라감)", func() -> void: make_aim_marker(DRCharacter3D.MUZZLE_NAME))
-	_btn(amrow, "견착 표지", "팔 몫 조준의 축(개머리판을 어깨에 대는 점) — 무기 아래 \"견착\" 표지를 만들고(없으면 지금 잰 개머리판 끝에) 고른다. 기즈모 W 이동",
+	_marker_btn(amrow, "견착 표지", "팔 몫 조준의 축(개머리판을 어깨에 대는 점) — 무기 아래 \"견착\" 표지를 만들고(없으면 지금 잰 개머리판 끝에) 고른다. 기즈모 W 이동",
 		func() -> void: make_aim_marker(DRCharacter3D.SHOULDER_NAME))
-	_btn(amrow, "자동으로", "총구 · 견착 표지를 지운다 — 무기 메시에서 다시 잰다(총열 축 앞 끝 · 개머리판 끝 가운데). 되돌리기 한 칸", clear_aim_markers)
-	left.add_child(HSeparator.new())
-	_xf_title = Label.new()
-	_xf_title.text = "고른 노드 —"
-	left.add_child(_xf_title)
-	var grid := GridContainer.new()
-	grid.columns = 4
-	left.add_child(grid)
-	for row in [["위치 cm", _pos, 0.1, -500.0, 500.0], ["회전 °", _rot, 0.5, -360.0, 360.0], ["크기", _scl, 0.01, 0.01, 100.0]]:
-		var l := Label.new()
-		l.text = String(row[0])
-		grid.add_child(l)
-		for k in 3:
-			var sp := SpinBox.new()
-			sp.step = float(row[2])
-			sp.min_value = float(row[3])
-			sp.max_value = float(row[4])
-			var is_scl := is_same(row[1], _scl)     # 빈 배열끼리는 == 가 참이라 같은 배열인지로
-			sp.allow_greater = true
-			sp.allow_lesser = not is_scl
-			sp.custom_minimum_size = Vector2(88, 0)
-			sp.prefix = ["x", "y", "z"][k]
-			sp.tooltip_text = "부모 기준(소켓 아래 장비 = 손 뼈 기준, 표지 = 장비 기준). 인스펙터의 position · rotation_degrees · scale 과 같은 값" + \
-				(" — 크기는 장비만(왼손 표지 · 소켓은 없음)" if is_scl else "")
-			sp.value_changed.connect(func(_v: float) -> void: _on_xf_changed())
-			grid.add_child(sp)
-			(row[1] as Array).append(sp)
-	_xf_note = Label.new()
-	_xf_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_xf_note.add_theme_font_size_override("font_size", 12)
-	_xf_note.add_theme_color_override("font_color", Color(0.96, 0.7, 0.36))
-	_xf_note.visible = false
-	left.add_child(_xf_note)
-	var erow := HBoxContainer.new()
-	left.add_child(erow)
-	_btn(erow, "에디터에서 고르기", "이 노드를 에디터에서 골라 3D 화면 기즈모로 옮긴다(탭과 같은 노드)", _on_edit_in_editor)
-	_btn(erow, "무기 기본 자리로 저장", "고른 장비의 자리 · 왼손 표지 · 동작별 비중 · 동작별 자리 · 조준 표지(총구 · 견착)를 모델 옆 asset.json(socket_hold)에 — 다른 유닛 소켓에 넣을 때 처음 자리", save_hold_default)
-	var brow := HBoxContainer.new()
-	left.add_child(brow)
-	_btn(brow, "씬 열기", "에디터에 이 유닛 씬을 연다", func() -> void:
-		if _sel_path != "" and Engine.is_editor_hint():
-			EditorInterface.open_scene_from_path(_sel_path))
-	_btn(brow, "저장", "이 유닛 씬을 저장", save_unit)
-	_status = Label.new()
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_font_size_override("font_size", 12)
-	_status.add_theme_color_override("font_color", Color(0.7, 0.72, 0.75))
-	left.add_child(_status)
+	_marker_btn(amrow, "표지 지우고 자동으로", "총구 · 견착 표지를 지운다 — 무기 메시에서 다시 잰다(총열 축 앞 끝 · 개머리판 끝 가운데). 되돌리기 한 칸", clear_aim_markers)
+	# 조준 미리보기 — 표적 대신 높낮이로(총구 높낮이, 수평 0). 좌우는 없다(횡스크롤 — 사용자 "옆은 필요 없는 것 같아")
+	var arow := HBoxContainer.new()
+	left.add_child(arow)
+	_aim_btn = Button.new()
+	_aim_btn.text = "조준 미리보기"
+	_aim_btn.toggle_mode = true
+	_aim_btn.focus_mode = Control.FOCUS_NONE
+	_aim_btn.tooltip_text = "미리보기 병사가 표적(분홍 십자)을 겨누게 한다 — 표적 높이를 끌어 팔 · 허리가 어떻게 움직이는지 본다(꺼진 채 끌어도 켜진다).\n" + \
+		"총구 선: 초록 = 표적으로 · 주황 = 한계에서 멈춤 · 노란 십자 = 견착점(팔 몫의 축). 조준 비중이 0 인 동작(서기 · 걷기 · 장전 …)은 안 움직인다 — 오른쪽 표 \"조준\" 칸"
+	_aim_btn.toggled.connect(set_aim_preview)
+	arow.add_child(_aim_btn)
+	var hl := Label.new()
+	hl.text = "표적 높이"
+	arow.add_child(hl)
+	_aim_height_sl = HSlider.new()
+	_aim_height_sl.min_value = -60.0
+	_aim_height_sl.max_value = 60.0
+	_aim_height_sl.step = 1.0
+	_aim_height_sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_aim_height_sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_aim_height_sl.tooltip_text = "총구에서 본 표적의 높낮이(수평 = 0, 위 +) — 높은 벽 위 · 참호 아래 · 엎드린 적. 좌우는 없다(횡스크롤)"
+	_aim_height_sl.value_changed.connect(func(_v: float) -> void:
+		if _aim_preview:
+			_apply_aim_preview()
+		else:
+			set_aim_preview(true))               # 꺼진 채 끌면 켠다(끌어도 아무 일이 없는 함정 — 10-21 사용자 "변화 없는데?")
+	arow.add_child(_aim_height_sl)
+	_aim_lbl = _note(left, "", Color(0.85, 0.87, 0.9), 12)
 
 	var right_split := HSplitContainer.new()
 	right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	split.add_child(right_split)
 
-	# 가운데 — 미리보기
+	# 가운데 — 도구 줄 · 미리보기 · 타임라인 · 상태 줄
 	var mid := VBoxContainer.new()
 	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid.custom_minimum_size = Vector2(340, 0)
@@ -382,6 +423,7 @@ func _build_ui() -> void:
 	var stack := Control.new()
 	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.custom_minimum_size = Vector2(320, 320)
+	stack.clip_contents = true               # 기즈모 손잡이가 화면 밖(무기가 미리보기 밖)이면 왼쪽 칸 위에 그려지던 것(10-21)
 	mid.add_child(stack)
 	_view3d = SubViewportContainer.new()
 	_view3d.stretch = true
@@ -445,92 +487,75 @@ func _build_ui() -> void:
 	_giz.transform_changed.connect(_on_giz_changed)
 	_giz.transform_end.connect(_on_giz_end)
 	stack.add_child(_giz)                    # 맨 위(돌려 보기에서만 보임 — set_dot_mode)
-	# 이 동작만 띠 — 지금 무엇을 고치는지 늘 보이게(기본 자리를 고치는 줄 알고 끄는 일이 없게) + 그 자리에서 맞추기 · 기본으로 · 끝
+	# 이 동작만이면 미리보기 둘레 주황 테두리 + 왼쪽 위 꼬리표 — 지금 무엇을 고치는지 늘 보이게. 단추는 없다(범위는 왼쪽 "3 무기 자리" 한 곳에서만)
+	_pm_frame = Panel.new()
+	_pm_frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pm_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var fs := StyleBoxFlat.new()
+	fs.draw_center = false
+	fs.set_border_width_all(3)
+	fs.border_color = Color(0.95, 0.6, 0.18)
+	_pm_frame.add_theme_stylebox_override("panel", fs)
+	_pm_frame.visible = false
+	stack.add_child(_pm_frame)
 	_pm_banner = PanelContainer.new()
-	_pm_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_pm_banner.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_pm_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var pbs := StyleBoxFlat.new()
-	pbs.bg_color = Color(0.86, 0.52, 0.14, 0.92)
-	pbs.content_margin_left = 10
-	pbs.content_margin_right = 6
-	pbs.content_margin_top = 3
+	pbs.bg_color = Color(0.95, 0.6, 0.18)
+	pbs.content_margin_left = 8
+	pbs.content_margin_right = 8
+	pbs.content_margin_top = 2
 	pbs.content_margin_bottom = 3
+	pbs.corner_radius_bottom_right = 4
 	_pm_banner.add_theme_stylebox_override("panel", pbs)
 	_pm_banner.visible = false
-	var pbh := HBoxContainer.new()
-	_pm_banner.add_child(pbh)
 	_pm_label = Label.new()
-	_pm_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_pm_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_pm_label.add_theme_color_override("font_color", Color(0.12, 0.07, 0.02))
-	_pm_label.mouse_filter = Control.MOUSE_FILTER_PASS
-	pbh.add_child(_pm_label)
-	_pm_fit_btn = _btn(pbh, "맞추기", "이 동작에 맞추기(자동) — 지금 동작 · 시점의 손(동작 그대로)에 무기 표지가 오게 이 동작 자리를 잡는다. 손 소켓 무기는 든 손을 축으로 돌리고, " +
-		"양손(두 손 사이) 무기는 두 표지의 가운데 · 방향을 두 손바닥에 맞춘다. 잘 안 맞으면 다른 시점에서 다시 · 기즈모로 다듬기", fit_motion_offset)
-	_pm_reset_btn = _btn(pbh, "기본으로", "이 동작의 따로 자리를 지운다(기본 자리로) — 되돌리기 한 칸", func() -> void: reset_motion_offset(current_motion()))
-	_btn(pbh, "끝", "모든 동작(기본 자리) 고치기로 돌아간다", func() -> void: set_per_motion(false))
+	_pm_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pm_banner.add_child(_pm_label)
 	stack.add_child(_pm_banner)
 	_sync_gizmo_bar()
-	var ctl := HFlowContainer.new()
-	mid.add_child(ctl)
-	var ml := Label.new()
-	ml.text = "동작"
-	ctl.add_child(ml)
-	_motion_ob = OptionButton.new()
-	_motion_ob.custom_minimum_size = Vector2(190, 0)
-	_motion_ob.clip_text = true
-	_motion_ob.tooltip_text = "미리 볼 동작(이 유닛 동작 표의 3D 동작 묶음)"
-	_motion_ob.item_selected.connect(func(i: int) -> void: play_motion(_motion_ob.get_item_text(i)))
-	ctl.add_child(_motion_ob)
+	# 타임라인 — 미리보는 동작(오른쪽 표에서 고름) · 재생 / 멈춤(Space) · 프레임(멈춘 채 끌어 자세를 고름 — 손에 맞추기 · 손 표지 · 처음 가는 잡기의 기준)
+	var tl := HBoxContainer.new()
+	mid.add_child(tl)
 	_play_btn = Button.new()
-	_play_btn.text = "⏸ 멈춤"
-	_play_btn.pressed.connect(func() -> void:
-		_playing = not _playing
-		_play_btn.text = "⏸ 멈춤" if _playing else "▶ 재생")
-	ctl.add_child(_play_btn)
+	_play_btn.text = "⏸"
+	_play_btn.focus_mode = Control.FOCUS_NONE
+	_play_btn.custom_minimum_size = Vector2(34, 0)
+	_play_btn.tooltip_text = "재생 · 멈춤(Space)"
+	_play_btn.pressed.connect(toggle_play)
+	tl.add_child(_play_btn)
+	_motion_lbl = Label.new()
+	_motion_lbl.custom_minimum_size = Vector2(150, 0)
+	_motion_lbl.clip_text = true
+	_motion_lbl.tooltip_text = "미리보는 동작 — 오른쪽 표에서 행을 눌러 고른다"
+	_motion_lbl.mouse_filter = Control.MOUSE_FILTER_PASS
+	tl.add_child(_motion_lbl)
 	_time_sl = HSlider.new()
 	_time_sl.min_value = 0.0
 	_time_sl.max_value = 1.0
 	_time_sl.step = 0.001
-	_time_sl.custom_minimum_size = Vector2(140, 0)
-	_time_sl.tooltip_text = "동작의 시점(멈춘 채 끌어서 자세를 고른다)"
+	_time_sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_time_sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_time_sl.tooltip_text = "프레임 — 끌면 멈추고 그 자세를 본다. [손에 맞추기] · 손 표지 · 처음 가는 잡기가 이 프레임의 자세를 기준으로 쓴다"
 	_time_sl.value_changed.connect(_on_time)
-	ctl.add_child(_time_sl)
-	_view_btn = _btn(ctl, "도트 보기", "돌려 보기(가까이 · 기준점 맞추기) ↔ 도트 보기(게임 화면과 같은 저해상도 · 외곽선)", func() -> void: set_dot_mode(not _dot_mode))
-	_btn(ctl, "손", "두 손 · 무기를 가까이", func() -> void: focus_hands())
-	_btn(ctl, "전신", "몸 전체", func() -> void: focus_body())
-	# 조준 미리보기(10-21) — 표적 대신 높낮이로(총구 높낮이, 수평 0). 좌우는 없다(횡스크롤 — 사용자 "옆은 필요 없는 것 같아")
-	var arow := HFlowContainer.new()
-	mid.add_child(arow)
-	_aim_btn = Button.new()
-	_aim_btn.text = "조준 미리보기"
-	_aim_btn.toggle_mode = true
-	_aim_btn.focus_mode = Control.FOCUS_NONE
-	_aim_btn.tooltip_text = "미리보기 병사가 표적(분홍 십자)을 겨누게 한다 — 표적 높이를 끌어 팔 · 허리가 어떻게 움직이는지 본다(꺼진 채 끌어도 켜진다).\n" + \
-		"총구 선: 초록 = 표적으로 · 주황 = 한계에서 멈춤 · 노란 십자 = 견착점(팔 몫의 축). 조준 비중이 0 인 동작(서기 · 걷기 · 장전 …)은 안 움직인다 — 오른쪽 표 \"조준\" 칸"
-	_aim_btn.toggled.connect(set_aim_preview)
-	arow.add_child(_aim_btn)
-	var hl := Label.new()
-	hl.text = "표적 높이"
-	arow.add_child(hl)
-	_aim_height_sl = HSlider.new()
-	_aim_height_sl.min_value = -60.0
-	_aim_height_sl.max_value = 60.0
-	_aim_height_sl.step = 1.0
-	_aim_height_sl.custom_minimum_size = Vector2(160, 0)
-	_aim_height_sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_aim_height_sl.tooltip_text = "총구에서 본 표적의 높낮이(수평 = 0, 위 +) — 높은 벽 위 · 참호 아래 · 엎드린 적. 좌우는 없다(횡스크롤)"
-	_aim_height_sl.value_changed.connect(func(_v: float) -> void:
-		if _aim_preview:
-			_apply_aim_preview()
-		else:
-			set_aim_preview(true))               # 꺼진 채 끌면 켠다(끌어도 아무 일이 없는 함정 — 10-21 사용자 "변화 없는데?")
-	arow.add_child(_aim_height_sl)
-	_aim_lbl = Label.new()
-	_aim_lbl.add_theme_font_size_override("font_size", 12)
-	arow.add_child(_aim_lbl)
+	tl.add_child(_time_sl)
+	_time_lbl = Label.new()
+	_time_lbl.custom_minimum_size = Vector2(96, 0)
+	_time_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_time_lbl.add_theme_font_size_override("font_size", 12)
+	tl.add_child(_time_lbl)
+	# 상태 줄 — 방금 한 일 · 경고(왼쪽 칸 맨 아래에 있으면 스크롤에 가려 안 보였다)
+	_status = Label.new()
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status.add_theme_font_size_override("font_size", 12)
+	_status.add_theme_color_override("font_color", Color(0.93, 0.86, 0.6))
+	mid.add_child(_status)
 	_info = Label.new()
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_info.add_theme_font_size_override("font_size", 12)
+	_info.add_theme_font_size_override("font_size", 11)
+	_info.add_theme_color_override("font_color", Color(0.66, 0.69, 0.74))
 	mid.add_child(_info)
 
 	# 오른쪽 — 동작마다 손 · 무기 자리
@@ -592,9 +617,8 @@ func _build_ui() -> void:
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.add_theme_font_size_override("font_size", 11)
 	help.add_theme_color_override("font_color", Color(0.6, 0.63, 0.67))
-	help.text = "IK 전 · 뒤 = 평균 / 최대. IK 비중 0 = 그 동작은 그 손을 표지에 안 붙인다(수류탄 던지기 · 장전 · 맨손 달리기처럼 총을 놓는 동작 — 손 표지의 motion_weights). " + \
-		"무기 자리 = 그 동작의 무기 위치 · 회전(● 따로 둠 · ↳ 상하체 합성의 상체 동작 것 · 기본). 조준 = 사격 때 허리 · 가슴을 돌리는 정도(흐림 = 기본). " + \
-		"행 누름 = 그 동작 틀기 · 두 번 누름 = 이 동작만 고치기 · 오른쪽 누름 = 맞추기 · 복사 · 붙여넣기 · 기본으로."
+	help.text = "행 누름 = 그 동작 보기 · 두 번 누름 = 그 동작만 고치기(적용 범위 = 이 동작만) · 오른쪽 누름 = 손에 맞추기 · 복사 · 붙여넣기 · 기본으로.\n" + \
+		"IK 비중 0 = 그 손이 총을 놓는 동작(수류탄 · 장전 · 맨손 달리기 · 피격). 무기 자리 = ● 따로 둠 · ↳ 상하체 합성의 상체 동작 것 · 기본. 조준 = 사격 때 총구를 표적 높이로(흐림 = 기본)."
 	right.add_child(help)
 	_fill_bones(PackedStringArray())
 	_fill_models()
@@ -602,7 +626,49 @@ func _build_ui() -> void:
 	_update_cam()
 
 
-## 미리보기 위 기즈모 도구 줄 — 유니티 툴바와 같은 자리 · 같은 단축키
+## 왼쪽 칸 단계 머리 — 번호 · 이름 · 한 줄 설명(무엇을 하는 곳인지 먼저 보이게)
+func _section(parent: Control, num: String, title: String, sub: String) -> void:
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.2, 0.24, 0.3)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 8
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 4
+	sb.set_corner_radius_all(3)
+	pc.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	pc.add_child(v)
+	var t := Label.new()
+	t.text = "%s   %s" % [num, title]
+	t.add_theme_font_size_override("font_size", 15)
+	t.add_theme_color_override("font_color", Color(0.96, 0.97, 1.0))
+	v.add_child(t)
+	_note(v, sub, Color(0.7, 0.76, 0.84), 11)
+	parent.add_child(pc)
+
+
+## 작은 설명 글(줄 바꿈)
+func _note(parent: Control, text: String, color: Color, size: int) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	parent.add_child(l)
+	return l
+
+
+## 표지(손 · 총구 · 견착 — 모든 동작 공통)를 고치는 단추 — 적용 범위가 "이 동작만"이면 잠근다(_update_pm_ui)
+func _marker_btn(parent: Control, text: String, tip: String, cb: Callable) -> Button:
+	var b := _btn(parent, text, tip, cb)
+	b.set_meta(&"tip", tip)
+	_marker_btns.append(b)
+	return b
+
+
+## 미리보기 위 도구 줄 — 유니티 툴바와 같은 자리 · 같은 단축키. 끝에 보기(돌려 보기 ↔ 도트 · 손 · 전신)
 func _build_gizmo_bar(parent: Control) -> void:
 	var bar := HFlowContainer.new()
 	parent.add_child(bar)
@@ -610,7 +676,7 @@ func _build_gizmo_bar(parent: Control) -> void:
 	for t in [[TransformGizmo.Tool.VIEW, "✋ Q", "Q — 보기: 손잡이 없음. 왼쪽 끌기 = 화면 옮기기"],
 			[TransformGizmo.Tool.MOVE, "✥ W 이동", "W — 이동: 축 화살표 · 평면 네모 · 가운데 네모(화면 평면)"],
 			[TransformGizmo.Tool.ROTATE, "⟳ E 회전", "E — 회전: 축 고리(고리를 따라 끈다) · 바깥 고리(화면 축) · 안쪽(자유)"],
-			[TransformGizmo.Tool.SCALE, "⤢ R 크기", "R — 크기: 축 끝 네모(로컬 축) · 가운데(전체 — 오른쪽 · 위로 끌면 커짐). 왼손 표지 · 소켓은 크기 없음"],
+			[TransformGizmo.Tool.SCALE, "⤢ R 크기", "R — 크기: 축 끝 네모(로컬 축) · 가운데(전체 — 오른쪽 · 위로 끌면 커짐). 손 표지 · 소켓은 크기 없음"],
 			[TransformGizmo.Tool.TRANSFORM, "▣ Y 변환", "Y — 변환: 이동 화살표 · 평면 + 회전 고리 + 가운데(전체 크기)"]]:
 		var b := Button.new()
 		b.text = String(t[1])
@@ -645,26 +711,10 @@ func _build_gizmo_bar(parent: Control) -> void:
 		sp.value_changed.connect(func(_v: float) -> void: _apply_snap())
 		bar.add_child(sp)
 		_snap_sp.append(sp)
-	# 무기 자리 — 모든 동작(기본 자리) ↔ 이 동작만(동작별 자리, 10-19)
 	bar.add_child(VSeparator.new())
-	var pl := Label.new()
-	pl.text = "무기 자리"
-	pl.tooltip_text = "기즈모 · 숫자 칸이 고치는 무기 자리 — 모든 동작(기본 자리) 또는 지금 동작만(동작별 자리)"
-	pl.mouse_filter = Control.MOUSE_FILTER_STOP
-	bar.add_child(pl)
-	var pg := ButtonGroup.new()
-	for m in [[false, "모든 동작", "기본 자리 — 따로 자리를 안 둔 동작은 모두 이 자리.\n지금 동작에 따로 자리가 있으면 보이는 자리 = 기본 자리 + 그 차이(옮기면 기본 자리가 바뀌고 차이는 그대로)"],
-			[true, "이 동작만", "지금 동작(동작 칸 · 오른쪽 표에서 고른 것)의 무기 자리만 — 기본 자리 · 다른 동작은 그대로. 위치 · 회전만(크기는 기본 자리 것)\n오른쪽 동작 표에서 행을 두 번 눌러도 된다. 게임에서는 동작이 바뀔 때 손 IK 비중과 함께 섞어 옮긴다"]]:
-		var b := Button.new()
-		b.text = String(m[1])
-		b.toggle_mode = true
-		b.button_group = pg
-		b.focus_mode = Control.FOCUS_NONE
-		b.tooltip_text = String(m[2])
-		var on: bool = m[0]
-		b.pressed.connect(func() -> void: set_per_motion(on))
-		bar.add_child(b)
-		_pm_btns.append(b)
+	_view_btn = _btn(bar, "도트 보기", "돌려 보기(가까이 · 기즈모) ↔ 도트 보기(게임 화면과 같은 저해상도 · 외곽선)", func() -> void: set_dot_mode(not _dot_mode))
+	_btn(bar, "손", "두 손 · 무기를 가까이", func() -> void: focus_hands())
+	_btn(bar, "전신", "몸 전체", func() -> void: focus_body())
 
 
 ## 도구 줄 단추 · 기즈모 칸을 지금 값으로
@@ -711,6 +761,8 @@ func _gizmo_target() -> Node3D:
 	if n == null or not (n is Node3D) or n is BoneAttachment3D:
 		return null
 	if n is DRGripMount3D and (n as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS:
+		return null
+	if _per_motion and _is_marker(n):           # 표지는 모든 동작 공통 — 이 동작만 범위에서 끌면 모든 동작이 바뀐다(10-21 "전부 다 뒤틀려")
 		return null
 	return _prev_node(n) as Node3D
 
@@ -884,6 +936,8 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 			set_pivot_mode(not _giz.pivot_mode)
 		KEY_F:
 			frame_selected()
+		KEY_SPACE:
+			toggle_play()
 		KEY_ESCAPE:
 			if not _giz.is_dragging():
 				return
@@ -1237,6 +1291,11 @@ func _show_xform() -> void:
 		_xf_title.text = "%s — %s 만(부모 %s 기준)" % [n.name, current_motion() if current_motion() != "" else "동작 없음", n.get_parent().name]
 		for sp in _scl:
 			sp.editable = false                  # 동작별 자리는 위치 · 회전만
+	elif _per_motion and _is_marker(n):
+		_show_xform_of(n)
+		for sp in _pos + _rot + _scl:
+			sp.editable = false
+		_xf_title.text = "%s — 표지는 모든 동작 공통이라 잠김(적용 범위 [모든 동작]에서 고침)" % n.name
 	else:
 		_show_xform_of(n)
 	_update_grip_ui()
@@ -1711,6 +1770,8 @@ func make_support_marker() -> Node3D:
 
 ## 그 손(0 = 왼손 · 1 = 오른손)의 지금 동작 · 시점 자리 · 회전(동작 그대로 — IK 전)을 고른 장비의 그 손 표지로(없으면 만든다)
 func make_hand_marker(side: int) -> Node3D:
+	if _marker_locked():
+		return null
 	var e := _equip_from(_node(_sel))
 	if e == null:
 		e = _weapon_equip()
@@ -1734,6 +1795,14 @@ func make_hand_marker(side: int) -> Node3D:
 	_set_status("%s 표지 = %s %d%% 의 %s(동작 그대로)%s" % [nm, current_motion(), int(_time_sl.value * 100.0), nm,
 		" — 지금은 무기가 %s 을 따라가 쉬는 표지(잡기를 바꾸면 씀)" % nm if grip_kind(e) == (1 if side == 0 else 0) else ""])
 	return cur
+
+
+## 표지(모든 동작 공통)를 고치려는데 적용 범위가 이 동작만 — 안내하고 막는다
+func _marker_locked() -> bool:
+	if not _per_motion:
+		return false
+	_set_status("표지(손 · 총구 · 견착)는 모든 동작 공통이라 \"이 동작만\" 범위에서는 잠깁니다 — 3 무기 자리의 적용 범위를 [모든 동작]으로 바꾸고 고치세요")
+	return true
 
 
 ## 지금 미리보기 자세에서 그 손바닥 자리 · 손 회전을 장비 e 기준으로(손 표지 자리) — 못 구하면 null
@@ -1941,6 +2010,8 @@ func set_aim_weight(motion: String, w: Variant) -> void:
 ## 조준 표지(총구 · 견착, 10-21)를 무기 아래에 만들고 고른다 — 이미 있으면 고르기만. 처음 자리 = 무기 메시에서 잰 자리
 ## (총구 = 총열 축 앞 끝 · +Z = 방향, 견착 = 개머리판 끝 가운데). 기즈모로 옮기면 레이 · 팔 몫의 축이 바로 따라온다(되돌리기 한 칸)
 func make_aim_marker(kind: String) -> Node3D:
+	if _marker_locked():
+		return null
 	var e := _equip_from(_node(_sel))
 	if e == null:
 		e = _weapon_equip()
@@ -1973,6 +2044,8 @@ func make_aim_marker(kind: String) -> Node3D:
 
 ## 총구 · 견착 표지를 지운다 — 무기 메시에서 다시 잰다(부모 유닛에서 온 표지는 숨김)
 func clear_aim_markers() -> void:
+	if _marker_locked():
+		return
 	var e := _equip_from(_node(_sel))
 	if e == null:
 		e = _weapon_equip()
@@ -2183,13 +2256,11 @@ func _prev_node(n: Node) -> Node:
 
 
 func _fill_motions(keep: String) -> void:
-	_motion_ob.clear()
 	if _prev == null:
+		_cur_motion = ""
 		return
 	var names := _prev.motion_names()
 	names.sort()
-	for n in names:
-		_motion_ob.add_item(n)
 	var want := keep if names.has(keep) else (DEFAULT_MOTION if names.has(DEFAULT_MOTION) else (names[0] if not names.is_empty() else ""))
 	_fill_motion_table()
 	if want != "":
@@ -2197,18 +2268,15 @@ func _fill_motions(keep: String) -> void:
 
 
 func current_motion() -> String:
-	if _motion_ob == null or _motion_ob.selected < 0:
-		return ""
-	return _motion_ob.get_item_text(_motion_ob.selected)
+	return _cur_motion
 
 
 ## 미리보기에서 그 동작을 튼다(섞기 없이 — 그 동작의 손 IK 비중 · 동작별 무기 자리)
 func play_motion(motion: String) -> void:
 	if _prev == null or motion == "":
 		return
-	for i in _motion_ob.item_count:
-		if _motion_ob.get_item_text(i) == motion:
-			_motion_ob.select(i)
+	_cur_motion = motion
+	_motion_lbl.text = motion
 	_prev.play_motion(motion, 0.0)
 	_acc = 0.0
 	_update_aim_label()                          # 조준 비중 0 동작이면 막대 옆 경고
@@ -2227,10 +2295,32 @@ func _seek(frac: float) -> void:
 		return
 	ap.seek(ap.get_animation(ap.current_animation).length * clampf(frac, 0.0, 1.0), true)
 	_time_sl.set_value_no_signal(clampf(frac, 0.0, 1.0))
+	_update_time_lbl()
 
 
+## 타임라인을 끌면 멈추고 그 프레임으로(끄는 동안 재생이 프레임을 덮지 않게)
 func _on_time(v: float) -> void:
+	if _playing:
+		toggle_play()
 	_seek(v)
+
+
+## 재생 ↔ 멈춤(타임라인 단추 · Space)
+func toggle_play() -> void:
+	_playing = not _playing
+	_play_btn.text = "⏸" if _playing else "▶"
+
+
+## 타임라인 초 = 지금 / 동작 길이
+func _update_time_lbl() -> void:
+	if _time_lbl == null or _prev == null:
+		return
+	var ap := _prev.get_animation_player()
+	if ap.current_animation == "":
+		_time_lbl.text = ""
+		return
+	var ln := ap.get_animation(ap.current_animation).length
+	_time_lbl.text = "%.2f / %.2f 초" % [_time_sl.value * ln, ln]
 
 
 ## 돌려 보기 ↔ 도트 보기(게임과 같은 3/4 방향 · 저해상도 · 외곽선). 기즈모는 돌려 보기에서만
@@ -2363,6 +2453,10 @@ func _process(delta: float) -> void:
 			var ap := _prev.get_animation_player()
 			if ap.current_animation != "":
 				_time_sl.set_value_no_signal(ap.current_animation_position / maxf(ap.get_animation(ap.current_animation).length, 0.001))
+				_update_time_lbl()
+	var pt := "⏸" if _playing else "▶"
+	if _play_btn.text != pt:                    # 검사 · 다른 길이 _playing 을 바로 바꿔도 단추가 따라오게
+		_play_btn.text = pt
 	if not _dot_mode:
 		var gt := _gizmo_target()
 		if _giz.target != gt:
@@ -2602,7 +2696,7 @@ func _fill_motion_table(report: Array = []) -> void:
 					it.set_tooltip_text(1, tip + "\n잰 뒤 무기 · 표지 자리가 바뀜 — [모든 동작 재기]")
 				elif float(d["ik_max"]) > 0.05 and float(d["weight"]) > 0.0:
 					it.set_custom_color(1, Color(0.95, 0.65, 0.3))
-					it.set_tooltip_text(1, tip + "\n팔이 표지에 안 닿는 시점이 있음(어깨 → 손목 목표 / 팔 길이 최대 %.2f) — [이 동작만] 으로 무기 자리를 옮기거나 [맞추기]" % float(d["reach_max"]))
+					it.set_tooltip_text(1, tip + "\n팔이 표지에 안 닿는 시점이 있음(어깨 → 손목 목표 / 팔 길이 최대 %.2f) — 행을 두 번 눌러(이 동작만) [손에 맞추기] 나 기즈모로" % float(d["reach_max"]))
 				else:
 					it.set_tooltip_text(1, tip)
 			else:
@@ -2704,37 +2798,56 @@ func set_per_motion(on: bool) -> void:
 	_fill_motion_table()
 	if on:
 		var e2 := _offset_equip()
-		_set_status("이 동작만 — %s 의 %s 자리를 고칩니다(기즈모 · 숫자 칸 · 띠의 [맞추기]). 다른 동작 · 기본 자리는 그대로" % [current_motion(), e2.name if e2 != null else "무기"]
-			if current_motion() != "" else "이 동작만 — 동작을 고르세요")
+		_set_status("적용 범위 = 이 동작만 — %s 의 %s 자리만 고칩니다(기즈모 · 숫자 칸 · [손에 맞추기]). 다른 동작 · 기본 자리는 그대로 · 표지는 잠김" % [current_motion(), e2.name if e2 != null else "무기"]
+			if current_motion() != "" else "적용 범위 = 이 동작만 — 오른쪽 표에서 동작을 고르세요")
 	else:
-		_set_status("모든 동작 — 기본 자리를 고칩니다")
+		_set_status("적용 범위 = 모든 동작 — 기본 자리를 고칩니다")
 
 
-## 위 도구 줄 단추 · 미리보기 띠 · 숫자 칸 아래 안내를 지금 상태로
+## 적용 범위 스위치 · 범위 한 줄 · [손에 맞추기] · 미리보기 테두리 · 꼬리표 · 표지 단추 잠금 · 숫자 칸 아래 안내를 지금 상태로
 func _update_pm_ui() -> void:
 	if _pm_banner == null:
 		return
 	for i in _pm_btns.size():
 		_pm_btns[i].set_pressed_no_signal(i == (1 if _per_motion else 0))
-	if _pm_btns.size() > 1:                     # 눌린 "이 동작만" = 미리보기 띠와 같은 주황(테마 여백은 그대로 — 틀을 덮으면 글자가 잘렸다)
+	if _pm_btns.size() > 1:                     # 눌린 "이 동작만" = 미리보기 테두리와 같은 주황(테마 여백은 그대로 — 틀을 덮으면 글자가 잘렸다)
 		_pm_btns[1].self_modulate = Color(1.0, 0.68, 0.32) if _per_motion else Color.WHITE
 	var e := _offset_equip()
 	var mo := current_motion()
 	var key := DRCharacter3D.offset_key(e, mo) if e != null else ""
+	var own: Array = DRCharacter3D.motion_offsets(e).keys() if e != null else []
+	var kind := grip_kind(e) if e != null else -1
+	var can_fit := e != null and mo != "" and kind >= 0 and kind < 3
 	_pm_banner.visible = _per_motion
+	_pm_frame.visible = _per_motion
+	var fit_tip := ""
 	if _per_motion:
+		var now := ""
 		if e == null:
 			_pm_label.text = "✎ 이 동작만 — 무기(장비)를 고르세요"
-			_pm_label.tooltip_text = _pm_label.text
 		elif mo == "":
-			_pm_label.text = "✎ 이 동작만 — 동작을 고르세요"
-			_pm_label.tooltip_text = _pm_label.text
+			_pm_label.text = "✎ 이 동작만 — 오른쪽 표에서 동작을 고르세요"
 		else:
-			var now := _offset_text(e, mo) if key == mo else ("아직 따로 없음 — " + _offset_text(e, mo)) if key != "" else "아직 기본 자리"
-			_pm_label.text = "✎ %s — %s" % [mo, now]             # 좁은 띠에서도 동작 · 차이가 먼저 보이게(장비 이름 · 설명은 풍선 도움말)
-			_pm_label.tooltip_text = "이 동작만 고치는 중: %s 의 %s 자리 — %s\n기즈모 · 숫자 칸 · [맞추기] 가 이 동작에만 저장된다. 기본 자리 · 다른 동작은 그대로" % [mo, e.name, now]
-		_pm_reset_btn.disabled = e == null or key != mo
-		_pm_fit_btn.disabled = e == null or mo == "" or grip_kind(e) == 3 or grip_kind(e) == 4
+			now = _offset_text(e, mo) if key == mo else ("아직 따로 없음 — " + _offset_text(e, mo)) if key != "" else "아직 기본 자리와 같음"
+			_pm_label.text = "✎ 이 동작만 — %s · %s" % [mo, now]
+		_scope_note.text = "기즈모 · 숫자 칸 · [손에 맞추기]가 %s 의 무기 자리만 고칩니다%s. 기본 자리 · 다른 동작은 그대로 · 표지(모든 동작 공통)는 잠김" % [
+			mo if mo != "" else "고른 동작", "(지금: %s)" % now if now != "" else ""]
+		_pm_fit_btn.text = "🤚 손에 맞추기 — %s 만" % mo if mo != "" else "🤚 손에 맞추기 — 이 동작만"
+		fit_tip = "지금 프레임에서 손이 총의 손 표지에 닿게 이 동작(%s)의 무기 자리를 자동으로 잡는다 — 이 동작에만 저장(되돌리기 한 칸)." % mo
+	else:
+		_scope_note.text = "기즈모 · 숫자 칸 · [손에 맞추기]가 기본 자리(모든 동작)를 고칩니다%s" % (
+			"" if own.is_empty() else " — 따로 자리를 둔 동작 %d개(%s)는 그 차이를 그대로 얹음" % [own.size(), ", ".join(PackedStringArray(own.slice(0, 3))) + (" …" if own.size() > 3 else "")])
+		_pm_fit_btn.text = "🤚 손에 맞추기 — 모든 동작"
+		fit_tip = "지금 프레임(%s)에서 손이 총의 손 표지에 닿게 기본 자리(모든 동작)를 자동으로 잡는다(되돌리기 한 칸)." % (mo if mo != "" else "동작 없음")
+	_pm_fit_btn.tooltip_text = fit_tip + "\n손에 든 무기 = 든 손을 축으로 돌려 다른 손이 표지에 닿게(쥔 손에서 안 미끄러짐) · 양손 = 두 표지의 가운데 · 방향을 두 손바닥에." + \
+		"\n두 손이 총에 있는 프레임에서 누르세요(타임라인을 멈추고 끌어 고름). 잘 안 맞으면 기즈모로 다듬기" + \
+		("\n— 고정(땅) 받침대 · 손 아닌 뼈 소켓의 장비는 자동이 없음(기즈모로)" if e != null and not can_fit and kind >= 3 else "")
+	_pm_fit_btn.disabled = not can_fit
+	_pm_reset_btn.visible = _per_motion
+	_pm_reset_btn.disabled = e == null or key != mo
+	for b in _marker_btns:
+		b.disabled = _per_motion
+		b.tooltip_text = String(b.get_meta(&"tip", "")) + ("\n— 잠김: 적용 범위가 \"이 동작만\". 표지는 모든 동작 공통이라 [모든 동작]에서 고친다" if _per_motion else "")
 	var note := ""
 	if e != null and mo != "" and _is_equip(_node(_sel)):
 		if _per_motion:
@@ -2807,7 +2920,13 @@ func paste_motion_offset(motion: String) -> void:
 ##   두 손 사이(양손) 무기: 두 표지의 가운데 · 방향을 두 손바닥의 가운데 · 방향으로(남는 길이 차는 두 손 IK 가 나눠 진다)
 ##   그 동작에서 한 손만 잡으면(다른 손 IK 비중 0) 그 손 표지를 손바닥 자리로 옮긴다. 고정(땅) · 손 아닌 뼈 소켓은 안 함(무기가 손을 안 따라감)
 ## 돌려주는 값 {motion, before: [왼손 cm, 오른손 cm], after: [...]} — 따라가는 손의 IK 뒤 손바닥 ↔ 표지(-1 = 안 따라감). 못 하면 {}
-func fit_motion_offset() -> Dictionary:
+## [손에 맞추기] — 적용 범위대로: 이 동작만 = 그 동작의 자리 · 모든 동작 = 기본 자리
+func fit_to_hands() -> Dictionary:
+	return fit_motion_offset(not _per_motion)
+
+
+## 지금 프레임에서 손이 총의 손 표지에 닿게 무기 자리를 잡는다 — to_base = 기본 자리(모든 동작) · 아니면 지금 동작의 동작별 자리
+func fit_motion_offset(to_base := false) -> Dictionary:
 	var e := _offset_equip()
 	var pe := _prev_node(e) as Node3D
 	var mo := current_motion()
@@ -2863,15 +2982,21 @@ func fit_motion_offset() -> Dictionary:
 	else:
 		c = Transform3D(Basis.IDENTITY, palms[follow[0]] - marks[0])
 	var anchor_p := pe.get_parent() as Node3D
-	var l2: Transform3D = anchor_p.global_transform.affine_inverse() * (c * pe.global_transform)     # 받침 기준 새 자리
-	set_motion_offset(e, mo, e.transform.affine_inverse() * l2, "장비: %s %s 자리 맞추기" % [e.name, mo])
+	var l2: Transform3D = anchor_p.global_transform.affine_inverse() * (c * pe.global_transform)     # 받침 기준 새 자리(보이는 자리)
+	if to_base:
+		_begin("장비: %s 기본 자리 손에 맞추기(%s)" % [e.name, mo])
+		_op_prop(e, "transform", l2 * _prev.get_equip_offset(pe).affine_inverse())     # 이 동작에 따로 자리가 있으면 그 차이를 뺀 기본 자리
+		_end(false)
+	else:
+		set_motion_offset(e, mo, e.transform.affine_inverse() * l2, "장비: %s %s 자리 맞추기" % [e.name, mo])
 	_seek(t)
 	var after := _hand_dists()
 	var txt := PackedStringArray()
 	for side in follow:
 		txt.append("%s 동작 그대로 %.1f → %.1f cm(IK 뒤 %.1f → %.1f)" % [DRCharacter3D.SIDE_NAMES[side], (before["raw"] as Array)[side], (after["raw"] as Array)[side],
 			(before["ik"] as Array)[side], (after["ik"] as Array)[side]])
-	_set_status("맞춤 — %s %d%% · %s · %s" % [mo, int(t * 100.0), _offset_text(e, mo), " · ".join(txt)])
+	_set_status("손에 맞춤 — %s · %s %d%% · %s · %s" % ["모든 동작(기본 자리)" if to_base else mo + " 만", mo, int(t * 100.0),
+		"기본 자리" if to_base else _offset_text(e, mo), " · ".join(txt)])
 	return {"motion": mo, "before": before["ik"], "after": after["ik"], "raw_before": before["raw"], "raw_after": after["raw"]}
 
 
@@ -2940,7 +3065,7 @@ func _on_mt_mouse(_pos: Vector2, button: int) -> void:
 	var own := DRCharacter3D.offset_key(e, _mt_menu_motion) == _mt_menu_motion
 	_mt_menu.clear()
 	_mt_menu.add_item("이 동작만 고치기", 0)
-	_mt_menu.add_item("이 동작에 맞추기(자동)", 1)
+	_mt_menu.add_item("손에 맞추기 — 이 동작만", 1)
 	_mt_menu.set_item_disabled(1, grip_kind(e) < 0 or grip_kind(e) >= 3)
 	_mt_menu.add_separator()
 	_mt_menu.add_item("무기 자리 복사", 2)
