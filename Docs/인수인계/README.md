@@ -83,6 +83,7 @@ P="C:/<경로>/SideProject"
 "$G" --headless --path "$P" --script res://addons/dot_rigger/tools/hub_smoke_cli.gd                          # ⑲ Dot Rigger 창(탭 3 · Ctrl+숫자, 창 없이 — 창으로 돌리면 그림도)
 "$G" --headless --path "$P" --script res://game/tools/view3d_smoke.gd -- --seconds=60 --squads=2 --seed=1941  # ㉑ 3D 게임 화면(병사 · 동작 · 소켓 무기 · 왼손 IK · 조준 IK)
 "$G" --headless --path "$P" --script res://addons/dot_rigger/tools/aim_check_cli.gd                         # ㉒ 조준 IK(10-21 — 사격 때 허리 · 가슴으로 총구를 표적에)
+"$G" --headless --path "$P" --script res://game/tools/equip_smoke.gd                                        # ㉓ 안건 F — 수정자 · 운용 장비(MG42) · 섞인 분대(10-21)
 python pipeline/check_editor.py --headless --sandbox=<저장소 통째 사본>                                       # ⑳ 실제 에디터 안 검사(창 없이 — 사본 project.godot 에 탐침을 잠깐 넣음)
 python pipeline/check_character.py source3d/characters/uniform_m36/uniform_m36.glb [--rest_time 0.42]      # ⑱ 캐릭터 실제 굽기 비교(샌드박스 Documents/1941 에서 돌림)
 ```
@@ -115,6 +116,7 @@ $P = "C:\<경로>\SideProject"
 | ⑳ `check_editor.py` | `EDITOR CHECK OK`(27항목) — ① 고른 유닛 씬이 열리고 그 루트를 고침 · 탭 창 Ctrl+Z 따라옴 · ② 기즈모 끌기 → 열린 씬 · 탭 창 Ctrl+Z / Ctrl+Y · 단축키 · 잡기 양손 → Ctrl+Z 원래 소켓(주인 그대로) → Ctrl+Y · 동작별 자리(이 동작만 끌기 → 열린 씬 장비 메타 · 기본 자리 그대로 · 저장에 담김 → Ctrl+Z 빠짐 → Ctrl+Y) · 조준(미리보기 사본만 돎 · 조준 비중 · 위 한계 → 열린 씬 루트 → Ctrl+Z / Ctrl+Y, 10-21) · ① ② 미리보기 소켓이 손뼈를 따라감 · ② 위치 칸 → 열린 씬 · 편집 중인 씬의 왼손 IK 목표가 따라감 · 소켓 더하기/되돌리기 · 저장 때 소켓의 뼈대 길이 씬 파일에 안 남음 · 닫고 다시 열면 같은 탭 · 에디터 오류 0(창 모드면 창 자리 검사도). **명령줄 검사가 못 보는 에디터 전용 길**(02 U18). ⚠ Documents/1941 샌드박스는 10-02 무렵 사본이라 `game/` 이 없다 — 저장소 통째 사본에 `--sandbox=` | ✓ (10-21, 창 없이 · 통째 사본 — 새 사본의 첫 실행은 셰이더 첫 컴파일 오류 줄로 FAIL, 두 번째부터 OK) |
 | ㉑ `view3d_smoke` | 마지막 줄 `VIEW3D SMOKE OK` — 병사 24명 · 무기 = 오른손 소켓 · 왼팔 IK · 멈춘 병사 0 % · 동작 따라 왼손 IK 붙임 ↔ 놓음 · 풀 돌려쓰기 · 복장 보기 4가지 · 조준 IK(화면을 0.25 배로 줄여 20 초 — 사격 · 조준 병사에 표적 99 % · 1 초마다 잰 수정자 결과 겨눌 방향과 0.00°) | ✓ (10-21) |
 | ㉒ `aim_check_cli` | 마지막 줄 `AIM CHECK OK`(29항목) — 조준 수정자 맨 앞 · kar98k 총구 · 기본 조준 비중(동작 표 사격 · 조준 상태) · 동작별 · 합성 = 상체 · 정면 / 위 / 아래 / 옆 표적 높낮이 0.1° 안 · 각으로(② 미리보기) · 한계 · 한 바퀴 평균 총구 · 흔들림 그대로 · 비중 0 · 끔 · 거둠 · 왼손 IK · 빠르기 · 섞기 · 돌림 · 배율 · 합성 · 엎드림 · 양손 받침대(사본 `_twohand_test.tscn` 이 있으면) · 고정 받침대는 안 함. 02 U44 | ✓ (10-21) |
+| ㉓ `equip_smoke` | 마지막 줄 `EQUIP SMOKE OK` — 수정자 쌓기 · 좌석 효율(최소 + (1 − 최소) × 숙련도) · 빈 장전 좌석(사수 혼자 장전 ×2) · 사수 사망 → 재착석 · 버려진 장비를 아군 · 적이 다시 운용 · 전장 MG42 팀(시드 1941 · 7 · 2024). `sim_smoke` 는 안건 F 전후 10 초마다 찍는 줄까지 같음. 02 U45 | ✓ (10-21) |
 | ⑱ `check_character.py` | `CHECK OK` + `pipeline/check/<이름>_sheet.png` 를 **눈으로** 본다(동작마다 · `--before <이전 glb>` 면 전 · 후 나란히). ★10-15 부터 **사람 몸으로만 시험**(UAL 마네킹 = 레거시 — 마네킹 줄 없앰, `ui_smoke_cli` 시험 모델도 human_base, `retarget_check_cli` 는 UAL 변환 검사라 돌리지 않음) | ✓ (10-15 human_base) |
 | `bake_cli` → `preview_cli` | `결과: { "ok": true ... }` → 구운 씬이 트랙 60개로 재생 | ✓ |
 | `compare_cli` | 3D 렌더 대비 2D 순서 합성 불일치 %. 합격선 없음, **각도 비교용** | 192px·Idle·자동 순서, **09-15 셰이더 수정(02 C9) 후**: 정측면 9.4% · −45° **3.9%** · −55° 7.8% · −65° 11.4% (09-14 의 4.3~5.9% 는 3D 기준이 틀린 값) |
