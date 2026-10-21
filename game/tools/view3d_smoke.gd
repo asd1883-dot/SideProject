@@ -135,8 +135,9 @@ func _run() -> void:
 	var aim_want := 0                      # 적을 겨눈(두뇌 표적) 채 조준 비중이 있는 동작(사격 · 조준)인 병사 · 프레임
 	var aim_frames := 0                    # 그중 캐릭터에 조준 표적이 간 것(표적은 동작 박자 — 초당 step_hz 번 — 에 넣는다)
 	var aim_solved := 0                    # 1 초마다 조준하던 병사의 뼈대를 바로 갱신해 잰 수(이 검사는 프레임을 안 넘겨 뼈대 갱신이 미뤄져 있다)
-	var aim_err := 0.0                     # 그때 돌린 총구 기준 ↔ 겨눌 방향 최대(한계에 걸린 것 빼고)
+	var aim_err := 0.0                     # 그때 돌린 총구 기준 ↔ 겨눌 방향 최대(다 돈 것만 — 한계 · 따라가는 중 · 비중 섞는 중 빼고)
 	var aim_clamped := 0
+	var aim_moving := 0                    # 표적이 바뀌어 따라가는 중(초당 aim_speed_deg) · 동작이 바뀌어 비중을 섞는 중
 	var aim_pitch := 0.0                   # 돌린 위아래 각 최대(절댓값)
 	for k in int(20.0 / DT):
 		bf.step(DT)
@@ -164,6 +165,8 @@ func _run() -> void:
 				aim_pitch = maxf(aim_pitch, absf(float(ar["pitch"])))
 				if bool(ar["clamped"]):
 					aim_clamped += 1
+				elif float(ar["lag"]) > 0.01 or float(ar["weight"]) < 0.999:
+					aim_moving += 1
 				else:
 					aim_err = maxf(aim_err, float(ar["err"]))
 		for team in 2:
@@ -171,10 +174,10 @@ func _run() -> void:
 				bf.deploy_squad(team, type)
 	view.scale = Vector2.ONE
 	var aim_pct := 100.0 * float(aim_frames) / maxf(float(aim_want), 1.0)
-	print("조준  사격 · 조준 동작 병사 · 프레임 %d 중 조준 표적 %.1f %% · 1 초마다 잰 %d번: 겨눌 방향과 최대 %.2f° · 위아래 돌림 최대 %.1f° · 한계 걸림 %d" % [
-		aim_want, aim_pct, aim_solved, aim_err, aim_pitch, aim_clamped])
-	if aim_solved == 0 or aim_err > 1.0:
-		fails.append("조준 IK 가 표적으로 안 돌림(잰 %d번 · 최대 %.2f°)" % [aim_solved, aim_err])
+	print("조준  사격 · 조준 동작 병사 · 프레임 %d 중 조준 표적 %.1f %% · 1 초마다 잰 %d번: 다 돈 것 %d번 겨눌 방향과 최대 %.2f° · 따라가는 중 %d · 한계 걸림 %d · 위아래 돌림 최대 %.1f°" % [
+		aim_want, aim_pct, aim_solved, aim_solved - aim_moving - aim_clamped, aim_err, aim_moving, aim_clamped, aim_pitch])
+	if aim_solved - aim_moving - aim_clamped <= 0 or aim_err > 0.5:
+		fails.append("조준 IK 가 표적으로 안 돌림(잰 %d번 · 다 돈 것 최대 %.2f°)" % [aim_solved, aim_err])
 	if aim_want == 0:
 		fails.append("사격 · 조준하는 병사가 없음")
 	elif aim_pct < 80.0:
