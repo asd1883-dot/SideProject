@@ -48,7 +48,7 @@
 | `pipeline/` | ✓ | 자산 공정 스크립트(Python · Blender) · 기준 그림(`reference/`). `.gdignore` 로 Godot 가 무시. AI 원본 `comfy/*.glb` · 검사 그림 `check/` 은 저장소 밖([01 §4-29~4-31](01_설계와_구조.md)) |
 | `source3d/characters/` | ✓ | AI 사람 몸 · 군복을 기준 뼈대에 붙인 결과(`human_base` · `uniform_m36`). `.import` 에 뼈 이름표가 있어 **같이 커밋**. 칠하기 파일 `<이름>.parts.json` 도 같이 |
 | `source3d/weapons/mp40/` | ✓ | AI 생성 MP40 자산(ComfyUI · asset.json · 정규화 결과) |
-| `source3d/weapons/kar98k/` · `equip/kar98k/` · `equip/kar98_obj/` | ✓(10-21) | 무료로 받은 Kar98k 모델(원본 묶음 `Desktop\kar98k` — 압축 · 폴더 어디에도 라이선스 파일 없음) · 무기 씬 `kar98k.tscn` · 구운 그림. 10-15 ~ 10-20 은 라이선스 확인 전이라 `.gitignore` 였고 **10-21 사용자 결정으로 올림**("무료로 받은 거, 산 에셋은 하나도 없음") |
+| `source3d/weapons/kar98k/` · `equip/kar98k/` · `equip/kar98_obj/` | ✓(10-21) | Sketchfab 무료 Kar98k(Ecler, **CC BY 4.0 — 출처 표기 의무**, 원본 묶음 `Desktop\kar98k` 엔 라이선스 파일 없음 · 페이지에서 확인) · 무기 씬 `kar98k.tscn` · 구운 그림. 10-15 ~ 10-20 은 라이선스 확인 전이라 `.gitignore` 였고 **10-21 사용자 결정으로 올림** + 출처 `CREDITS.md` · 폴더 안 `CREDITS.txt`. 게임을 낼 때 크레딧 화면에도 적을 것 |
 | `equip/` · `outfits/` | ✓ | 구운 장비 · 구운 복장(`outfits/<이름>/outfit.json`) |
 | `human.tres` | ✓ | 기본 몸(human_base) 프리셋 — 사용자가 지금 세트를 구운 설정 |
 | `puppet_test/` | △ | 검증 도구 산출물(도구가 다시 만든다). ⚠ 이 저장소에는 첫 커밋 때 77개가 같이 올라갔고 `.gitignore` 에도 없어서, 검증 도구를 돌리면 추적 파일이 바뀐다. `.gitignore` 에 넣고 추적에서 뺄지는 결정 필요 |

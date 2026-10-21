@@ -1,0 +1,8 @@
+"Kar98k" (https://sketchfab.com/3d-models/kar98k-96b7387fe49b4dd491cc8277f765527a)
+by Ecler (https://sketchfab.com/ecler)
+is licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+
+Modified: material file (Kar98_obj.mtl) recreated, normalized (length, origin at grip, axes) and converted to glTF (kar98k.glb),
+weapon scene with a left-hand target (kar98k.tscn), rendered to pixel sprites (equip/kar98k, equip/kar98_obj).
+
+출처 표기 의무(CC BY 4.0): 이 모델을 쓰는 게임 · 영상의 크레딧에 위 문장을 적는다. 저장소 전체 출처는 CREDITS.md.
