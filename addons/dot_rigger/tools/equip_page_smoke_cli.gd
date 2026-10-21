@@ -16,6 +16,8 @@ extends SceneTree
 ##     숫자 칸 · 게임 길 섞어 옮기기 · 맞추기(양손 · 소켓) · 복사 · 붙여넣기 · 기본으로 · asset.json 왕복
 ## [10] 조준 IK(10-21): 조준 칸 = 유닛 값 · 미리보기(높낮이 · 옆 → 허리 · 가슴) · 표적 십자 · 총구 선 · 한계 · 한계 칸 · 비중 0 동작 안내 ·
 ##     동작 표 조준 칸(기본 · 따로 · 합성 = 상체) · 비중 절반 · 기본으로 · 끔(잠김) · 미리보기 끔
+## [11] 화면 정리(10-21 사용자 "직관적인 UI/UX — 전체 동작 · 이 동작만 버튼 단일화 · 맞추기는 뭘 맞추나 · 멈춤 재생 · 스크롤바는 왜"): 적용 범위 스위치는 한 곳 ·
+##     [손에 맞추기] = 범위대로(모든 동작 = 기본 자리 · 이 동작만 = 그 동작 자리) · 표지 잠금(이 동작만) · 타임라인(동작 이름 · 초 · 끌면 멈춤 · Space) · 상태 줄은 가운데
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -268,6 +270,86 @@ func _snap_diff(a: Dictionary, b: Dictionary) -> Array:
 		mm = maxf(mm, ta.origin.distance_to(tb.origin) * 1000.0)
 		dg = maxf(dg, rad_to_deg(ta.basis.get_rotation_quaternion().angle_to(tb.basis.get_rotation_quaternion())))
 	return [mm, dg]
+
+
+## 이 노드 아래의 모든 단추
+func _buttons_in(n: Node) -> Array[Button]:
+	var out: Array[Button] = []
+	for c in n.find_children("*", "Button", true, false):
+		out.append(c as Button)
+	return out
+
+
+## [11] 화면 정리(10-21)
+func _ui_checks(page: DREquipPage) -> void:
+	print("[11] 화면 정리 — 적용 범위 한 곳 · 손에 맞추기(범위대로) · 표지 잠금 · 타임라인 · 상태 줄")
+	page.select_unit(BASE)
+	await _frames(3)
+	page._playing = false
+	var w := page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	var scope_btns := _buttons_in(page).filter(func(b: Button) -> bool: return b.text.contains("모든 동작") and b.toggle_mode)
+	var old_fit := _buttons_in(page).filter(func(b: Button) -> bool: return b.text == "맞추기" or b.text == "끝" or b.text.contains("지금 동작으로 무기 맞추기"))
+	_check(scope_btns.size() == 1 and page._pm_btns.size() == 2 and old_fit.is_empty() and page._pm_banner.get_child_count() == 1,
+		"적용 범위 스위치 = 한 곳(%d) · 옛 [맞추기] [끝] [지금 동작으로 무기 맞추기] 없음 · 미리보기 꼬리표에 단추 없음" % scope_btns.size())
+	page.set_per_motion(false)
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	_check(page._pm_fit_btn.text.contains("모든 동작") and page._scope_note.text.contains("기본 자리") and not page._pm_reset_btn.visible and not page._pm_frame.visible,
+		"모든 동작: [%s] · 한 줄「%s」 · [이 동작 기본으로] 숨김 · 테두리 없음" % [page._pm_fit_btn.text, page._scope_note.text.left(30)])
+	# 손에 맞추기 — 모든 동작 = 기본 자리(동작별 자리 안 생김). Rifle_Idle 은 동작의 왼손이 총에서 20 cm
+	page.play_motion("Rifle_Idle")
+	page._seek(0.3)
+	var b0 := w.transform
+	var fr := page.fit_to_hands()
+	var rb := float((fr.get("raw_before", [0, 0]) as Array)[0])
+	var ra := float((fr.get("raw_after", [99, 99]) as Array)[0])
+	_check(not fr.is_empty() and ra < rb * 0.5 and not w.transform.is_equal_approx(b0) and DRCharacter3D.motion_offsets(w).is_empty() and page._status.text.contains("모든 동작"),
+		"손에 맞추기(모든 동작) Rifle_Idle: 기본 자리가 바뀜 · 동작별 자리 안 생김 · 왼손 동작 그대로 %.1f → %.1f cm · 「%s」" % [rb, ra, page._status.text.left(40)])
+	w.transform = b0
+	page._sync_preview()
+	# 이 동작만
+	page.set_per_motion(true)
+	page.play_motion("Rifle_Idle")
+	page._seek(0.3)
+	var fr2 := page.fit_to_hands()
+	_check(not fr2.is_empty() and w.transform.is_equal_approx(b0) and DRCharacter3D.offset_key(w, "Rifle_Idle") == "Rifle_Idle" and page._pm_fit_btn.text.contains("Rifle_Idle 만")
+		and page._pm_frame.visible and page._pm_reset_btn.visible and not page._pm_reset_btn.disabled,
+		"이 동작만: [%s] · 기본 자리 그대로 · Rifle_Idle 만 따로 자리 · 주황 테두리 · [이 동작 기본으로] 켜짐" % page._pm_fit_btn.text)
+	page.reset_motion_offset("Rifle_Idle")
+	# 표지 잠금(이 동작만) — 표지는 모든 동작 공통
+	var mk := DRCharacter3D.find_hand_marker(w, 0)
+	var mx := mk.transform
+	var all_locked := page._marker_btns.size() >= 5 and page._marker_btns.all(func(b: Button) -> bool: return b.disabled)
+	var made := page.make_hand_marker(0)
+	page._select_node(page._root.get_path_to(mk))
+	var giz_none := page._gizmo_target() == null
+	var fields_locked := not page._pos[0].editable and not page._rot[0].editable
+	_check(all_locked and made == null and mk.transform.is_equal_approx(mx) and giz_none and fields_locked and page._xf_title.text.contains("잠김"),
+		"이 동작만이면 표지 잠김: 단추 %d개 꺼짐 · [왼손 표지 ← 지금 손] 안 됨 · 기즈모 없음 · 숫자 칸 잠김 · 「%s」" % [page._marker_btns.size(), page._xf_title.text.left(30)])
+	page.set_per_motion(false)
+	page._select_node(page._root.get_path_to(mk))
+	_check(page._marker_btns.all(func(b: Button) -> bool: return not b.disabled) and page._gizmo_target() != null and page._pos[0].editable, "모든 동작이면 표지 단추 · 기즈모 · 숫자 칸 다시 켜짐")
+	# 타임라인 — 동작 이름 · 초 · 끌면 멈춤 · Space
+	page._select_node(page._root.get_path_to(w))
+	page.play_motion("Firing_Rifle")
+	page._seek(0.5)
+	var ln := page._prev.get_animation_player().get_animation("Firing_Rifle").length
+	_check(page._motion_lbl.text == "Firing_Rifle" and page.current_motion() == "Firing_Rifle" and page._time_lbl.text == "%.2f / %.2f 초" % [ln * 0.5, ln],
+		"타임라인: 동작 이름「%s」 · 초「%s」" % [page._motion_lbl.text, page._time_lbl.text])
+	page._playing = true
+	page._time_sl.value = 0.25
+	_check(not page._playing and absf(page._prev.get_animation_player().current_animation_position - ln * 0.25) < 0.01, "프레임을 끌면 멈추고 그 프레임(0.25)")
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_SPACE
+	ev.pressed = true
+	page._unhandled_key_input(ev)
+	var on1 := page._playing
+	page._unhandled_key_input(ev)
+	await _frames(2)
+	_check(on1 and not page._playing and page._play_btn.text == "▶", "Space = 재생 ↔ 멈춤 · 단추 ▶ / ⏸")
+	_check(page._status.get_parent() == page._info.get_parent() and page._status.get_parent() == page._time_sl.get_parent().get_parent(), "상태 줄 = 가운데(타임라인 아래 — 왼쪽 칸 스크롤에 안 가림)")
+	page._playing = false
 
 
 ## [8-2] 잡기 오가기(10-21) — 사용자: "잡기 오른손 · 왼손 · 양손을 엄청 번갈아 움직이면 세팅된 게 전부 망가져".
@@ -987,6 +1069,7 @@ func _run() -> void:
 	await _grip_memory_checks(page)
 	await _offset_checks(page)
 	await _aim_checks(page)
+	await _ui_checks(page)
 
 	# 치우기
 	page._drop_root()
