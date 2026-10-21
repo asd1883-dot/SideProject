@@ -116,8 +116,10 @@ func _run() -> void:
 			mods.append(String(c.name))
 	_check(not mods.is_empty() and mods[0] == "DR_AimSolver", "조준 수정자가 맨 앞 — %s" % ", ".join(PackedStringArray(mods)))
 	var mz := DRCharacter3D.find_muzzle(ch.get_weapon_node())
-	_check(not mz.is_empty() and absf((mz[0] as Vector3).z - 0.764) < 0.01 and (mz[1] as Vector3).is_equal_approx(Vector3.BACK),
-		"kar98k 총구 = +Z 앞 끝 %s" % str(mz))
+	_check(not mz.is_empty() and absf((mz[0] as Vector3).z - 0.764) < 0.01 and absf((mz[0] as Vector3).y - 0.045) < 0.01 and (mz[1] as Vector3).is_equal_approx(Vector3.BACK)
+		and absf((mz[2] as Vector3).z + 0.346) < 0.01 and (mz[2] as Vector3).y < -0.01,
+		"kar98k 총구 = +Z 앞 끝의 총열 축(원점보다 %.1f cm 위 — 10-21 사용자 \"조준선과 총구가 안 맞네\") · 견착점 = 개머리판 끝 가운데(%.1f cm 아래) %s" % [
+		(mz[0] as Vector3).y * 100.0, -(mz[2] as Vector3).y * 100.0, str(mz)])
 
 	print("[2] 기본 조준 비중")
 	var expect := {"Firing_Rifle": 1.0, "Crouch_Idle+Firing_Rifle": 1.0, "Prone_Firing_Rifle": 1.0, "Rifle_Idle": 0.0, "Sprint": 0.0, "Walk_With_Rifle": 0.0}
@@ -134,30 +136,28 @@ func _run() -> void:
 	print("[3] 표적 방향")
 	_start(ch, "Firing_Rifle")
 	var no_aim := _upper_pose(ch)
-	for c in [[0.0, 0.0, "정면"], [0.0, 25.0, "위 25°"], [0.0, -20.0, "아래 20°"], [12.0, 5.0, "옆 12° · 위 5°"], [-12.0, 0.0, "반대 옆 12°"]]:
+	var hdir0 := ch.muzzle_world()[1] as Vector3       # 조준 전 실제 총구의 좌우 방향
+	for c in [[0.0, 0.0, "정면"], [0.0, 25.0, "위 25°"], [0.0, -20.0, "아래 20°"], [12.0, 5.0, "옆으로 12° 벗어난 표적 · 위 5°"]]:
 		var tp := _target(ch, c[0], c[1])
 		ch.set_aim_target(tp, true)
 		_force(ch)
 		var r := ch.aim_report()
 		var el_t := _elev(ch.global_transform.basis.inverse() * (tp - ch.to_global(r.get("muzzle", Vector3.ZERO))))   # 총구에서 본 표적 높낮이
 		var el_m := _elev(r.get("dir", Vector3.ZERO))
-		_check(not r.is_empty() and float(r["err"]) < 0.5 and absf(el_m - el_t) < 0.5 and absf(float(r["yaw"]) - float(c[0])) < 1.5 and not bool(r["clamped"]),
-			"%s — 총구 높낮이 %.1f° (표적 %.1f°) · 돌림 옆 %.1f° · 위아래 %.1f° (동작 원래 옆 %.1f° · 높낮이 %.1f°)" % [c[2], el_m, el_t,
-			float(r.get("yaw", 0)), float(r.get("pitch", 0)), float(r.get("base_yaw", 0)), float(r.get("base_pitch", 0))])
-	ch.set_aim_angles(6.0, 12.0, true)
+		var hd := ch.muzzle_world()[1] as Vector3
+		var side := rad_to_deg(Vector2(hd.x, hd.z).angle_to(Vector2(hdir0.x, hdir0.z)))     # 좌우는 안 돈다(횡스크롤 — 10-21 사용자 "옆은 필요 없는 것 같아")
+		_check(not r.is_empty() and float(r["err"]) < 0.5 and absf(el_m - el_t) < 0.5 and absf(side) < 1.0 and not bool(r["clamped"]),
+			"%s — 총구 높낮이 %.1f° (표적 %.1f°) · 든 각 %+.1f° · 좌우 그대로(%.2f°) · 동작 원래 높낮이 %.1f°" % [c[2], el_m, el_t,
+			float(r.get("pitch", 0)), side, float(r.get("base_pitch", 0))])
+	ch.set_aim_elevation(12.0, true)
 	_force(ch)
 	var ra := ch.aim_report()
-	_check(not ra.is_empty() and absf(_elev(ra["dir"]) - 12.0) < 0.3 and absf(float(ra["yaw"]) - 6.0) < 0.1,
-		"각으로(② 탭 미리보기): 옆 6° · 높낮이 12° → 돌림 옆 %.1f° · 총구 높낮이 %.1f°" % [float(ra.get("yaw", 0)), _elev(ra.get("dir", Vector3.ZERO))])
+	_check(not ra.is_empty() and absf(_elev(ra["dir"]) - 12.0) < 0.3, "높낮이로(② 탭 미리보기): 12° → 총구 높낮이 %.1f°" % _elev(ra.get("dir", Vector3.ZERO)))
 	ch.set_aim_target(_target(ch, 0.0, 70.0), true)
 	_force(ch)
 	var rl := ch.aim_report()
 	_check(bool(rl.get("clamped", false)) and absf(float(rl["pitch"]) - ch.aim_up_deg) < 0.5,
 		"위 70° = 한계 %.0f° 에서 멈춤 — 돌림 %.1f° (필요 %.1f°)" % [ch.aim_up_deg, float(rl.get("pitch", 0)), float(rl.get("want_pitch", 0))])
-	ch.set_aim_target(_target(ch, 40.0, 0.0), true)
-	_force(ch)
-	var rs := ch.aim_report()
-	_check(bool(rs.get("clamped", false)) and absf(float(rs["yaw"]) - ch.aim_side_deg) < 0.5, "옆 40° = 한계 %.0f° — 돌림 %.1f°" % [ch.aim_side_deg, float(rs.get("yaw", 0))])
 
 	print("[4] 실제 총구 · 동작의 흔들림")
 	ch.clear_aim_target(true)
@@ -244,7 +244,7 @@ func _run() -> void:
 	var turn := {}
 	for share in [0.0, 0.7, 1.0]:
 		ch9.aim_arm_share = share
-		ch9.set_aim_angles(0.0, 25.0, true)
+		ch9.set_aim_elevation(25.0, true)
 		var up := _upper_pose(ch9)
 		var r9 := ch9.aim_report()
 		var el := _elev(ch9.muzzle_world()[1])
@@ -281,7 +281,7 @@ func _run() -> void:
 		_check(not hl.is_empty() and not hr.is_empty() and float(hl["ik"]) < float(hl0.get("ik", 0)) + 0.01 and float(hr["ik"]) < float(hr0.get("ik", 0)) + 0.01,
 			"두 손 IK 뒤 왼 %.2f · 오른 %.2f cm — 조준 전 %.2f · %.2f cm 보다 나빠지지 않음" % [float(hl.get("ik", 9)) * 100.0, float(hr.get("ik", 9)) * 100.0,
 			float(hl0.get("ik", 9)) * 100.0, float(hr0.get("ik", 9)) * 100.0])
-		two.set_aim_angles(0.0, 25.0, true)
+		two.set_aim_elevation(25.0, true)
 		_force(two)
 		var el2 := _elev(two.muzzle_world()[1])
 		_check(absf(el2 - 25.0) < 1.5 and float(two.aim_report().get("arm_pitch", 0)) > 1.0,

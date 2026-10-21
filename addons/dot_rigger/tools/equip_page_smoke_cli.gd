@@ -543,7 +543,8 @@ func _aim_checks(page: DREquipPage) -> void:
 	await _frames(3)
 	var r0 := page._root
 	_check(page._aim_chk.button_pressed == r0.aim_enabled and r0.aim_enabled and absf((page._aim_sp["aim_up_deg"] as SpinBox).value - r0.aim_up_deg) < 0.01,
-		"조준 칸 = 유닛 값(켬 · 위 한계 %.0f° · 아래 %.0f° · 옆 %.0f° · 빠르기 %.0f°/s)" % [r0.aim_up_deg, r0.aim_down_deg, r0.aim_side_deg, r0.aim_speed_deg])
+		"조준 칸 = 유닛 값(켬 · 위로 최대 %.0f° · 아래로 최대 %.0f° · 빠르기 %.0f°/s) · 옆 칸 없음 · 설명 줄" % [r0.aim_up_deg, r0.aim_down_deg, r0.aim_speed_deg])
+	_check(not page._aim_sp.has("aim_side_deg") and DREquipPage.AIM_HELP.contains("최대") and r0.get("aim_side_deg") == null, "옆(좌우) 조준 없음 — 횡스크롤(10-21 사용자 \"옆은 필요 없는 것 같아\")")
 	page._playing = false
 	# 조준 비중 0 동작에서 켜면 조준하는 동작으로 바꾼다(10-21 사용자 "토글 누르고 막 끌었는데 변화 없는데?" — 사용자 동작 표의 Rifle_Aiming_Idle 이 0)
 	page.play_motion("Rifle_Idle")
@@ -554,7 +555,6 @@ func _aim_checks(page: DREquipPage) -> void:
 	page.set_aim_preview(false)
 	page.play_motion("Firing_Rifle")
 	page._seek(0.3)
-	page._aim_side_sl.set_value_no_signal(0.0)
 	page._aim_height_sl.set_value_no_signal(0.0)
 	var marks_off := _mark_count(page)
 	page._aim_height_sl.value = 20.0                 # 꺼진 채 끌면 켜진다
@@ -562,16 +562,16 @@ func _aim_checks(page: DREquipPage) -> void:
 	_check(page._aim_preview, "꺼진 채 높낮이를 끌면 조준 미리보기가 켜짐")
 	var ar := page._prev.aim_report()
 	_check(page._aim_btn.button_pressed and not ar.is_empty() and absf(_elev(ar["dir"]) - 20.0) < 0.5 and page._aim_lbl.text.contains("+20"),
-		"조준 미리보기 높낮이 +20° → 총구 높낮이 %.1f° · 허리 · 가슴 돌림 위아래 %+.1f°「%s」" % [_elev(ar.get("dir", Vector3.ZERO)), float(ar.get("pitch", 0)), page._aim_lbl.text])
+		"조준 미리보기 표적 높이 +20° → 총구 높낮이 %.1f° · 든 각 %+.1f°「%s」" % [_elev(ar.get("dir", Vector3.ZERO)), float(ar.get("pitch", 0)), page._aim_lbl.text])
 	page._update_info()
 	_check(page._info.text.contains("(팔 +") and page._info.text.contains("허리 · 가슴"), "정보 줄: …%s" % page._info.text.right(80))
 	var marks_on := _mark_count(page)
 	_check(marks_on == marks_off + 14, "미리보기 표시 — 표적 십자 · 총구 선 · 견착점 십자(선 정점 %d → %d)" % [marks_off, marks_on])
-	page._aim_side_sl.value = 10.0
-	await _frames(1)
-	ar = page._prev.aim_report()
-	_check(absf(float(ar.get("yaw", 0)) - 10.0) < 0.2, "옆 +10° → 돌림 옆 %+.1f°" % float(ar.get("yaw", 0)))
-	page._aim_side_sl.value = 0.0
+	# 총구 선이 실제 총구(총열 축)에서 나간다 — 10-21 사용자 "조준선과 총구가 안 맞네? 위치가"
+	var mw := page._prev.muzzle_world()
+	var wn := page._prev.get_weapon_node()
+	var tip_local := wn.global_transform.affine_inverse() * (mw[0] as Vector3)
+	_check(absf(tip_local.y - 0.045) < 0.01 and absf(tip_local.z - 0.764) < 0.01, "총구 선 시작 = 총열 축 앞 끝(무기 로컬 y %.1f cm · z %.1f cm)" % [tip_local.y * 100.0, tip_local.z * 100.0])
 	page._aim_height_sl.value = 60.0
 	await _frames(1)
 	ar = page._prev.aim_report()
