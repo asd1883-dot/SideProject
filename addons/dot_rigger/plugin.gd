@@ -4,12 +4,12 @@ extends EditorPlugin
 ## Dot Rigger — 프로젝트 > 도구 메뉴에 창 하나를 띄운다.
 ## 창(DRHubWindow) 안에 탭 페이지: ① 유닛 · ② 장비(뼈 소켓) · ③ 복장 — 10-16 셋 다 3D(예전 2D 굽기 페이지는 뺐다).
 ## (10-06 이전에는 기능마다 창이 따로였다 — 여러 창을 껐다 켜는 게 번거로워 한 창의 탭으로 합쳤다)
-## 3D 노선(10-15): 같은 메뉴의 "3D 동작 내보내기" = 게임 동작 표의 동작을 3D 캐릭터용 AnimationLibrary 로 저장(DRMotionExporter).
-## 동작 표(DRMotionTable)를 인스펙터에서 열면 상태별 편집 화면(동작 여러 개 · 비중 % · 상하체 합성 — ui/motion_table_editor.gd, 10-16).
+## 동작 표(DRMotionTable)를 인스펙터에서 열면 상태별 편집 화면(동작 여러 개 · 비중 % · 상하체 합성 · [3D 동작 내보내기] — ui/motion_table_editor.gd, 10-16).
+## (10-15 에 같은 메뉴에 "3D 동작 내보내기" 를 두었으나 10-21 뺐다 — 늘 기본 동작 표만 · 저장 안 한 고침을 안 읽어, 지금 보는 표를 내보내는
+##  동작 표 화면의 버튼과 겹치고 헷갈렸다. 사용자 "3D 동작 내보내기는 왜 드롭다운 원소에 추가시켜 놓은 거야?" → "엉"(빼기). 명령줄은 tools/export_motions_cli.gd)
 
 const MENU_ITEM := "Dot Rigger"
 const MENU_RESET := "Dot Rigger — 개발 내용 갱신"
-const MENU_MOTIONS := "Dot Rigger — 3D 동작 내보내기"
 
 var _hub: DRHubWindow
 var _motion_inspector: DRMotionTableInspector
@@ -18,7 +18,6 @@ var _motion_inspector: DRMotionTableInspector
 func _enter_tree() -> void:
 	add_tool_menu_item(MENU_ITEM, _open)
 	add_tool_menu_item(MENU_RESET, _reopen)
-	add_tool_menu_item(MENU_MOTIONS, _export_motions)
 	_motion_inspector = DRMotionTableInspector.new()
 	add_inspector_plugin(_motion_inspector)
 	# 추가 동작 파일에 BoneMap 자동 지정(DRBoneMapAuto) — 가져오기가 끝날 때마다 + 켤 때 한 번 전체
@@ -29,7 +28,6 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	remove_tool_menu_item(MENU_ITEM)
 	remove_tool_menu_item(MENU_RESET)
-	remove_tool_menu_item(MENU_MOTIONS)
 	if _motion_inspector != null:
 		remove_inspector_plugin(_motion_inspector)
 		_motion_inspector = null
@@ -79,38 +77,3 @@ func _open() -> void:
 func _reopen() -> void:
 	_free_window()
 	print("[Dot Rigger] 개발 내용 갱신 — 창을 다시 열면 새 코드로 뜹니다.")
-
-
-## 3D 동작 내보내기(10-15) — 명령줄 도구(tools/export_motions_cli.gd)와 같은 일을 기본값으로:
-## 프리셋 UAL1_preset.tres 의 처리(추가 동작 · 손 맞춤 · 비틀림 · 제자리 · 합성)를 거친 동작 중 게임 동작 표(game/units/rifleman_motions.tres)에
-## 적힌 것을 game/motions/rifleman_anims.res 로 저장한다. 동작 표를 고치거나 Mixamo 동작을 새로 받은 뒤 누른다. 몇 초 걸린다(그동안 에디터가 멈춘다)
-func _export_motions() -> void:
-	var ex := DRMotionExporter.new()
-	var t0 := Time.get_ticks_msec()
-	var res := ex.run(EditorInterface.get_base_control())
-	var lines := PackedStringArray()
-	if bool(res.get("ok", false)):
-		lines.append("동작 %d개 → %s  (%.0f KB, %.1f 초)" % [ex.motions.size(), ex.out_path, float(ex.file_size) / 1024.0,
-			float(Time.get_ticks_msec() - t0) / 1000.0])
-		lines.append("제자리로 만든 동작: %s" % (", ".join(ex.in_place_names) if not ex.in_place_names.is_empty() else "없음"))
-	else:
-		lines.append("내보내기 실패")
-	if ex.missing.size() > 0:
-		lines.append("")
-		lines.append("동작 표에 있는데 없는 동작 %d개(가져오기 안 됨 · 이름 틀림):" % ex.missing.size())
-		for m in ex.missing:
-			lines.append("  ✗ " + m)
-	if ex.warnings.size() > 0:
-		lines.append("")
-		lines.append("알림 %d개:" % ex.warnings.size())
-		for w in ex.warnings:
-			lines.append("  ⚠ " + w)
-	ex.cleanup()
-	print("[Dot Rigger] 3D 동작 내보내기\n" + "\n".join(lines))
-	EditorInterface.get_resource_filesystem().scan()      # 새로 쓴 파일이 파일 시스템 창 · 열려 있는 리소스에 반영되게
-	var dlg := AcceptDialog.new()
-	dlg.title = "3D 동작 내보내기"
-	dlg.dialog_text = "\n".join(lines)
-	dlg.confirmed.connect(dlg.queue_free)
-	dlg.canceled.connect(dlg.queue_free)
-	EditorInterface.popup_dialog_centered(dlg)            # 에디터 창 가운데에(10-06: 직접 띄운 창이 다른 모니터 구석에 뜬 적이 있다)

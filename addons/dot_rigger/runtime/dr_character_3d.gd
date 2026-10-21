@@ -1249,7 +1249,7 @@ func sync_from(src: DRCharacter3D) -> void:
 	for k in AIM_PROPS:                        # 조준 칸(유닛 루트)
 		set(k, src.get(k))
 	aim_motion_weights = src.aim_motion_weights.duplicate()
-	_aim_refs.clear()
+	refresh_muzzle()                           # 총구 · 견착 표지를 기즈모로 옮겼을 수 있다
 	_aim_valid = false
 	_grip_t = -1.0                             # 섞던 것은 끊고 지금 동작 값으로
 	_aim_offsets(_motion, true)
@@ -1287,6 +1287,11 @@ const AIM_PROPS := ["aim_enabled", "aim_up_deg", "aim_down_deg", "aim_speed_deg"
 const NO_TRACKS := [-1, -1, -1]
 ## 팔 몫 돌림을 머리가 따라가는 정도
 const AIM_HEAD_SHARE := 0.6
+## 조준 표지 이름(10-21) — 무기 아래 이 이름의 Node3D(② 탭이 Marker3D 로 만든다 · 기즈모로 옮김):
+## 총구 = 레이(총구 선)가 나가는 자리, +Z = 방향 · 견착 = 팔 몫 조준의 축(개머리판 끝). 없으면 메시에서 잰다(_measure_weapon)
+## 사용자(10-21): "조준선과 총구 위치(즉 레이 기능) — 그 위치를 조정할 수 있는 기즈모 기능 연동도 필요해"
+const MUZZLE_NAME := "총구"
+const SHOULDER_NAME := "견착"
 
 
 ## 표적(세상 좌표)을 준다 — 조준 비중이 있는 동작(사격 · 조준)에서 허리 · 가슴을 돌려 총구가 이리로. 표적을 바꾸면 aim_speed_deg 로 따라간다.
@@ -1372,6 +1377,16 @@ func muzzle_world() -> Array:
 	return [g * (_muzzle[0] as Vector3), (g.basis * (_muzzle[1] as Vector3)).normalized()]
 
 
+## 총구 · 견착점을 다시 찾는다(조준 표지를 옮기거나 더하고 뺀 뒤 — ② 탭 기즈모 · sync_from). 총구 기준(동작별 평균)도 다시
+func refresh_muzzle() -> void:
+	if _sock_weapon == null or not is_instance_valid(_sock_weapon) or _muzzle.is_empty():
+		return
+	var mz := find_muzzle(_sock_weapon)
+	if not mz.is_empty():
+		_muzzle = mz
+	_aim_refs.clear()
+
+
 ## 지금 견착점(세상 좌표 — 개머리판 끝, 팔 몫 조준의 축). 무기가 없으면 Vector3.INF
 func shoulder_world() -> Vector3:
 	if _sock_weapon == null or not is_instance_valid(_sock_weapon) or _muzzle.is_empty() or not _sock_weapon.is_inside_tree():
@@ -1394,12 +1409,12 @@ static func find_muzzle(e: Node3D) -> Array:
 		var n: Node = it[0]
 		var rel: Transform3D = it[1]
 		if n != e and n is Node3D:
-			if String(n.name) == "총구":
-				muzzle = [rel.origin, rel.basis.z.normalized()]
-			elif String(n.name) == "견착":
-				butt = rel.origin
 			if not (n as Node3D).visible:
-				continue
+				continue                           # 숨긴 표지(자식 유닛이 부모 것을 숨김) · 숨긴 부품은 안 씀
+			if String(n.name) == MUZZLE_NAME:
+				muzzle = [rel.origin, rel.basis.z.normalized()]
+			elif String(n.name) == SHOULDER_NAME:
+				butt = rel.origin
 		if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
 			meshes.append([(n as MeshInstance3D).mesh, rel])
 			key.append("%d@%s" % [(n as MeshInstance3D).mesh.get_instance_id(), str(rel)])
@@ -1418,6 +1433,33 @@ static func find_muzzle(e: Node3D) -> Array:
 		if butt == Vector3.INF:
 			butt = geo[1]
 	return [muzzle[0], muzzle[1], butt]
+
+
+## 무기 e 아래 그 이름의 조준 표지(MUZZLE_NAME · SHOULDER_NAME — 보이는 것 중 처음). 없으면 null
+static func find_aim_marker(e: Node, marker_name: String) -> Node3D:
+	if e == null:
+		return null
+	var stack: Array[Node] = []
+	stack.append_array(e.get_children())
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is Node3D and not (n as Node3D).visible:
+			continue
+		if n is Node3D and String(n.name) == marker_name and not (n is BoneAttachment3D):
+			return n as Node3D
+		stack.append_array(n.get_children())
+	return null
+
+
+## n 의 자리를 조상 anc 기준으로(트리 밖이어도 — 부모를 따라 곱함). anc 가 조상이 아니면 n 의 지금 transform
+static func rel_xform(anc: Node, n: Node3D) -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var c: Node = n
+	while c != null and c != anc:
+		if c is Node3D:
+			t = (c as Node3D).transform * t
+		c = c.get_parent()
+	return t if c == anc else n.transform
 
 
 ## 무기 메시에서 [총구(앞 끝의 총열 축), 견착점(뒤 끝 가운데)] — 무기 로컬. 앞 끝 바로 뒤 토막(길이의 2 ~ 9 %)의 정점 가운데가 총열 축

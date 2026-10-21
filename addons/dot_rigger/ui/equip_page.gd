@@ -313,6 +313,14 @@ func _build_ui() -> void:
 		sp.value_changed.connect(func(v: float) -> void: set_aim_setting(prop, v * scale))
 		agrid.add_child(sp)
 		_aim_sp[prop] = sp
+	# 조준 표지(10-21) — 레이(총구 선)가 나가는 자리 · 팔 몫의 축을 기즈모로. 사용자: "그 위치를 조정할 수 있는 기즈모 기능 연동도 필요해"
+	var amrow := HFlowContainer.new()
+	left.add_child(amrow)
+	_btn(amrow, "총구 표지", "레이(총구 선)가 나가는 자리 · 방향 — 무기 아래 \"총구\" 표지를 만들고(없으면 지금 잰 총열 끝에) 고른다. 기즈모 W 이동 · E 회전(파란 축 = 방향)\n" +
+		"유닛 씬에 저장 · [무기 기본 자리로 저장] 이면 asset.json 에도(다른 유닛에 넣을 때 따라감)", func() -> void: make_aim_marker(DRCharacter3D.MUZZLE_NAME))
+	_btn(amrow, "견착 표지", "팔 몫 조준의 축(개머리판을 어깨에 대는 점) — 무기 아래 \"견착\" 표지를 만들고(없으면 지금 잰 개머리판 끝에) 고른다. 기즈모 W 이동",
+		func() -> void: make_aim_marker(DRCharacter3D.SHOULDER_NAME))
+	_btn(amrow, "자동으로", "총구 · 견착 표지를 지운다 — 무기 메시에서 다시 잰다(총열 축 앞 끝 · 개머리판 끝 가운데). 되돌리기 한 칸", clear_aim_markers)
 	left.add_child(HSeparator.new())
 	_xf_title = Label.new()
 	_xf_title.text = "고른 노드 —"
@@ -348,7 +356,7 @@ func _build_ui() -> void:
 	var erow := HBoxContainer.new()
 	left.add_child(erow)
 	_btn(erow, "에디터에서 고르기", "이 노드를 에디터에서 골라 3D 화면 기즈모로 옮긴다(탭과 같은 노드)", _on_edit_in_editor)
-	_btn(erow, "무기 기본 자리로 저장", "고른 장비의 자리 · 왼손 표지 · 동작별 비중을 모델 옆 asset.json(socket_hold)에 — 다른 유닛 소켓에 넣을 때 처음 자리", save_hold_default)
+	_btn(erow, "무기 기본 자리로 저장", "고른 장비의 자리 · 왼손 표지 · 동작별 비중 · 동작별 자리 · 조준 표지(총구 · 견착)를 모델 옆 asset.json(socket_hold)에 — 다른 유닛 소켓에 넣을 때 처음 자리", save_hold_default)
 	var brow := HBoxContainer.new()
 	left.add_child(brow)
 	_btn(brow, "씬 열기", "에디터에 이 유닛 씬을 연다", func() -> void:
@@ -709,13 +717,20 @@ func _gizmo_target() -> Node3D:
 
 ## 손 표지(크기가 뜻이 없음) — DRHandTarget3D 또는 장비 아래 이름이 "왼손" · "오른손" 인 Node3D(받침은 빼고)
 static func _is_marker(n: Node) -> bool:
-	return n is DRHandTarget3D or (n is Node3D and not _is_anchor(n) and DRCharacter3D.SIDE_NAMES.has(String(n.name)))
+	return n is DRHandTarget3D or (n is Node3D and not _is_anchor(n) and (DRCharacter3D.SIDE_NAMES.has(String(n.name)) or _is_aim_marker(n)))
+
+
+## 조준 표지(10-21) — 장비 아래 이름이 "총구" · "견착" 인 Node3D(받침은 빼고)
+static func _is_aim_marker(n: Node) -> bool:
+	return n is Node3D and not _is_anchor(n) and (String(n.name) == DRCharacter3D.MUZZLE_NAME or String(n.name) == DRCharacter3D.SHOULDER_NAME)
 
 
 ## 기즈모로 끄는 중 — 미리보기 사본만(왼손 IK 목표 · 숫자 칸이 따라온다). 유닛 씬은 놓을 때
 func _on_giz_changed(pn: Node3D) -> void:
 	if _prev != null:
 		_prev.sync_support()
+		if _is_aim_marker(pn):
+			_prev.refresh_muzzle()               # 끄는 동안에도 레이 · 견착점이 따라오게
 		_force_pose()
 	_show_xform_of(pn)
 
@@ -776,8 +791,9 @@ func pick_in_preview(pos: Vector2) -> Node3D:
 	var best: Node3D = null
 	var bd := 14.0
 	for e in equips:
-		for side in 2:
-			var mk := DRCharacter3D.find_hand_marker(e, side)
+		var mks: Array[Node3D] = [DRCharacter3D.find_hand_marker(e, 0), DRCharacter3D.find_hand_marker(e, 1),
+			DRCharacter3D.find_aim_marker(e, DRCharacter3D.MUZZLE_NAME), DRCharacter3D.find_aim_marker(e, DRCharacter3D.SHOULDER_NAME)]
+		for mk in mks:
 			if mk != null and not _cam.is_position_behind(mk.global_position):
 				var d := pos.distance_to(_cam.unproject_position(mk.global_position))
 				if d < bd:
@@ -1144,6 +1160,16 @@ func _fill_tree() -> void:
 				mi.set_tooltip_text(0, "%s IK 목표: 원점 = 손바닥 자리, 회전 = 그 손 뼈 회전%s" % [side_name, "\n무기가 이 손 소켓에 있어 이 손은 IK 안 함(무기가 따라감)" if idle else ""])
 				if idle:
 					mi.set_custom_color(0, Color(0.55, 0.57, 0.6))
+			for an in [DRCharacter3D.MUZZLE_NAME, DRCharacter3D.SHOULDER_NAME]:   # 조준 표지(10-21)
+				var am := DRCharacter3D.find_aim_marker(e, an)
+				if am == null:
+					continue
+				var ai := _tree.create_item(ei)
+				var muzzle: bool = an == DRCharacter3D.MUZZLE_NAME
+				ai.set_text(0, "%s %s  (%s)" % ["🎯" if muzzle else "📍", am.name, "총구 표지 — 레이가 나가는 곳 · 파란 축 = 방향" if muzzle else "견착 표지 — 팔 몫 조준의 축(개머리판 끝)"])
+				ai.set_metadata(0, _root.get_path_to(am))
+				ai.set_tooltip_text(0, ("총구 표지: 원점 = 총구 선(레이)이 나가는 자리, +Z(파란 축) = 방향. 기즈모 W 이동 · E 회전" if muzzle
+					else "견착 표지: 조준할 때 팔이 총을 드는 축 — 개머리판을 어깨에 대는 점. 기즈모 W 이동") + "\n지우면(빼기 · [자동으로]) 무기 메시에서 다시 잰다")
 	for it in _all_items(top):
 		if (it.get_metadata(0) as NodePath) == _sel:
 			it.select(0)
@@ -1593,6 +1619,13 @@ func put_model(model_path: String) -> Node3D:
 			owned.append(mk)
 		if not (hold["motion_offsets"] as Dictionary).is_empty():
 			n.set_meta(DRCharacter3D.MOTION_OFFSETS_META, (hold["motion_offsets"] as Dictionary).duplicate())   # 동작별 자리(무기 축 기준 — 받침이 같으니 그대로)
+		for an in (hold.get("aim_markers", {}) as Dictionary).keys():      # 조준 표지(총구 · 견착, 10-21)
+			var am := Marker3D.new()
+			am.name = String(an)
+			am.gizmo_extents = 0.05
+			am.transform = hold["aim_markers"][an]
+			n.add_child(am)
+			owned.append(am)
 		used_hold = true
 	_begin("장비: %s 넣기" % n.name)
 	for c in sock.get_children():
@@ -1805,8 +1838,13 @@ func save_hold_default() -> void:
 		_set_status("무기 기본 자리는 소켓(손 · 뼈)에 든 무기만 — 받침대(양손 · 고정) 자리는 유닛 씬에 저장된다")
 		return
 	var mk := DRCharacter3D.find_support(e)
+	var aims := {}                                # 조준 표지(무기 기준 — 10-21)
+	for an in [DRCharacter3D.MUZZLE_NAME, DRCharacter3D.SHOULDER_NAME]:
+		var am := DRCharacter3D.find_aim_marker(e, an)
+		if am != null:
+			aims[an] = DRCharacter3D.rel_xform(e, am)
 	var ok := DREquipHold.write_hold(asset, sock.bone_name, e.scene_file_path, e.transform, mk.transform if mk != null else null,
-		(mk as DRHandTarget3D).motion_weights if mk is DRHandTarget3D else {}, DRCharacter3D.motion_offsets(e))
+		(mk as DRHandTarget3D).motion_weights if mk is DRHandTarget3D else {}, DRCharacter3D.motion_offsets(e), aims)
 	if ok and Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().update_file(asset)
 	_fill_models()
@@ -1870,6 +1908,64 @@ func set_aim_weight(motion: String, w: Variant) -> void:
 	_end(false)
 	_fill_motion_table.call_deferred()      # 미뤄서 — 표의 칸 고치기 신호에서도 불린다
 	_update_aim_label()
+
+
+## 조준 표지(총구 · 견착, 10-21)를 무기 아래에 만들고 고른다 — 이미 있으면 고르기만. 처음 자리 = 무기 메시에서 잰 자리
+## (총구 = 총열 축 앞 끝 · +Z = 방향, 견착 = 개머리판 끝 가운데). 기즈모로 옮기면 레이 · 팔 몫의 축이 바로 따라온다(되돌리기 한 칸)
+func make_aim_marker(kind: String) -> Node3D:
+	var e := _equip_from(_node(_sel))
+	if e == null:
+		e = _weapon_equip()
+	if e == null:
+		_set_status("무기(장비)를 고르세요")
+		return null
+	var cur := DRCharacter3D.find_aim_marker(e, kind)
+	if cur == null:
+		var mz := DRCharacter3D.find_muzzle(e)
+		if mz.is_empty():
+			_set_status("이 장비는 메시가 없어 %s 자리를 못 잽니다" % kind)
+			return null
+		var mk := Marker3D.new()
+		mk.name = kind
+		mk.gizmo_extents = 0.05
+		var muzzle := kind == DRCharacter3D.MUZZLE_NAME
+		var dir: Vector3 = mz[1]
+		var b := Basis.IDENTITY if not muzzle or dir.is_equal_approx(Vector3.BACK) else Basis.looking_at(-dir, Vector3.UP)   # +Z = 레이 방향
+		mk.transform = Transform3D(b, mz[0] if muzzle else mz[2])
+		_begin("장비: %s 표지" % kind)
+		_op_add(e, mk, [mk])
+		_end(true)
+		cur = mk
+	_select_node(_root.get_path_to(cur))
+	if _giz.tool_mode == TransformGizmo.Tool.VIEW:
+		set_tool(TransformGizmo.Tool.MOVE)
+	_set_status("%s 표지 — 기즈모로 옮기세요(W 이동%s). 하늘색 선 = 레이 · 노란 십자 = 견착점" % [kind, " · E 회전, 파란 축 = 방향" if kind == DRCharacter3D.MUZZLE_NAME else ""])
+	return cur
+
+
+## 총구 · 견착 표지를 지운다 — 무기 메시에서 다시 잰다(부모 유닛에서 온 표지는 숨김)
+func clear_aim_markers() -> void:
+	var e := _equip_from(_node(_sel))
+	if e == null:
+		e = _weapon_equip()
+	var ms: Array[Node3D] = []
+	for kind in [DRCharacter3D.MUZZLE_NAME, DRCharacter3D.SHOULDER_NAME]:
+		var m := DRCharacter3D.find_aim_marker(e, kind) if e != null else null
+		if m != null and (m.owner == _root or _is_inherited(m)):
+			ms.append(m)
+	if ms.is_empty():
+		_set_status("조준 표지가 없습니다 — 이미 무기 메시에서 잰 자리")
+		return
+	_begin("장비: 조준 표지 지움(자동으로)")
+	for m in ms:
+		if _root.get_path_to(m) == _sel:           # 빼기 전에(빼면 경로가 없다)
+			_sel = NodePath()
+		if _is_inherited(m):
+			_op_prop(m, "visible", false)
+		else:
+			_op_remove(m)
+	_end(true)
+	_set_status("조준 표지를 지움 — 총구 · 견착점을 무기 메시에서 다시 잼")
 
 
 ## 조준 미리보기 켜고 끄기 — 미리보기 병사가 옆 · 높낮이 각을 겨눈다(표적 대신 각 — set_aim_angles)
@@ -2393,16 +2489,20 @@ func _draw_marks() -> void:
 	for s in _prev.get_anchors():
 		_cross(s.global_position, 0.02, Color(1.0, 0.9, 0.2) if s is BoneAttachment3D else Color(1.0, 0.55, 0.15))
 		any = true
-	if _aim_preview:                             # 조준: 표적(분홍 — 겨눌 방향) · 총구 선(초록 = 표적으로 · 주황 = 한계) · 견착점(노랑 — 팔 몫의 축)
-		var ar := _prev.aim_report()
+	# 조준: 표적(분홍 — 겨눌 방향) · 총구 선 = 레이(초록 = 표적으로 · 주황 = 한계 · 하늘 = 조준 표지를 고르는 중) · 견착점(노랑 — 팔 몫의 축)
+	# 조준 표지(총구 · 견착)를 고르면 미리보기를 안 켜도 레이 · 견착점을 그린다 — 기즈모로 옮기며 보게(10-21)
+	var aim_sel := _is_aim_marker(_node(_sel))
+	if _aim_preview or aim_sel:
+		var ar := _prev.aim_report() if _aim_preview else {}
 		var mw := _prev.muzzle_world()
-		if not ar.is_empty() and not mw.is_empty():
-			var tp: Vector3 = (mw[0] as Vector3) + (_prev.global_transform.basis * (ar["aim_dir"] as Vector3)).normalized() * AIM_MARK_M
-			_cross(tp, 0.06, Color(1.0, 0.35, 0.85))
+		if not mw.is_empty() and (aim_sel or not ar.is_empty()):
+			if not ar.is_empty():
+				var tp: Vector3 = (mw[0] as Vector3) + (_prev.global_transform.basis * (ar["aim_dir"] as Vector3)).normalized() * AIM_MARK_M
+				_cross(tp, 0.06, Color(1.0, 0.35, 0.85))
 			var sw := _prev.shoulder_world()
 			if sw != Vector3.INF:
 				_cross(sw, 0.035, Color(1.0, 0.9, 0.2))
-			var col := Color(1.0, 0.6, 0.2) if bool(ar["clamped"]) else Color(0.35, 1.0, 0.45)
+			var col := Color(0.4, 0.85, 1.0) if ar.is_empty() else (Color(1.0, 0.6, 0.2) if bool(ar["clamped"]) else Color(0.35, 1.0, 0.45))
 			_imesh.surface_set_color(col)
 			_imesh.surface_add_vertex(mw[0])
 			_imesh.surface_set_color(col)

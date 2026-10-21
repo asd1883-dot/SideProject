@@ -249,6 +249,10 @@ static func read_hold(asset_json: String) -> Dictionary:
 	for k in Dictionary(h.get("motion_offsets", {})).keys():
 		mo[String(k)] = _a2t(h["motion_offsets"][k])
 	out["motion_offsets"] = mo
+	var am := {}                                  # 조준 표지(10-21) — {"총구": 무기 기준 변환, "견착": …}
+	for k in Dictionary(h.get("aim_markers", {})).keys():
+		am[String(k)] = _a2t(h["aim_markers"][k])
+	out["aim_markers"] = am
 	return out
 
 
@@ -256,8 +260,9 @@ static func read_hold(asset_json: String) -> Dictionary:
 ## 왜 글로 끼우나: 통째로 읽어 JSON.stringify 로 다시 쓰면 Godot 4.7 이 아주 작은 수를 13 자리로 줄여(옛 equip 그립 6.51925802230835e-08
 ## → 6.519258022e-08, 10-16 실측) 손대지 않은 칸까지 바뀐다
 ## motion_offsets = 동작별 무기 자리(장비 축 기준 차이 — 받침이 달라도 뜻이 같아 다른 유닛에 그대로 쓴다, 10-19)
+## aim_markers = 조준 표지 {"총구": 무기 기준 변환(+Z = 레이 방향), "견착": …}(10-21 — 없으면 게임이 메시에서 잰다)
 static func write_hold(asset_json: String, bone: String, scene: String, weapon: Transform3D, support: Variant, motion_weights: Dictionary,
-		motion_offsets: Dictionary = {}) -> bool:
+		motion_offsets: Dictionary = {}, aim_markers: Dictionary = {}) -> bool:
 	if asset_json == "" or not FileAccess.file_exists(asset_json):
 		return false
 	var txt := FileAccess.get_file_as_string(asset_json)
@@ -265,7 +270,7 @@ static func write_hold(asset_json: String, bone: String, scene: String, weapon: 
 		return false
 	var at := Time.get_datetime_string_from_system()
 	var h := {
-		"note": "② 장비 탭(3D 소켓) — 이 무기를 소켓에 넣을 때의 기본 자리. transform = 소켓(뼈) 기준 무기, support = 무기 기준 왼손 표지(원점 = 손바닥 점, 기저 = 왼손 뼈 회전), motion_weights = 동작별 왼손 IK 비중(없는 동작 = 1), motion_offsets = 동작별 무기 자리(무기 축 기준 차이 — 무기 자리 = transform × 이 값)",
+		"note": "② 장비 탭(3D 소켓) — 이 무기를 소켓에 넣을 때의 기본 자리. transform = 소켓(뼈) 기준 무기, support = 무기 기준 왼손 표지(원점 = 손바닥 점, 기저 = 왼손 뼈 회전), motion_weights = 동작별 왼손 IK 비중(없는 동작 = 1), motion_offsets = 동작별 무기 자리(무기 축 기준 차이 — 무기 자리 = transform × 이 값), aim_markers = 조준 표지(무기 기준 — 총구 = 레이 자리 · +Z 방향, 견착 = 팔 몫 조준의 축)",
 		"bone": bone, "scene": scene, "transform": _t2a(weapon), "motion_weights": motion_weights.duplicate(), "at": at,
 	}
 	if support is Transform3D:
@@ -276,6 +281,12 @@ static func write_hold(asset_json: String, bone: String, scene: String, weapon: 
 			if motion_offsets[k] is Transform3D:
 				mo[String(k)] = _t2a(motion_offsets[k])
 		h["motion_offsets"] = mo
+	if not aim_markers.is_empty():
+		var am := {}
+		for k in aim_markers.keys():
+			if aim_markers[k] is Transform3D:
+				am[String(k)] = _t2a(aim_markers[k])
+		h["aim_markers"] = am
 	var block := JSON.stringify(h, "\t", true, true).replace("\n", "\n\t")          # 맨 위 객체 안(들여쓰기 한 칸)
 	# 키(뒤에 콜론)로 찾는다 — 기록 안의 값 "step": "socket_hold" 를 잡지 않게(10-16 두 번째 저장에서 normalize 칸을 덮은 일)
 	var rk := RegEx.create_from_string("\"%s\"\\s*:\\s*\\{" % HOLD_KEY)
