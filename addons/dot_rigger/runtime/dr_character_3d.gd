@@ -1339,7 +1339,8 @@ func aim_default_weight(motion: String) -> float:
 
 
 ## 마지막 조준 풀이 — {weight(비중 × 표적), yaw · pitch(지금 돌린 각 °), want_yaw · want_pitch(한계 전 필요한 각 °),
-## base_yaw · base_pitch(동작이 원래 겨눈 옆 · 높낮이 °), err(돌린 총구 기준 ↔ 겨눌 방향 °, 반동 빼고), clamped(한계에 걸림),
+## base_yaw · base_pitch(동작이 원래 겨눈 옆 · 높낮이 °), err(돌린 총구 기준 ↔ 겨눌 방향 °, 반동 빼고 — 따라가는 중 · 비중을 섞는 중이면 그만큼 남음),
+## lag(표적이 바뀌어 아직 덜 돈 각 °, aim_speed_deg 로 따라감), clamped(한계에 걸림),
 ## muzzle · dir(돌린 총구 기준 — 캐릭터 공간) · aim_dir(겨눌 방향 — 캐릭터 공간, 한계 전)}. 조준 안 하면 {}
 func aim_report() -> Dictionary:
 	return _aim_last.duplicate()
@@ -1460,6 +1461,7 @@ func _solve_aim(sk: Skeleton3D) -> void:
 	var md := b * dir0
 	_aim_last = {"weight": w, "yaw": rad_to_deg(_aim_cur.x * w), "pitch": rad_to_deg(_aim_cur.y * w), "want_yaw": rad_to_deg(raw.x),
 		"want_pitch": rad_to_deg(raw.y), "base_yaw": rad_to_deg(yaw0), "base_pitch": rad_to_deg(el0), "err": rad_to_deg(md.angle_to(ideal)),
+		"lag": rad_to_deg(maxf(absf(want.x - _aim_cur.x), absf(want.y - _aim_cur.y))),
 		"clamped": not want.is_equal_approx(raw), "muzzle": piv + b * (pos0 - piv), "dir": md, "aim_dir": ideal}
 
 
