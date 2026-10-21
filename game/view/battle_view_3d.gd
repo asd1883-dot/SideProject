@@ -14,6 +14,8 @@ class_name BattleView3D
 ##   - 동작은 초당 step_hz 번만 새로 그린다(12 = 2D 퍼펫의 초당 12장과 같은 끊는 맛 — 도트 느낌). 화면 밖 병사는 안 돌린다
 ##   - 겹침 순서는 3D 깊이 버퍼가 맡는다(2D 의 z 띠가 필요 없다) · 저해상도 그리기 · 외곽선 = DRDotView3D
 ##   - 복장 보기(wear_mode): 유닛 복장 / 상의만 / 하의만 / 내복 — 상의 · 하의를 따로 입히는 3D 슬롯이 도는지 바로 본다
+##   - 조준 IK(10-21): 쏘는 표적(Ballistics.aim_point — 두뇌가 고른 적의 겨눌 곳) · 조종 중이면 조준점을 캐릭터에 준다 —
+##     사격 · 조준 동작에서 허리 · 가슴이 돌아 총구 높낮이가 표적으로(DRCharacter3D.set_aim_target)
 ## 연산: 노드 · 셰이더 값은 바뀔 때만 넣는다(자리 · 방향 · 사라지기 단계). 무거운 것(슬롯 나누기 · 동작별 그립)은 캐릭터를 만들 때 한 번 · 캐시.
 
 ## 도트 느낌(외곽선 · 픽셀 퍼펙트 · 명암 · 도트 크기 · 각도 · 초당 장수) — Dot Rigger ① 유닛 탭이 고치는 것과 같은 파일.
@@ -226,6 +228,7 @@ func _recycle(e: Entry) -> void:
 		ch.rotation = Vector3.ZERO
 		ch.set_tint(Color.WHITE)
 		ch.set_fade(1.0)
+		ch.clear_aim_target(true)
 		var ap := ch.get_animation_player()
 		if ap != null:
 			ap.stop()
@@ -251,6 +254,7 @@ func _on_died(s: BattleSoldier) -> void:
 	if e.ch == null:
 		return
 	e.ch.set_tint(CORPSE_TINT)
+	e.ch.clear_aim_target(true)
 	# 죽을 때의 자세에 맞는 사망 동작(기본 동작으로 내려가면 안 되므로 pick 이 아니라 상태마다 pick_state — 2D 와 같은 규칙)
 	var m := ""
 	if e.table != null:
@@ -303,7 +307,7 @@ func _update_soldier(e: Entry, delta: float, _step: float) -> void:
 		e3.yaw = move_toward(e3.yaw, want, deg_to_rad(turn_speed_deg) * delta)
 		ch.rotation = Vector3(0.0, e3.yaw, 0.0)
 	if e3.motion != "" and foot.x > _vis_x0 and foot.x < _vis_x1:       # 맞는 동작이 없거나 화면 밖이면 진행시키지 않는다
-		_advance(e3, delta)
+		_advance(e3, delta, true)
 
 
 func _update_corpse(e: Entry, delta: float, _step: float) -> bool:
@@ -326,15 +330,36 @@ func _update_corpse(e: Entry, delta: float, _step: float) -> bool:
 	return left <= 0.0
 
 
-## 동작을 모았다가 step_hz 에 맞춰 한 번에 진행시킨다(무기 그립 섞기도 같은 박자로 — DRCharacter3D.step_motion)
-func _advance(e: Entry3D, delta: float) -> void:
+## 동작을 모았다가 step_hz 에 맞춰 한 번에 진행시킨다(무기 그립 섞기도 같은 박자로 — DRCharacter3D.step_motion). aim = 그 박자에 조준 표적도 새로
+func _advance(e: Entry3D, delta: float, aim := false) -> void:
 	e.acc += delta
 	var step := 1.0 / step_hz if step_hz > 0.0 else 0.0
 	if e.acc < step:
 		return
+	if aim:
+		_aim(e)
 	if e.ch.step_motion(e.acc) and e.reroll:
 		_reroll(e)                                   # 반복 동작이 한 바퀴 돌았다 — 그 상태의 동작 중에서 비중대로 다시
 	e.acc = 0.0
+
+
+## 조준 IK 표적(10-21) — 조종 중이면 조준점, 아니면 두뇌가 고른 적의 겨눌 곳(Ballistics.aim_point — 총알이 가는 곳과 같다). 없으면 거둔다.
+## 화면이 병사를 카메라 쪽으로 face_turn_deg 만큼 더 돌려 보이므로 표적도 발을 축으로 그만큼 돌려 준다 — 같은 줄 정면의 적 = 몸 정면
+## (동작이 겨눈 옆 방향 그대로 · 총구 높낮이만 표적으로), 앞뒤 줄이 다르면 그만큼 옆으로 더 돈다
+func _aim(e: Entry3D) -> void:
+	var s := e.s
+	var a := Vector3.INF
+	if s.controller != 0:
+		a = Vector3(s.aim_x, s.aim_h, s.aim_depth)
+	elif s.target != null and s.target.alive:
+		a = Ballistics.aim_point(s, s.target)
+	if a == Vector3.INF:
+		if e.ch.has_aim_target():
+			e.ch.clear_aim_target()
+		return
+	var foot := e.ch.position
+	var p := _dot.ground_to_world(to_canvas(a.x, 0.0, a.z)) + Vector3(0.0, a.y, 0.0)
+	e.ch.set_aim_target(foot + (p - foot).rotated(Vector3.UP, e.yaw - float(s.facing if s.facing != 0 else 1) * PI * 0.5))
 
 
 func _pick_motion(e: Entry) -> void:

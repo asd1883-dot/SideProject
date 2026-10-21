@@ -10,7 +10,7 @@ class_name DRCharacter3D
 ##     ├ <몸 glb 인스턴스>(human_base)       — 구조 그대로: AnimationPlayer(root_node "..") 의 트랙 `%GeneralSkeleton:<뼈>` 가 그대로 풀린다
 ##     │   ├ Armature/GeneralSkeleton
 ##     │   │    ├ SlotTop · SlotBottom · SlotBase (MeshInstance3D — 슬롯 메시. 원래 통메시 Body 는 뺐다)
-##     │   │    └ DR_GripSolver(받침대가 있을 때 · 맨 앞) · DR_<손>Ref · DR_<손>Elbow · DR_<손>ArmIK · DR_<손>HandRot (손 표지마다 — 팔 IK 수정자)
+##     │   │    └ DR_AimSolver(무기를 들었을 때 · 맨 앞 — 조준 IK, 10-21) · DR_GripSolver(받침대가 있을 때) · DR_<손>Ref · DR_<손>Elbow · DR_<손>ArmIK · DR_<손>HandRot (손 표지마다 — 팔 IK 수정자)
 ##     │   └ AnimationPlayer
 ##     ├ 오른손 (BoneAttachment3D = 소켓, 씬에 든 노드 — 10-16)  └ kar98k (장비 = 모델 씬 인스턴스)  └ 왼손 (DRHandTarget3D 표지)
 ##     └ 양손 (DRGripMount3D = 받침대 — 두 손 사이 보간 · 땅 고정, 10-16)  └ mg42  └ 오른손 · 왼손 (표지 — 두 손 다 IK)
@@ -32,6 +32,7 @@ class_name DRCharacter3D
 ##   ch.rotation.y = atan2(dir.x, dir.z)    # dir 쪽을 보게(+X = PI/2)
 ##   ch.scale = Vector3.ONE * (1.75 / ch.model_height())
 ##   ch.set_tint(Color(0.45, 0.45, 0.45)) ; ch.set_fade(0.3)    # 죽은 병사 어둡게 · 도트식으로 사라지기
+##   ch.set_aim_target(적_가슴_세상좌표)       # 사격 · 조준 동작에서 허리 · 가슴을 돌려 총구가 그리로(조준 IK, 10-21) · clear_aim_target()
 
 const BODY_DEFAULT := "res://source3d/characters/human_base/human_base.glb"
 const SHADER_PATH := "res://addons/dot_rigger/shaders/dot_char.gdshader"
@@ -99,6 +100,22 @@ static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
 ## 씬에 들어가면(_ready) 위 칸대로 저절로 조립한다. 끄면 setup() · wear() 를 직접 부를 때만
 @export var auto_build := true
 
+@export_group("조준")
+## 조준 IK(10-21) — 사격 · 조준 동작에서 허리 · 가슴(Spine · Chest · UpperChest)을 돌려 총구가 표적을 향하게 한다. 표적은 게임이 준다(set_aim_target).
+## 사용자(10-21): "사격을 할 때 적을 바라보는 벡터 기준으로 허리가 살짝 굽거나 해야 될 것 같아 — 총구가 적을 바라봐야 되니까"
+@export var aim_enabled := true
+## 총구를 위로 더 돌릴 수 있는 한계(그 동작의 총구 방향에서) — 표적이 더 높으면 여기서 멈춘다
+@export_range(0.0, 80.0, 1.0, "suffix:°") var aim_up_deg := 30.0
+## 아래로 더 돌릴 수 있는 한계(10-21 그림: 40° 면 몸이 뒤로 크게 젖혀져 기본 30°)
+@export_range(0.0, 80.0, 1.0, "suffix:°") var aim_down_deg := 30.0
+## 옆으로(위에서 봐 좌우 — 앞뒤 줄의 표적) 더 돌릴 수 있는 한계. 횡스크롤이라 작게
+@export_range(0.0, 60.0, 1.0, "suffix:°") var aim_side_deg := 20.0
+## 표적이 바뀔 때 허리를 돌리는 빠르기(초당 각)
+@export_range(30.0, 1440.0, 10.0, "suffix:°/s") var aim_speed_deg := 240.0
+## 동작마다 조준 비중(0 = 동작 그대로 · 1 = 총구가 표적으로). 없는 동작 = 동작 표에서 "사격" · "조준" 상태에 든 동작이면 1, 아니면 0
+## (상하체 합성 "A+B" 는 제 것이 없으면 상체 B 것) — ② 장비 탭 동작 표의 "조준" 칸
+@export var aim_motion_weights: Dictionary[String, float] = {}
+
 @export_group("미리보기 (에디터)")
 ## 에디터 3D 화면에서 이 동작 자세로 보여 준다(동작 표의 동작 · 내보낸 3D 동작 묶음에 있어야 함)
 @export var preview_motion := "":
@@ -148,6 +165,26 @@ var _equip_sig := ""                           # 편집 중인 씬에서 받침 
 var _saved_skel_paths := {}                    # 저장하는 동안 비운 소켓의 뼈대 길(소켓 -> 길)
 var _saved_mount_xf := {}                      # 저장하는 동안 원점에 둔 두 손 사이 받침대의 자리(받침대 -> 변환)
 var _equip_poll := 0.0
+# 조준 IK(10-21) — 아래 "조준 IK" 절
+var _aim_solver: SkeletonModifier3D = null
+var _aim_bones := PackedInt32Array()           # 돌릴 뼈(허리 → 가슴, 아래부터)
+var _aim_shares := PackedFloat32Array()        # 뼈마다 몫(합 1)
+var _muzzle := []                              # 무기 로컬 총구 [자리, 방향] — 무기가 없으면 []
+var _aim_has := false                          # 표적이 있나
+var _aim_point := Vector3.ZERO                 # 표적(세상 좌표)
+var _aim_by_angle := false                     # 표적 대신 각으로(② 탭 미리보기 — set_aim_angles)
+var _aim_angle := Vector2.ZERO                 # 그 각(라디안) x = 동작의 겨눔에서 옆 · y = 총구 높낮이(수평 = 0)
+var _aim_on := 0.0                             # 표적이 있는 정도(나타나고 사라질 때 섞음)
+var _aim_w := 0.0                              # 지금 동작의 조준 비중(동작이 바뀔 때 _grip_t 로 섞음)
+var _aim_w_from := 0.0
+var _aim_w_to := 0.0
+var _aim_cur := Vector2.ZERO                   # 지금 돌린 각(라디안, 비중 곱하기 전) x = 옆 · y = 위아래
+var _aim_valid := false                        # _aim_cur 가 이어 가는 값인가(아니면 다음 풀이에서 바로 그 값으로)
+var _aim_dt := 0.0                             # 지난 풀이 뒤 흐른 시간(step_motion 이 모은다)
+var _aim_refs := {}                            # 동작 -> [총구 자리, 방향](캐릭터 공간, 동작 그대로 시점 평균) 또는 [](조준 못 함)
+var _aim_defaults := {}                        # 동작 -> 동작 표로 정한 기본 비중
+var _anim_tracks := {}                         # Animation -> {뼈 번호: [위치, 회전, 크기 트랙](없으면 −1)}
+var _aim_last := {}                            # 마지막 풀이(검사 · ② 탭) — aim_report
 
 
 # ---------------------------------------------------------------- 만들기
@@ -288,6 +325,7 @@ func play_motion(motion: String, blend: float = 0.1) -> void:
 		if first or blend <= 0.0:
 			for side in 2:
 				_set_hand_weight(side, _hand_weight(side, motion))
+			_aim_w = aim_weight_for(motion)
 			_grip_t = -1.0
 		else:
 			for side in 2:
@@ -295,6 +333,8 @@ func play_motion(motion: String, blend: float = 0.1) -> void:
 				if h != null:
 					h.w_from = h.w
 					h.w_to = _hand_weight(side, motion)
+			_aim_w_from = _aim_w                   # 조준 비중도 손 IK 와 같은 시간 동안
+			_aim_w_to = aim_weight_for(motion)
 			_grip_blend = blend
 			_grip_t = 0.0
 		return
@@ -318,6 +358,7 @@ func step_motion(dt: float) -> bool:
 	if _ap == null:
 		return false
 	var before := _ap.current_animation_position
+	_aim_dt += dt                              # 조준 수정자가 이번 갱신에 쓴다(빠르기 · 표적 섞기)
 	_ap.advance(dt)
 	var wrapped := _ap.current_animation_position < before
 	if _grip_t >= 0.0:
@@ -329,6 +370,7 @@ func step_motion(dt: float) -> bool:
 			var h: HandIK = _hands[side]
 			if h != null:
 				_set_hand_weight(side, lerpf(h.w_from, h.w_to, k))
+		_aim_w = lerpf(_aim_w_from, _aim_w_to, k)
 		var moved := false
 		for pq in _pose_equips:
 			if is_instance_valid(pq.e) and not pq.from.is_equal_approx(pq.to):
@@ -529,6 +571,8 @@ func set_motions(lib: AnimationLibrary) -> void:
 	if _ap.has_animation_library(""):
 		_ap.remove_animation_library("")
 	_ap.add_animation_library("", lib)
+	_aim_refs.clear()                          # 동작이 바뀌었으니 총구 기준도 다시
+	_anim_tracks.clear()
 
 
 func get_animation_player() -> AnimationPlayer:
@@ -958,6 +1002,7 @@ const PALM_PARTS := ["L_Hand", "R_Hand"]
 const SIDE_NAMES := ["왼손", "오른손"]
 const SIDE_TAGS := ["Left", "Right"]
 const SOLVER_SCRIPT := preload("res://addons/dot_rigger/runtime/dr_grip_solver_3d.gd")
+const AIM_SOLVER_SCRIPT := preload("res://addons/dot_rigger/runtime/dr_aim_solver_3d.gd")
 ## 동작별 무기 자리(10-19) — 장비 노드의 메타 칸 이름. 값 = {동작 이름: Transform3D}, 그 동작에서 장비 자리 = 기본 자리(transform) × 이 값
 ## (장비 자신의 축 기준 위치 · 회전 차이 — 받침을 바꿔도(잡기 오른손 → 양손) 뜻이 같다). 동작 표의 상하체 합성 "A+B" 는 제 것이 없으면 상체 B 것을 쓴다.
 ## 사용자(10-16): "2번 탭은 애니메이션별로 양손이든 왼손이든 오른손이든 총기 위치 회전 오프셋을 지정해 둘 수 있는 리소스 툴인 거지?" → 10-19 "2번 작업도 시행"
@@ -1053,15 +1098,17 @@ func refresh_equipment() -> void:
 		_solver.set("character", self)
 		_skel.add_child(_solver)
 		_skel.move_child(_solver, 0)       # 수정자 차례 맨 앞(손 IK 보다 먼저 — 동작 자세로)
+	_make_aim()                            # 그보다 더 앞(허리를 돌린 자세로 받침대 · 손 IK 가 푼다)
 	for side in 2:
 		if found[side] != null:
 			_make_ik(side, found[side][0], found[side][1])
-	if _solver != null or _hands[0] != null or _hands[1] != null:
+	if _aim_solver != null or _solver != null or _hands[0] != null or _hands[1] != null:
 		_skel.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE if edited else Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL
 	_aim_offsets(_motion, true)                # 지금 동작의 동작별 자리를 바로(안 움직였으면 아래 sync_support 가 손 IK 목표를)
 	sync_support()
 	for side in 2:
 		_set_hand_weight(side, _hand_weight(side, _motion))
+	_aim_w = aim_weight_for(_motion)
 	_equip_sig = _socket_sig()
 
 
@@ -1134,6 +1181,7 @@ func _pose_of(e: Node) -> PoseEquip:
 
 ## 장비 e 의 기본 자리를 바꾼다(① ② 탭이 유닛 씬 값을 미리보기 사본에 옮길 때) — 지금 얹은 동작별 자리는 그대로 얹어 놓는다
 func set_equip_base(e: Node3D, base: Transform3D) -> void:
+	_aim_refs.clear()                          # 무기 자리가 바뀌면 총구 기준도 다시
 	var pq := _pose_of(e)
 	if pq == null:
 		e.transform = base
@@ -1186,11 +1234,345 @@ func sync_from(src: DRCharacter3D) -> void:
 			if pn is DRGripMount3D and n is DRGripMount3D:
 				for k in ["blend", "right_offset", "left_offset"]:
 					pn.set(k, n.get(k))
+	for k in AIM_PROPS:                        # 조준 칸(유닛 루트)
+		set(k, src.get(k))
+	aim_motion_weights = src.aim_motion_weights.duplicate()
+	_aim_refs.clear()
+	_aim_valid = false
 	_grip_t = -1.0                             # 섞던 것은 끊고 지금 동작 값으로
 	_aim_offsets(_motion, true)
 	sync_support()
 	for side in 2:
 		_set_hand_weight(side, _hand_weight(side, _motion))
+	_aim_w = aim_weight_for(_motion)
+
+
+# ---------------------------------------------------------------- 조준 IK(10-21)
+## 사용자(10-21): "사격을 할 때 적의 위치 · 적을 바라보는 벡터 기준으로 허리가 살짝 굽거나 해야 될 것 같아 — 총구가 적을 바라봐야 되니까. IK 기술의 파생인가?"
+## = 조준 IK(에임 오프셋). 동작 위에 덧씌운다 — 그 동작의 **총구 기준**(동작 그대로 여러 시점 평균 방향)을 표적 쪽으로 한계 안에서
+## 돌리고, 그 돌림을 허리 · 가슴 뼈에 나눠 준다. 기준이 평균이라 동작의 반동 · 흔들림은 그대로 남는다(매 장면 총구를 표적에 붙이면 반동이 지워진다).
+## 손 · 무기는 몸을 따라오고 뒤의 받침대 풀이 · 손 IK 가 돌린 자세로 다시 잡는다.
+##   위아래: 총구 높낮이 = 총구에서 표적을 보는 높낮이(정확히).
+##   옆: 몸 정면(+Z)에서 표적이 옆으로 벗어난 만큼만 더 돈다 — 동작이 원래 겨눈 옆 방향(Firing_Rifle 은 총구가 몸 정면에서 약 22° 틀어져 있다)은
+##   그대로 둔다. 그래야 화면이 정한 3/4 방향(BattleView3D.face_turn_deg — 표적을 몸 정면 쪽으로 옮겨 준다)과 동작 모습이 안 깨진다(10-21 실측).
+## 무기 총구 = 장비 아래 "총구" 노드(자리 · +Z 방향)가 있으면 그것, 없으면 무기 +Z(normalize_weapon 규칙: 원점 = 잡는 자리 · +Z = 총구 쪽)의 메시 앞 끝.
+## 고정 받침대(땅 — MG42 라페테)에 든 무기는 몸을 돌려 겨누지 않는다(장비를 돌리는 것은 나중).
+
+## 돌릴 뼈와 몫(아래부터 — 합 1). 몸에 없는 뼈는 빼고 나머지 몫을 다시 나눈다
+const AIM_BONES := [["Spine", 0.3], ["Chest", 0.35], ["UpperChest", 0.35]]
+## 총구 기준을 재는 시점 수(동작 길이를 고르게)
+const AIM_SAMPLES := 8
+## 표적이 나타나거나 사라질 때 섞는 시간(초)
+const AIM_FADE_SEC := 0.15
+## 동작 표 상태 이름에 이 말이 들어 있으면 그 상태의 동작은 기본 조준 비중 1
+const AIM_STATE_WORDS := ["사격", "조준"]
+## 조준 칸(sync_from 이 옮긴다 — aim_motion_weights 는 따로 복제)
+const AIM_PROPS := ["aim_enabled", "aim_up_deg", "aim_down_deg", "aim_side_deg", "aim_speed_deg"]
+const NO_TRACKS := [-1, -1, -1]
+
+
+## 표적(세상 좌표)을 준다 — 조준 비중이 있는 동작(사격 · 조준)에서 허리 · 가슴을 돌려 총구가 이리로. 표적을 바꾸면 aim_speed_deg 로 따라간다.
+## instant = 섞지 않고 바로(② 탭 미리보기 · 시험). 자세는 다음 뼈대 갱신(step_motion)에 바뀐다
+func set_aim_target(p: Vector3, instant := false) -> void:
+	_aim_point = p
+	_aim_by_angle = false
+	_aim_has = true
+	if instant:
+		_aim_on = 1.0
+		_aim_valid = false
+
+
+## 표적 대신 각으로 겨눈다(② 장비 탭 미리보기) — side = 동작이 원래 겨눈 옆 방향에서 더 돌 각, height = 총구 높낮이(수평 = 0, 위 +). 도
+func set_aim_angles(side_deg: float, height_deg: float, instant := false) -> void:
+	_aim_angle = Vector2(deg_to_rad(side_deg), deg_to_rad(height_deg))
+	_aim_by_angle = true
+	_aim_has = true
+	if instant:
+		_aim_on = 1.0
+		_aim_valid = false
+
+
+## 표적을 거둔다 — 허리가 AIM_FADE_SEC 동안 동작 그대로 돌아온다(instant = 바로)
+func clear_aim_target(instant := false) -> void:
+	_aim_has = false
+	if instant:
+		_aim_on = 0.0
+		_aim_valid = false
+
+
+func has_aim_target() -> bool:
+	return _aim_has
+
+
+func get_aim_target() -> Vector3:
+	return _aim_point
+
+
+## 그 동작의 조준 비중(0 ~ 1) — aim_motion_weights → 상하체 합성(A+B)이면 상체 B 것 → 동작 표 기본(aim_default_weight)
+func aim_weight_for(motion: String) -> float:
+	if not aim_enabled or motion == "":
+		return 0.0
+	if aim_motion_weights.has(motion):
+		return clampf(aim_motion_weights[motion], 0.0, 1.0)
+	var plus := motion.rfind("+")
+	if plus > 0 and aim_motion_weights.has(motion.substr(plus + 1)):
+		return clampf(aim_motion_weights[motion.substr(plus + 1)], 0.0, 1.0)
+	return aim_default_weight(motion)
+
+
+## 동작 표로 정한 기본 조준 비중 — 그 동작이 "사격" · "조준" 이 든 상태(서기+사격 · 앉기+조준 · 엎드림+사격 …)에 있으면 1, 아니면 0. 표가 없으면 0
+func aim_default_weight(motion: String) -> float:
+	var v: Variant = _aim_defaults.get(motion)
+	if v != null:
+		return v
+	var w := 0.0
+	if motions != null:
+		for st in motions.state_names():
+			var hit := false
+			for word in AIM_STATE_WORDS:
+				hit = hit or st.contains(String(word))
+			if hit and motions.has_motion(st, motion):
+				w = 1.0
+				break
+	_aim_defaults[motion] = w
+	return w
+
+
+## 마지막 조준 풀이 — {weight(비중 × 표적), yaw · pitch(지금 돌린 각 °), want_yaw · want_pitch(한계 전 필요한 각 °),
+## base_yaw · base_pitch(동작이 원래 겨눈 옆 · 높낮이 °), err(돌린 총구 기준 ↔ 겨눌 방향 °, 반동 빼고), clamped(한계에 걸림),
+## muzzle · dir(돌린 총구 기준 — 캐릭터 공간) · aim_dir(겨눌 방향 — 캐릭터 공간, 한계 전)}. 조준 안 하면 {}
+func aim_report() -> Dictionary:
+	return _aim_last.duplicate()
+
+
+## 지금 무기 총구(세상 좌표) [자리, 방향] — 뼈대 갱신 뒤 무기 노드 그대로(동작의 반동 포함). 무기가 없으면 []
+func muzzle_world() -> Array:
+	if _sock_weapon == null or not is_instance_valid(_sock_weapon) or _muzzle.is_empty() or not _sock_weapon.is_inside_tree():
+		return []
+	var g := _sock_weapon.global_transform
+	return [g * (_muzzle[0] as Vector3), (g.basis * (_muzzle[1] as Vector3)).normalized()]
+
+
+## 무기 e 의 로컬 총구 [자리, 방향] — 아래 "총구" 노드가 있으면 그 자리 · +Z, 없으면 +Z 쪽 메시 앞 끝(보이는 메시만 — 숨긴 탄 클립 빼고)
+static func find_muzzle(e: Node3D) -> Array:
+	if e == null:
+		return []
+	var front := -INF
+	var stack: Array = [[e, Transform3D.IDENTITY]]
+	while not stack.is_empty():
+		var it: Array = stack.pop_back()
+		var n: Node = it[0]
+		var rel: Transform3D = it[1]
+		if n != e and n is Node3D:
+			if String(n.name) == "총구":
+				return [rel.origin, rel.basis.z.normalized()]
+			if not (n as Node3D).visible:
+				continue
+		if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
+			front = maxf(front, (rel * (n as MeshInstance3D).get_aabb()).end.z)
+		for c in n.get_children():
+			stack.append([c, rel * (c as Node3D).transform if c is Node3D else rel])
+	if front == -INF:
+		return []
+	return [Vector3(0.0, 0.0, front), Vector3.BACK]
+
+
+## 조준 수정자를 만든다(무기를 들었을 때 — refresh_equipment). 맨 앞 차례
+func _make_aim() -> void:
+	_aim_refs.clear()
+	_aim_defaults.clear()
+	_aim_valid = false
+	_aim_last = {}
+	_muzzle = find_muzzle(_sock_weapon)
+	_aim_bones = PackedInt32Array()
+	_aim_shares = PackedFloat32Array()
+	if _muzzle.is_empty() or _skel == null:
+		return
+	var total := 0.0
+	for b in AIM_BONES:
+		var bi := _skel.find_bone(String(b[0]))
+		if bi >= 0:
+			_aim_bones.append(bi)
+			_aim_shares.append(float(b[1]))
+			total += float(b[1])
+	if _aim_bones.is_empty():
+		return
+	for i in _aim_shares.size():
+		_aim_shares[i] /= total
+	_aim_solver = AIM_SOLVER_SCRIPT.new()
+	_aim_solver.name = "DR_AimSolver"
+	_aim_solver.set("character", self)
+	_skel.add_child(_aim_solver)
+	_skel.move_child(_aim_solver, 0)
+
+
+## 조준 풀이 — 조준 수정자(뼈대 수정자 차례 맨 앞)가 부른다. 뼈 자세 = 동작 그대로
+func _solve_aim(sk: Skeleton3D) -> void:
+	var dt := _aim_dt
+	_aim_dt = 0.0
+	var on_to := 1.0 if _aim_has else 0.0
+	if _aim_on != on_to:
+		_aim_on = move_toward(_aim_on, on_to, dt / AIM_FADE_SEC)
+	var w := _aim_w * _aim_on
+	var ref: Array = _aim_ref(_motion) if w > 0.001 and sk != null else []
+	if ref.is_empty():
+		_aim_valid = false
+		_aim_last = {}
+		return
+	var to_c := _skel_to_char()
+	var piv := to_c * sk.get_bone_global_pose(_aim_bones[0]).origin
+	var pos0: Vector3 = ref[0]
+	var dir0: Vector3 = ref[1]
+	var yaw0 := atan2(dir0.x, dir0.z)
+	var el0 := asin(clampf(dir0.y, -1.0, 1.0))
+	var lo := Vector2(-deg_to_rad(aim_side_deg), -deg_to_rad(aim_down_deg))
+	var hi := Vector2(deg_to_rad(aim_side_deg), deg_to_rad(aim_up_deg))
+	var raw := Vector2(_aim_angle.x, _aim_angle.y - el0)
+	var want := raw.clamp(lo, hi)
+	if not _aim_by_angle:
+		var tgt := (global_transform.affine_inverse() if is_inside_tree() else Transform3D.IDENTITY) * _aim_point
+		var dp := tgt - piv
+		raw = Vector2(atan2(dp.x, dp.z), 0.0)  # 옆 = 몸 정면에서 표적이 벗어난 각(동작이 원래 겨눈 옆 방향은 그대로)
+		want = raw.clamp(lo, hi)
+		for it in 3:                           # 총구가 몸 축에서 떨어져 있어 돌리면 총구 자리도 바뀐다 — 그 자리에서 표적 높낮이를 다시
+			var d := tgt - (piv + aim_basis(want, dir0) * (pos0 - piv))
+			if d.length_squared() < 0.0001:
+				break
+			raw.y = asin(clampf(d.normalized().y, -1.0, 1.0)) - el0
+			want = raw.clamp(lo, hi)
+	if not _aim_valid:
+		_aim_cur = want
+		_aim_valid = true
+	else:
+		var step := deg_to_rad(aim_speed_deg) * dt
+		_aim_cur = Vector2(move_toward(_aim_cur.x, want.x, step), move_toward(_aim_cur.y, want.y, step))
+	var b := aim_basis(_aim_cur * w, dir0)     # 캐릭터 공간에서 돌림
+	var cb := to_c.basis.orthonormalized()
+	var q := (cb.inverse() * b * cb).get_rotation_quaternion()   # 뼈대 공간으로(배율은 서로 지운다)
+	for i in _aim_bones.size():
+		var bi := _aim_bones[i]
+		var g := sk.get_bone_global_pose(bi)
+		g.basis = Basis(Quaternion.IDENTITY.slerp(q, _aim_shares[i])) * g.basis    # 그 뼈 자리를 축으로 몫만큼
+		sk.set_bone_global_pose(bi, g)
+	var ya := yaw0 + raw.x
+	var ea := el0 + raw.y
+	var ideal := Vector3(sin(ya) * cos(ea), sin(ea), cos(ya) * cos(ea))
+	var md := b * dir0
+	_aim_last = {"weight": w, "yaw": rad_to_deg(_aim_cur.x * w), "pitch": rad_to_deg(_aim_cur.y * w), "want_yaw": rad_to_deg(raw.x),
+		"want_pitch": rad_to_deg(raw.y), "base_yaw": rad_to_deg(yaw0), "base_pitch": rad_to_deg(el0), "err": rad_to_deg(md.angle_to(ideal)),
+		"clamped": not want.is_equal_approx(raw), "muzzle": piv + b * (pos0 - piv), "dir": md, "aim_dir": ideal}
+
+
+## 조준 돌림(캐릭터 공간 — 위 = +Y) — 총구 방향 dir0 를 먼저 위아래로 c.y(그 수직면 안에서), 다음 옆으로 c.x(위 축으로)
+static func aim_basis(c: Vector2, dir0: Vector3) -> Basis:
+	var h := Vector3(dir0.x, 0.0, dir0.z)
+	if h.length_squared() < 1e-6:
+		h = Vector3.BACK
+	return Basis(Vector3.UP, c.x) * Basis(h.normalized().cross(Vector3.UP).normalized(), c.y)
+
+
+## 뼈대 공간 → 캐릭터 공간(이 노드 로컬) — 트리 밖이어도 되게 부모를 따라 곱한다
+func _skel_to_char() -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var n: Node = _skel
+	while n != null and n != self:
+		if n is Node3D:
+			t = (n as Node3D).transform * t
+		n = n.get_parent()
+	return t
+
+
+## 그 동작의 총구 기준 [자리, 방향](캐릭터 공간) — 동작 그대로(수정자 전) AIM_SAMPLES 시점 평균. 동작 파일에서 바로 계산해 지금 자세를
+## 건드리지 않는다(캐시 — 장비 · 동작 묶음이 바뀌면 비운다). 조준 못 하는 동작 · 받침(고정 받침대)이면 []
+func _aim_ref(motion: String) -> Array:
+	var r: Variant = _aim_refs.get(motion)
+	if r != null:
+		return r
+	var out: Array = []
+	var e := _sock_weapon
+	var anim: Animation = _ap.get_animation(motion) if _ap != null and motion != "" and _ap.has_animation(motion) else null
+	if anim != null and e != null and is_instance_valid(e) and not _muzzle.is_empty() and anim.length > 0.0:
+		var pq := _pose_of(e)
+		var exf := pq.base * offset_for(e, motion) if pq != null else e.transform    # 받침 기준 무기 자리(그 동작의 동작별 자리까지)
+		var to_c := _skel_to_char()
+		var tracks := _tracks_of(anim)
+		var sp := Vector3.ZERO
+		var sd := Vector3.ZERO
+		var ok := true
+		for k in AIM_SAMPLES:
+			var wx: Variant = _anchor_at(anim, tracks, anim.length * (float(k) + 0.5) / float(AIM_SAMPLES), e.get_parent(), motion)
+			if wx == null:
+				ok = false
+				break
+			var w := to_c * (wx as Transform3D) * exf
+			sp += w * (_muzzle[0] as Vector3)
+			sd += (w.basis * (_muzzle[1] as Vector3)).normalized()
+		if ok and sd.length_squared() > 1e-6:
+			out = [sp / float(AIM_SAMPLES), sd.normalized()]
+	_aim_refs[motion] = out
+	return out
+
+
+## 동작 파일의 시점 t 에서 받침의 자리(뼈대 공간) — 소켓 = 그 뼈, 두 손 사이 받침대 = _solve_mounts 와 같은 보간(그 동작의 손 IK 비중으로). 고정 받침대 · 모르는 받침 = null
+func _anchor_at(anim: Animation, tracks: Dictionary, t: float, anchor: Node, motion: String) -> Variant:
+	var memo := {}
+	if anchor is BoneAttachment3D:
+		var bi := _skel.find_bone((anchor as BoneAttachment3D).bone_name)
+		return _fk(anim, tracks, bi, t, memo) if bi >= 0 else null
+	var m := anchor as DRGripMount3D
+	if m == null or m.mode != DRGripMount3D.Mode.HANDS:
+		return null
+	var bl := _skel.find_bone(String(HAND_BONES[0]))
+	var br := _skel.find_bone(String(HAND_BONES[1]))
+	if bl < 0 or br < 0:
+		return null
+	var r := _fk(anim, tracks, br, t, memo) * m.right_offset
+	var l := _fk(anim, tracks, bl, t, memo) * m.left_offset
+	var hl: HandIK = _hands[0]
+	var hr: HandIK = _hands[1]
+	var wl := m.blend * (_hand_weight(0, motion) if hl != null and hl.anchor == m else 0.0)
+	var wr := (1.0 - m.blend) * (_hand_weight(1, motion) if hr != null and hr.anchor == m else 0.0)
+	return r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else m.blend)
+
+
+## 동작 파일에서 바로 그 시점의 뼈 자세(뼈대 공간). 트랙이 없는 뼈 · 성분은 레스트 — memo = 이번 시점에 계산한 뼈
+func _fk(anim: Animation, tracks: Dictionary, bone: int, t: float, memo: Dictionary) -> Transform3D:
+	var v: Variant = memo.get(bone)
+	if v != null:
+		return v
+	var rest := _skel.get_bone_rest(bone)
+	var tr: Array = tracks.get(bone, NO_TRACKS)
+	var p: Vector3 = rest.origin if int(tr[0]) < 0 else anim.position_track_interpolate(int(tr[0]), t)
+	var q: Quaternion = rest.basis.get_rotation_quaternion() if int(tr[1]) < 0 else anim.rotation_track_interpolate(int(tr[1]), t)
+	var s: Vector3 = rest.basis.get_scale() if int(tr[2]) < 0 else anim.scale_track_interpolate(int(tr[2]), t)
+	var g := Transform3D(Basis(q) * Basis.from_scale(s), p)
+	var par := _skel.get_bone_parent(bone)
+	if par >= 0:
+		g = _fk(anim, tracks, par, t, memo) * g
+	memo[bone] = g
+	return g
+
+
+## 동작의 뼈 트랙 — {뼈 번호: [위치, 회전, 크기 트랙 번호(없으면 −1)]} (트랙 길 "%GeneralSkeleton:<뼈>" 의 뼈 이름으로)
+func _tracks_of(anim: Animation) -> Dictionary:
+	var d: Variant = _anim_tracks.get(anim)
+	if d != null:
+		return d
+	var out := {}
+	for i in anim.get_track_count():
+		var ty := anim.track_get_type(i)
+		var slot := 0 if ty == Animation.TYPE_POSITION_3D else (1 if ty == Animation.TYPE_ROTATION_3D else (2 if ty == Animation.TYPE_SCALE_3D else -1))
+		var path := anim.track_get_path(i)
+		if slot < 0 or path.get_subname_count() == 0:
+			continue
+		var bi := _skel.find_bone(String(path.get_subname(0)))
+		if bi < 0:
+			continue
+		if not out.has(bi):
+			out[bi] = NO_TRACKS.duplicate()
+		(out[bi] as Array)[slot] = i
+	_anim_tracks[anim] = out
+	return out
 
 
 ## 이 노드 아래(skip — 몸 모델 — 빼고)의 소켓(BoneAttachment3D)을 씬 순서대로. 소켓 안으로는 더 내려가지 않는다
@@ -1337,7 +1719,7 @@ func _make_ik(side: int, marker: Node3D, anchor: Node3D) -> void:
 
 
 func _free_ik() -> void:
-	var nodes: Array = [_solver]
+	var nodes: Array = [_solver, _aim_solver]
 	for h in _hands:
 		if h != null:
 			nodes.append_array([(h as HandIK).rot, (h as HandIK).ik, (h as HandIK).pole, (h as HandIK).ref, (h as HandIK).wrist])
@@ -1348,6 +1730,7 @@ func _free_ik() -> void:
 				nn.get_parent().remove_child(nn)
 			nn.free()                          # 바로 — 같은 이름으로 다시 만들 때 겹치지 않게
 	_solver = null
+	_aim_solver = null
 	_hands = [null, null]
 
 

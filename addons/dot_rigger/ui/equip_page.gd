@@ -13,7 +13,9 @@ class_name DREquipPage
 ##     단축키(유니티와 같음): Q 보기 · W 이동 · E 회전 · R 크기 · Y 변환 · X 로컬/글로벌 · Z 피벗/중심 · F 고른 것 보기 · Ctrl 끌기 = 눈금 ·
 ##     Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) 되돌리기 / 다시 · Ctrl+S 저장. 카메라: 휠 · 가운데 끌기(옮기기) · 오른쪽 / Alt+왼쪽 끌기(돌려 보기) · Alt+오른쪽(확대)
 ##     미리보기를 누르면(끌지 않고) 그 자리의 왼손 표지 · 소켓 · 장비를 고른다(빈 곳 = 고르기 풀기). 기즈모를 놓으면 유닛 씬에 되돌리기 한 칸
-##   오른쪽: 동작마다 왼손(IK 전 · 뒤 cm) · 왼손 IK 비중(0 = 동작 그대로 — 수류탄 · 장전 · 맨손 달리기 등)
+##   오른쪽: 동작마다 왼손(IK 전 · 뒤 cm) · 왼손 IK 비중(0 = 동작 그대로 — 수류탄 · 장전 · 맨손 달리기 등) · 무기 자리 · 조준 비중
+##   조준 IK(10-21): 왼쪽 "조준" 칸(켜기 · 위 · 아래 · 옆 한계 · 빠르기 — 유닛 루트) · 가운데 [조준 미리보기](옆 · 높낮이를 끌면 허리 · 가슴이 돌아
+##     총구 선이 표적 십자로) · 동작 표 "조준" 칸(그 동작의 조준 비중 — 기본 = 동작 표의 사격 · 조준 상태면 1)
 ## 미리보기는 유닛을 pack 한 사본(저장 안 한 고침까지)이라 편집 중인 씬을 건드리지 않는다. 자리만 바뀌면 사본의 노드 자리만 옮긴다.
 
 const UNITS_DIR := "res://game/units"
@@ -105,6 +107,20 @@ var _xf_note: Label                       # 숫자 칸 아래 — 동작별 자�
 var _mt_menu: PopupMenu                   # 동작 표 오른쪽 누름
 var _mt_menu_motion := ""
 var _offset_clip: Variant = null          # 복사한 동작별 자리(Transform3D)
+# 조준 IK(10-21)
+const AIM_FIELDS := [["aim_up_deg", "위 한계 °", 0.0, 80.0, 1.0, "총구를 위로 더 돌릴 수 있는 각(그 동작이 원래 겨눈 높낮이에서) — 표적이 더 높으면 여기서 멈춘다"],
+	["aim_down_deg", "아래 한계 °", 0.0, 80.0, 1.0, "아래로 더 돌릴 수 있는 각"],
+	["aim_side_deg", "옆 한계 °", 0.0, 60.0, 1.0, "옆으로(앞뒤 줄의 표적) 더 돌릴 수 있는 각 — 0 이면 높낮이만 맞춘다"],
+	["aim_speed_deg", "빠르기 °/s", 30.0, 1440.0, 10.0, "표적이 바뀔 때 허리를 돌리는 빠르기(초당 각)"]]
+const AIM_MARK_M := 1.5                   # 미리보기 표적 십자 · 총구 선 길이(m)
+var _aim_chk: CheckBox
+var _aim_sp: Dictionary = {}              # 칸 이름 -> SpinBox
+var _aim_lock := false
+var _aim_btn: Button                      # 조준 미리보기
+var _aim_side_sl: HSlider
+var _aim_height_sl: HSlider
+var _aim_lbl: Label
+var _aim_preview := false
 
 
 func _init() -> void:
@@ -247,6 +263,43 @@ func _build_ui() -> void:
 	_btn(frow, "지금 자세로 왼손 표지", "미리보기의 지금 동작 · 시점에서 왼손(동작 그대로) 자리 · 회전을 고른 장비의 왼손 표지로(없으면 만든다)", func() -> void: make_hand_marker(0))
 	_btn(frow, "지금 자세로 오른손 표지", "미리보기의 지금 동작 · 시점에서 오른손(동작 그대로) 자리 · 회전을 고른 장비의 오른손 표지로(없으면 만든다) — 무기가 왼손 · 양손 · 고정일 때 오른손이 따라감", func() -> void: make_hand_marker(1))
 	_btn(frow, "지금 동작으로 무기 맞추기", "지금 동작 · 시점의 두 손바닥으로 무기 방향을 다시 잡는다(쥐는 점 = 지금 오른 손바닥 자리, 표지가 있으면 그 점이 왼손 쪽) — 손 소켓에 든 무기만", fit_weapon)
+	# 조준 IK(10-21) — 유닛 루트 칸. 사용자: "사격할 때 적을 바라보는 벡터 기준으로 허리가 살짝 굽거나 — 총구가 적을 바라봐야 되니까"
+	left.add_child(HSeparator.new())
+	var arow0 := HBoxContainer.new()
+	left.add_child(arow0)
+	_aim_chk = CheckBox.new()
+	_aim_chk.text = "조준"
+	_aim_chk.focus_mode = Control.FOCUS_NONE
+	_aim_chk.tooltip_text = "조준 IK — 사격 · 조준 동작에서 허리 · 가슴(Spine · Chest · UpperChest)을 돌려 총구가 표적(게임이 주는 적의 겨눌 곳)을 향하게 한다.\n" + \
+		"높낮이는 정확히 · 옆은 몸 정면에서 표적이 벗어난 만큼만(동작이 원래 겨눈 옆 방향은 그대로). 손 · 무기는 몸을 따라오고 손 IK 가 다시 잡는다"
+	_aim_chk.toggled.connect(func(on: bool) -> void: set_aim_setting("aim_enabled", on))
+	arow0.add_child(_aim_chk)
+	var anote := Label.new()
+	anote.text = "사격 때 허리 · 가슴을 돌려 총구를 표적으로"
+	anote.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	anote.clip_text = true
+	anote.add_theme_font_size_override("font_size", 12)
+	anote.add_theme_color_override("font_color", Color(0.72, 0.8, 0.9))
+	arow0.add_child(anote)
+	var agrid := GridContainer.new()
+	agrid.columns = 4
+	left.add_child(agrid)
+	for f in AIM_FIELDS:
+		var al := Label.new()
+		al.text = String(f[1])
+		al.tooltip_text = String(f[5])
+		al.mouse_filter = Control.MOUSE_FILTER_PASS
+		agrid.add_child(al)
+		var sp := SpinBox.new()
+		sp.min_value = float(f[2])
+		sp.max_value = float(f[3])
+		sp.step = float(f[4])
+		sp.custom_minimum_size = Vector2(84, 0)
+		sp.tooltip_text = String(f[5])
+		var prop := String(f[0])
+		sp.value_changed.connect(func(v: float) -> void: set_aim_setting(prop, v))
+		agrid.add_child(sp)
+		_aim_sp[prop] = sp
 	left.add_child(HSeparator.new())
 	_xf_title = Label.new()
 	_xf_title.text = "고른 노드 —"
@@ -424,6 +477,37 @@ func _build_ui() -> void:
 	_view_btn = _btn(ctl, "도트 보기", "돌려 보기(가까이 · 기준점 맞추기) ↔ 도트 보기(게임 화면과 같은 저해상도 · 외곽선)", func() -> void: set_dot_mode(not _dot_mode))
 	_btn(ctl, "손", "두 손 · 무기를 가까이", func() -> void: focus_hands())
 	_btn(ctl, "전신", "몸 전체", func() -> void: focus_body())
+	# 조준 미리보기(10-21) — 표적 대신 각으로: 옆 = 동작이 원래 겨눈 옆 방향에서 · 높낮이 = 총구 높낮이(수평 0)
+	var arow := HFlowContainer.new()
+	mid.add_child(arow)
+	_aim_btn = Button.new()
+	_aim_btn.text = "조준 미리보기"
+	_aim_btn.toggle_mode = true
+	_aim_btn.focus_mode = Control.FOCUS_NONE
+	_aim_btn.tooltip_text = "미리보기 병사가 표적(분홍 십자)을 겨누게 한다 — 옆 · 높낮이를 끌어 허리 · 가슴이 어떻게 도는지 본다.\n" + \
+		"총구 선: 초록 = 표적으로 · 주황 = 한계에서 멈춤. 조준 비중이 0 인 동작(서기 · 걷기 · 장전 …)은 돌지 않는다 — 오른쪽 표 \"조준\" 칸"
+	_aim_btn.toggled.connect(set_aim_preview)
+	arow.add_child(_aim_btn)
+	for sd in [["옆", -45.0, 45.0, "동작이 원래 겨눈 옆 방향에서 표적이 벗어난 각(앞뒤 줄의 적)"], ["높낮이", -60.0, 60.0, "총구에서 본 표적의 높낮이(수평 = 0, 위 +) — 높은 벽 위 · 참호 아래 · 엎드린 적"]]:
+		var sl := Label.new()
+		sl.text = String(sd[0])
+		arow.add_child(sl)
+		var hs := HSlider.new()
+		hs.min_value = float(sd[1])
+		hs.max_value = float(sd[2])
+		hs.step = 1.0
+		hs.custom_minimum_size = Vector2(110, 0)
+		hs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		hs.tooltip_text = String(sd[3])
+		hs.value_changed.connect(func(_v: float) -> void: _apply_aim_preview())
+		arow.add_child(hs)
+		if sd[0] == "옆":
+			_aim_side_sl = hs
+		else:
+			_aim_height_sl = hs
+	_aim_lbl = Label.new()
+	_aim_lbl.add_theme_font_size_override("font_size", 12)
+	arow.add_child(_aim_lbl)
 	_info = Label.new()
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_info.add_theme_font_size_override("font_size", 12)
@@ -431,7 +515,7 @@ func _build_ui() -> void:
 
 	# 오른쪽 — 동작마다 손 · 무기 자리
 	var right := VBoxContainer.new()
-	right.custom_minimum_size = Vector2(440, 0)
+	right.custom_minimum_size = Vector2(470, 0)
 	right_split.add_child(right)
 	var rrow := HBoxContainer.new()
 	right.add_child(rrow)
@@ -449,20 +533,22 @@ func _build_ui() -> void:
 	rrow.add_child(_mt_side_ob)
 	_btn(rrow, "모든 동작 재기", "동작마다 8 시점에서 그 손바닥 ↔ 표지 거리(IK 전 = 동작 그대로 · IK 뒤) — 미리보기 사본으로 잰다", measure_all)
 	_mt = Tree.new()
-	# 칸: 동작 | 손 ↔ 표지(IK 전 → 뒤 평균 — 최대는 풍선 도움말) | IK 비중 | 무기 자리. 10-19 무기 자리 칸을 넣으며 IK 전 · 뒤 두 칸을 하나로(탭 기본 크기에서 가로로 안 넘치게)
-	_mt.columns = 4
+	# 칸: 동작 | 손 ↔ 표지(IK 전 → 뒤 평균 — 최대는 풍선 도움말) | IK 비중 | 무기 자리 | 조준. 10-19 무기 자리 칸을 넣으며 IK 전 · 뒤 두 칸을 하나로(탭 기본 크기에서 가로로 안 넘치게)
+	_mt.columns = 5
 	_mt.hide_root = true
 	_mt.column_titles_visible = true
 	_mt.set_column_title(0, "동작")
 	_mt.set_column_title(1, "손↔표지 cm")
 	_mt.set_column_title(2, "IK 비중")
 	_mt.set_column_title(3, "무기 자리")
+	_mt.set_column_title(4, "조준")
 	_mt.set_column_title_tooltip_text(1, "그 손바닥 ↔ 표지 거리, 8 시점 평균: 동작 그대로(IK 전) → IK 뒤. 최대는 칸의 풍선 도움말 — [모든 동작 재기]")
 	_mt.set_column_title_tooltip_text(2, "그 손을 표지에 붙이는 정도(0 = 동작 그대로 — 총을 놓는 동작)")
 	_mt.set_column_title_tooltip_text(3, "그 동작의 무기 위치 · 회전 — ● 따로 둠(기본 자리에서 거리 · 각) · ↳ 상하체 합성의 상체 동작 것 · 기본")
+	_mt.set_column_title_tooltip_text(4, "그 동작의 조준 비중(0 = 동작 그대로 · 1 = 총구가 표적으로) — 흐린 값 = 기본(동작 표의 사격 · 조준 상태면 1)")
 	_mt.set_column_expand(0, true)
 	_mt.set_column_clip_content(0, true)        # 좁으면 동작 이름을 줄여서(다른 칸이 밀려나지 않게)
-	for cw in [[1, 96], [2, 76], [3, 104]]:
+	for cw in [[1, 88], [2, 64], [3, 100], [4, 56]]:
 		_mt.set_column_expand(cw[0], false)
 		_mt.set_column_custom_minimum_width(cw[0], cw[1])
 	_mt.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -487,8 +573,8 @@ func _build_ui() -> void:
 	help.add_theme_font_size_override("font_size", 11)
 	help.add_theme_color_override("font_color", Color(0.6, 0.63, 0.67))
 	help.text = "IK 전 · 뒤 = 평균 / 최대. IK 비중 0 = 그 동작은 그 손을 표지에 안 붙인다(수류탄 던지기 · 장전 · 맨손 달리기처럼 총을 놓는 동작 — 손 표지의 motion_weights). " + \
-		"무기 자리 = 그 동작의 무기 위치 · 회전(● 따로 둠 · ↳ 상하체 합성의 상체 동작 것 · 기본). 행 누름 = 그 동작 틀기 · 두 번 누름 = 이 동작만 고치기 · " + \
-		"오른쪽 누름 = 맞추기 · 복사 · 붙여넣기 · 기본으로."
+		"무기 자리 = 그 동작의 무기 위치 · 회전(● 따로 둠 · ↳ 상하체 합성의 상체 동작 것 · 기본). 조준 = 사격 때 허리 · 가슴을 돌리는 정도(흐림 = 기본). " + \
+		"행 누름 = 그 동작 틀기 · 두 번 누름 = 이 동작만 고치기 · 오른쪽 누름 = 맞추기 · 복사 · 붙여넣기 · 기본으로."
 	right.add_child(help)
 	_fill_bones(PackedStringArray())
 	_fill_models()
@@ -999,6 +1085,7 @@ func _refresh_all() -> void:
 	_struct_sig = _make_struct_sig()
 	_xform_sig = _make_xform_sig()
 	_show_xform()
+	_show_aim_settings()
 
 
 func _fill_tree() -> void:
@@ -1438,6 +1525,7 @@ func _after_change(structural: bool) -> void:
 	_struct_sig = _make_struct_sig()
 	_xform_sig = _make_xform_sig()
 	_show_xform()
+	_show_aim_settings()
 
 
 ## 소켓 더하기 — 유닛 씬에 BoneAttachment3D(use_external_skeleton — 뼈대는 DRCharacter3D 가 조립 뒤 이어 준다)
@@ -1721,6 +1809,126 @@ func _on_edit_in_editor() -> void:
 	EditorInterface.edit_node(n)
 
 
+# ───────────── 조준 IK(10-21) ─────────────
+
+## 유닛 루트의 조준 칸(aim_enabled · aim_up_deg …) — 되돌리기 한 칸(숫자 칸을 잇달아 바꾸면 한 칸으로 합침)
+func set_aim_setting(prop: String, value: Variant) -> void:
+	if _aim_lock or _root == null or _root.get(prop) == value:
+		return
+	if value is bool:
+		_begin("장비: 조준 %s" % ("켬" if value else "끔"))
+		_op_prop(_root, prop, value)
+		_end(false)
+	else:
+		_set_props_merged("장비: 조준 " + prop, [[_root, prop, value]])
+	_fill_motion_table.call_deferred()      # 켜고 끄면 조준 칸이 바뀐다
+
+
+## 왼쪽 조준 칸 = 유닛 루트 값(되돌리기 · 인스펙터로 바뀐 것도)
+func _show_aim_settings() -> void:
+	if _aim_chk == null:
+		return
+	_aim_lock = true
+	var on := _root != null
+	_aim_chk.disabled = not on
+	_aim_chk.button_pressed = _root.aim_enabled if on else false
+	for prop in _aim_sp:
+		var sp := _aim_sp[prop] as SpinBox
+		sp.editable = on and _root.aim_enabled
+		if on:
+			sp.value = float(_root.get(prop))
+	_aim_lock = false
+
+
+## 그 동작의 조준 비중을 따로(w = null 이면 지워서 기본으로) — 유닛 루트 aim_motion_weights, 되돌리기 한 칸
+func set_aim_weight(motion: String, w: Variant) -> void:
+	if _root == null or motion == "":
+		return
+	var d: Dictionary[String, float] = _root.aim_motion_weights.duplicate()
+	d.erase(motion)
+	var plus := motion.rfind("+")
+	var fallback: float = d[motion.substr(plus + 1)] if plus > 0 and d.has(motion.substr(plus + 1)) else _root.aim_default_weight(motion)   # 따로 안 두면 쓰는 값
+	if w != null and absf(float(w) - fallback) >= 0.001:
+		d[motion] = clampf(float(w), 0.0, 1.0)
+	if d == _root.aim_motion_weights:
+		return
+	_begin("장비: 조준 비중 %s" % motion)
+	_op_prop(_root, "aim_motion_weights", d)
+	_end(false)
+	_fill_motion_table.call_deferred()      # 미뤄서 — 표의 칸 고치기 신호에서도 불린다
+
+
+## 조준 미리보기 켜고 끄기 — 미리보기 병사가 옆 · 높낮이 각을 겨눈다(표적 대신 각 — set_aim_angles)
+func set_aim_preview(on: bool) -> void:
+	_aim_preview = on
+	if _aim_btn != null:
+		_aim_btn.set_pressed_no_signal(on)
+		_aim_btn.self_modulate = Color(1.0, 0.55, 0.85) if on else Color.WHITE   # 켜져 있음이 보이게(표적 십자와 같은 분홍)
+	_apply_aim_preview()
+	if on and not _dot_mode:
+		focus_aim()                          # 허리가 도는 것 · 표적 십자가 다 보이게
+
+
+## 몸과 표적 십자가 다 들어오게(조준 미리보기를 켤 때 · 돌려 보기)
+func focus_aim() -> void:
+	if _prev == null:
+		return
+	var ar := _prev.aim_report()
+	if ar.is_empty():
+		focus_body()
+		return
+	var g := _prev.global_transform
+	var body := g * Vector3(0.0, 1.0, 0.0)
+	var tp: Vector3 = g * (ar["muzzle"] as Vector3) + (g.basis * (ar["aim_dir"] as Vector3)).normalized() * AIM_MARK_M
+	_target = (body + tp) * 0.5
+	_dist = clampf(body.distance_to(tp) * 2.4 + 1.4, 3.3, 7.0)
+	_update_cam()
+
+
+func _apply_aim_preview() -> void:
+	var side := _aim_side_sl.value if _aim_side_sl != null else 0.0
+	var height := _aim_height_sl.value if _aim_height_sl != null else 0.0
+	if _aim_lbl != null:
+		_aim_lbl.text = "옆 %+d° · 높낮이 %+d°" % [int(side), int(height)]
+		_aim_lbl.modulate = Color.WHITE if _aim_preview else Color(1, 1, 1, 0.45)
+	if _prev == null:
+		return
+	if _aim_preview:
+		_prev.set_aim_angles(side, height, true)
+	else:
+		_prev.clear_aim_target(true)
+	_force_pose()
+
+
+## 동작 표 조준 칸 — 기본(동작 표 상태로 정한 값)은 흐리게
+func _fill_aim_cell(it: TreeItem, motion: String) -> void:
+	const C := 4
+	if _root == null:
+		it.set_text(C, "-")
+		return
+	var own := _root.aim_motion_weights.has(motion)
+	var plus := motion.rfind("+")
+	var upper := motion.substr(plus + 1) if plus > 0 and not own and _root.aim_motion_weights.has(motion.substr(plus + 1)) else ""
+	it.set_cell_mode(C, TreeItem.CELL_MODE_RANGE)
+	it.set_range_config(C, 0.0, 1.0, 0.05)
+	it.set_range(C, _root.aim_weight_for(motion) if _root.aim_enabled else 0.0)
+	it.set_editable(C, _root.aim_enabled)
+	var tip := "조준 비중 — 사격 때 허리 · 가슴을 돌려 총구를 표적으로 하는 정도(0 = 동작 그대로)"
+	if not _root.aim_enabled:
+		it.set_custom_color(C, Color(0.45, 0.47, 0.5))
+		tip += "\n조준이 꺼져 있다(왼쪽 [조준])"
+	elif own:
+		it.clear_custom_color(C)
+		tip += "\n이 동작만 따로 둔 값 — 오른쪽 누름 → 조준 비중 기본으로"
+	elif upper != "":
+		it.set_custom_color(C, Color(0.55, 0.76, 0.96))
+		tip += "\n상하체 합성 — 상체 동작 %s 의 값" % upper
+	else:
+		it.set_custom_color(C, Color(0.55, 0.57, 0.6))
+		tip += "\n기본 — 동작 표의 사격 · 조준 상태에 든 동작이면 1, 아니면 0. 바꾸면 이 동작만 따로"
+	it.set_tooltip_text(C, tip)
+
+
 # ───────────── 미리보기 ─────────────
 
 ## 유닛을 pack 한 사본으로 미리보기 캐릭터를 다시 만든다(저장 안 한 고침까지 — 편집 중인 씬은 안 건드림)
@@ -1768,6 +1976,7 @@ func _rebuild_preview() -> void:
 		_seek(keep_t)
 	elif keep == "":
 		focus_hands.call_deferred()             # 처음 — 두 손 · 무기를 가까이(소켓이 뼈를 따라간 뒤에)
+	_apply_aim_preview()                         # 새 사본도 조준 미리보기 그대로
 
 
 func _on_prev_updated() -> void:
@@ -2006,6 +2215,7 @@ func _follow_root() -> void:
 		_rebuild_preview()
 		_xform_sig = _make_xform_sig()
 		_show_xform()
+		_show_aim_settings()
 		return
 	var xs := _make_xform_sig()
 	if xs != _xform_sig:
@@ -2013,6 +2223,7 @@ func _follow_root() -> void:
 		_sync_preview()
 		_fill_tree()                             # 동작별 자리 개수(되돌리기 · 인스펙터로 바뀐 것도)
 		_show_xform()
+		_show_aim_settings()                     # 조준 칸(되돌리기 · 인스펙터)
 		_fill_motion_table()
 
 
@@ -2037,7 +2248,9 @@ func _make_struct_sig() -> String:
 func _make_xform_sig() -> String:
 	if _root == null:
 		return ""
-	var parts := PackedStringArray()
+	var parts := PackedStringArray([str(_root.aim_motion_weights)])   # 조준 칸(10-21 — 되돌리기 · 인스펙터로 바뀐 것도 미리보기 사본에)
+	for k in DRCharacter3D.AIM_PROPS:
+		parts.append(str(_root.get(k)))
 	for s in _anchors():
 		if s is DRGripMount3D:                  # 받침대: 고정이면 자리 · 두 손 사이면 보간 비율 · 맞춘 자세
 			var gm := s as DRGripMount3D
@@ -2081,7 +2294,27 @@ func _update_info() -> void:
 	var oe := _offset_equip()
 	if oe != null and DRCharacter3D.offset_key(oe, current_motion()) != "":
 		parts.append("무기 = 이 동작 자리(%s)" % _offset_text(oe, current_motion()))
+	if _aim_preview:
+		parts.append(_aim_text())
 	_info.text = " · ".join(parts)
+
+
+## 조준 미리보기 상태 한 줄
+func _aim_text() -> String:
+	if _prev == null or _prev.get_weapon_node() == null:
+		return "조준: 무기 없음"
+	if not _prev.aim_enabled:
+		return "조준: 꺼짐(왼쪽 [조준])"
+	if _prev.get_weapon_node().get_parent() is DRGripMount3D and (_prev.get_weapon_node().get_parent() as DRGripMount3D).mode == DRGripMount3D.Mode.FIXED:
+		return "조준: 고정 받침대 — 몸으로 겨누지 않음"
+	var w := _prev.aim_weight_for(current_motion())
+	if w <= 0.0:
+		return "조준: 이 동작은 0 % — 오른쪽 표 \"조준\" 칸을 올리거나 사격 동작(Firing_Rifle 등)을 고르세요"
+	var r := _prev.aim_report()
+	if r.is_empty():
+		return "조준 %d %%" % roundi(w * 100.0)
+	return "조준 %d %% · 허리 · 가슴 돌림 옆 %+.0f° · 위아래 %+.0f°%s (동작이 원래 겨눈 높낮이 %+.0f°)" % [roundi(w * 100.0), float(r["yaw"]), float(r["pitch"]),
+		" — 한계에서 멈춤" if bool(r["clamped"]) else "", float(r["base_pitch"])]
 
 
 ## 미리보기에 표시: 손 표지(초록 — 왼손 · 하늘 — 오른손) · IK 뒤 손바닥(빨강) · 소켓(노랑) · 받침대(주황) ·
@@ -2107,6 +2340,19 @@ func _draw_marks() -> void:
 	for s in _prev.get_anchors():
 		_cross(s.global_position, 0.02, Color(1.0, 0.9, 0.2) if s is BoneAttachment3D else Color(1.0, 0.55, 0.15))
 		any = true
+	if _aim_preview:                             # 조준: 표적(분홍 — 겨눌 방향) · 총구 선(초록 = 표적으로 · 주황 = 한계)
+		var ar := _prev.aim_report()
+		var mw := _prev.muzzle_world()
+		if not ar.is_empty() and not mw.is_empty():
+			var g := _prev.global_transform
+			var tp: Vector3 = g * (ar["muzzle"] as Vector3) + (g.basis * (ar["aim_dir"] as Vector3)).normalized() * AIM_MARK_M
+			_cross(tp, 0.06, Color(1.0, 0.35, 0.85))
+			var col := Color(1.0, 0.6, 0.2) if bool(ar["clamped"]) else Color(0.35, 1.0, 0.45)
+			_imesh.surface_set_color(col)
+			_imesh.surface_add_vertex(mw[0])
+			_imesh.surface_set_color(col)
+			_imesh.surface_add_vertex((mw[0] as Vector3) + (mw[1] as Vector3) * AIM_MARK_M)
+			any = true
 	var pn := _prev_node(_node(_sel)) as Node3D
 	if pn != null and (_giz.tool_mode == TransformGizmo.Tool.VIEW or (_giz.tool_mode == TransformGizmo.Tool.SCALE and not _giz.allow_scale)):
 		var t := pn.global_transform
@@ -2187,6 +2433,7 @@ func _fill_motion_table(report: Array = []) -> void:
 			else:
 				it.set_text(2, "표지 없음" if mk == null else "1(늘)")
 			_fill_offset_cell(it, n)
+			_fill_aim_cell(it, n)
 			if n == current_motion():
 				it.select(0)                     # 지금 동작 행(잠금 중이라 다시 틀지 않음)
 	_mt_lock = false
@@ -2196,9 +2443,12 @@ func _on_mt_edited() -> void:
 	if _mt_lock:
 		return
 	var it := _mt.get_edited()
-	if it == null or _mt.get_edited_column() != 2:
+	if it == null:
 		return
-	set_motion_weight(it.get_text(0), it.get_range(2))
+	if _mt.get_edited_column() == 2:
+		set_motion_weight(it.get_text(0), it.get_range(2))
+	elif _mt.get_edited_column() == 4:
+		set_aim_weight(it.get_text(0), it.get_range(4))
 
 
 ## 동작마다 그 손바닥 ↔ 표지(IK 전 · 뒤, 동작 표가 보이는 손) — 미리보기 사본으로 8 시점씩. 돌려주는 값 = DREquipHold.motion_report
@@ -2515,6 +2765,10 @@ func _on_mt_mouse(_pos: Vector2, button: int) -> void:
 	_mt_menu.set_item_disabled(3, not (_offset_clip is Transform3D))
 	_mt_menu.add_item("기본 자리로(따로 자리 지우기)", 4)
 	_mt_menu.set_item_disabled(4, not own)
+	_mt_menu.add_separator()
+	_mt_menu.add_item("조준 미리보기(이 동작)", 5)
+	_mt_menu.add_item("조준 비중 기본으로", 6)
+	_mt_menu.set_item_disabled(6, _root == null or not _root.aim_motion_weights.has(_mt_menu_motion))
 	_mt_menu.reset_size()
 	_mt_menu.popup_on_parent(Rect2i(Vector2i(get_global_mouse_position()), Vector2i.ZERO))
 
@@ -2536,3 +2790,7 @@ func _on_mt_menu(id: int) -> void:
 			paste_motion_offset(mo)
 		4:
 			reset_motion_offset(mo)
+		5:
+			set_aim_preview(true)
+		6:
+			set_aim_weight(mo, null)
