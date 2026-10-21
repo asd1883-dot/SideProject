@@ -9,7 +9,8 @@ extends SceneTree
 ## [5] 비중 0 동작 · 꺼짐(aim_enabled) · 표적 거둠 = 동작 그대로(뼈 자세가 조준 없을 때와 같음)
 ## [6] 왼손 IK 가 돌린 자세에서도 총을 잡음(1 cm 안) · 빠르기(초당 각) · 동작이 바뀔 때 비중 섞기
 ## [7] 게임처럼(캐릭터 돌림 · 키 배율) · 상하체 합성 · 엎드려 사격
-## [8] 양손 받침대(두 손 사이 — 시험 파일이 있으면): 두 손 IK · 조준 · 고정 받침대 = 조준 안 함
+## [8] 양손 받침대(두 손 사이 — 시험 파일이 있으면): 두 손 IK · 조준(받침대를 견착점 축으로) · 고정 받침대 = 조준 안 함
+## [9] 팔 · 견착(10-21 저녁): 팔 몫 0 · 70 · 100 % 실제 총구 높낮이 · 가슴 뼈 덜 숙임 · 100 % 면 견착점 제자리 · 거두면 팔 IK 꺼짐
 ## 마지막 줄이 "AIM CHECK OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -233,6 +234,33 @@ func _run() -> void:
 		_check(not rr.is_empty() and float(rr["err"]) < 1.5, "%s 위 10° — %.2f° · 왼손 IK 뒤 %.2f cm" % [mo, float(rr.get("err", 999)), float(ch.support_report(0).get("ik", 9)) * 100.0])
 	ch.queue_free()
 
+	print("[9] 팔 · 견착 — 높낮이는 견착점 축으로 팔이 주로(사용자: \"진짜 조준을 할 때 팔 부분이 영향이 제일 많이 가잖아 — 양팔로 인한 견착 위치에 따라\")")
+	var ch9 := _make(BASE)
+	await process_frame
+	_start(ch9, "Firing_Rifle")
+	var up_raw := _upper_pose(ch9)
+	var sh_raw := ch9.shoulder_world()
+	var mz_raw := ch9.muzzle_world()
+	var turn := {}
+	for share in [0.0, 0.7, 1.0]:
+		ch9.aim_arm_share = share
+		ch9.set_aim_angles(0.0, 25.0, true)
+		var up := _upper_pose(ch9)
+		var r9 := ch9.aim_report()
+		var el := _elev(ch9.muzzle_world()[1])
+		turn[share] = rad_to_deg(up.basis.get_rotation_quaternion().angle_to(up_raw.basis.get_rotation_quaternion()))
+		_check(absf(el - 25.0) < 1.5 and absf(float(r9["arm_pitch"]) - float(r9["pitch"]) * share) < 0.1,
+			"팔 몫 %d %% — 실제 총구 높낮이 %.1f°(겨눔 25°) · 팔 %+.1f° · 허리 · 가슴 %+.1f° · 가슴 뼈 돌림 %.1f° · 견착점 이동 %.1f cm · 왼손 IK 뒤 %.2f cm" % [
+			roundi(share * 100.0), el, float(r9["arm_pitch"]), float(r9["body_pitch"]), float(turn[share]), ch9.shoulder_world().distance_to(sh_raw) * 100.0,
+			float(ch9.support_report(0).get("ik", 9)) * 100.0])
+	_check(float(turn[0.7]) < float(turn[0.0]) * 0.5, "가슴 뼈 돌림: 팔 몫 0 %% %.1f° → 70 %% %.1f°(팔이 맡은 만큼 덜 숙임)" % [float(turn[0.0]), float(turn[0.7])])
+	_check(ch9.shoulder_world().distance_to(sh_raw) < 0.03, "팔 몫 100 %% = 견착점 거의 제자리(%.1f cm) — 개머리판을 어깨에 댄 채 총구만 듦" % (ch9.shoulder_world().distance_to(sh_raw) * 100.0))
+	_check((ch9.muzzle_world()[0] as Vector3).y - (mz_raw[0] as Vector3).y > 0.1, "총구 끝이 %.0f cm 올라감" % (((ch9.muzzle_world()[0] as Vector3).y - (mz_raw[0] as Vector3).y) * 100.0))
+	ch9.clear_aim_target(true)
+	_force(ch9)
+	_check(_upper_pose(ch9).is_equal_approx(up_raw) and ch9.shoulder_world().distance_to(sh_raw) < 0.001, "표적 거둠 → 팔 IK 꺼짐 · 동작 그대로")
+	ch9.queue_free()
+
 	print("[8] 양손 받침대")
 	if not ResourceLoader.exists(TWO):
 		print("  (건너뜀 — %s 없음)" % TWO)
@@ -253,6 +281,11 @@ func _run() -> void:
 		_check(not hl.is_empty() and not hr.is_empty() and float(hl["ik"]) < float(hl0.get("ik", 0)) + 0.01 and float(hr["ik"]) < float(hr0.get("ik", 0)) + 0.01,
 			"두 손 IK 뒤 왼 %.2f · 오른 %.2f cm — 조준 전 %.2f · %.2f cm 보다 나빠지지 않음" % [float(hl.get("ik", 9)) * 100.0, float(hr.get("ik", 9)) * 100.0,
 			float(hl0.get("ik", 9)) * 100.0, float(hr0.get("ik", 9)) * 100.0])
+		two.set_aim_angles(0.0, 25.0, true)
+		_force(two)
+		var el2 := _elev(two.muzzle_world()[1])
+		_check(absf(el2 - 25.0) < 1.5 and float(two.aim_report().get("arm_pitch", 0)) > 1.0,
+			"양손 받침대도 팔 몫 — 받침대를 견착점 축으로 돌림: 실제 총구 높낮이 %.1f°(겨눔 25°) · 팔 %+.1f°" % [el2, float(two.aim_report().get("arm_pitch", 0))])
 		(w.get_parent() as DRGripMount3D).mode = DRGripMount3D.Mode.FIXED
 		two.refresh_equipment()
 		_start(two, "Firing_Rifle")

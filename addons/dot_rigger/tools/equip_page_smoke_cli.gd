@@ -564,9 +564,9 @@ func _aim_checks(page: DREquipPage) -> void:
 	_check(page._aim_btn.button_pressed and not ar.is_empty() and absf(_elev(ar["dir"]) - 20.0) < 0.5 and page._aim_lbl.text.contains("+20"),
 		"조준 미리보기 높낮이 +20° → 총구 높낮이 %.1f° · 허리 · 가슴 돌림 위아래 %+.1f°「%s」" % [_elev(ar.get("dir", Vector3.ZERO)), float(ar.get("pitch", 0)), page._aim_lbl.text])
 	page._update_info()
-	_check(page._info.text.contains("허리 · 가슴 돌림"), "정보 줄: …%s" % page._info.text.right(64))
+	_check(page._info.text.contains("(팔 +") and page._info.text.contains("허리 · 가슴"), "정보 줄: …%s" % page._info.text.right(80))
 	var marks_on := _mark_count(page)
-	_check(marks_on == marks_off + 8, "미리보기 표시 — 표적 십자 · 총구 선(선 정점 %d → %d)" % [marks_off, marks_on])
+	_check(marks_on == marks_off + 14, "미리보기 표시 — 표적 십자 · 총구 선 · 견착점 십자(선 정점 %d → %d)" % [marks_off, marks_on])
 	page._aim_side_sl.value = 10.0
 	await _frames(1)
 	ar = page._prev.aim_report()
@@ -584,6 +584,17 @@ func _aim_checks(page: DREquipPage) -> void:
 	_check(absf(r0.aim_up_deg - 25.0) < 0.01 and absf(page._prev.aim_up_deg - 25.0) < 0.01 and absf(float(ar.get("pitch", 0)) - 25.0) < 0.5,
 		"위 한계 칸 25° → 유닛 값 · 미리보기 사본 · 돌림 %+.1f°" % float(ar.get("pitch", 0)))
 	(page._aim_sp["aim_up_deg"] as SpinBox).value = up0
+	# 팔 몫 칸(% — 유닛 값은 0 ~ 1)
+	var arm0 := r0.aim_arm_share
+	(page._aim_sp["aim_arm_share"] as SpinBox).value = 100.0
+	await _frames(1)
+	page._force_pose()
+	ar = page._prev.aim_report()
+	_check(absf(r0.aim_arm_share - 1.0) < 0.001 and absf(page._prev.aim_arm_share - 1.0) < 0.001 and absf(float(ar.get("arm_pitch", 0)) - float(ar.get("pitch", 9))) < 0.1
+		and absf(float(ar.get("body_pitch", 9))) < 0.1, "팔 몫 칸 100 %% → 유닛 값 1.0 · 미리보기 사본 · 위아래 전부 팔(%+.1f°)" % float(ar.get("arm_pitch", 0)))
+	(page._aim_sp["aim_arm_share"] as SpinBox).value = arm0 * 100.0
+	await _frames(1)
+	_check(absf(r0.aim_arm_share - arm0) < 0.001, "팔 몫 되돌림 %d %%" % roundi(arm0 * 100.0))
 	page._aim_height_sl.value = 15.0
 	await _frames(1)
 	# 비중 0 동작 · 안내
