@@ -61,10 +61,15 @@ static func shoot(bf: Battlefield, s: BattleSoldier, w: WeaponData, ox: float, a
 	var hit: BattleSoldier = res["hit"]
 	if bool(res["blocked"]):
 		bf.stats["blocked"] += 1
-	bf.schedule_impact(flight, hit, s.stat(StatMod.DAMAGE, w.damage), s, res["near"], w.suppress_power)
+	var to := Vector3(mx + float(dir) * travel, mh + slope_h * travel, md + slope_d * travel)
+	var hit_at := to                            # 맞은 점(화면의 피격 반응 — 판정 · 비행 시간에는 안 씀): 총알이 상자 위 · 아래로 들어오면 높이를 몸 안으로
+	if hit != null:
+		hit_at.y = clampf(to.y, 0.0, hit.type.box(hit.stance).y)
+	bf.schedule_impact(flight, hit, s.stat(StatMod.DAMAGE, w.damage), s, res["near"], w.suppress_power, hit_at,
+		Vector3(float(dir), slope_h, slope_d * bf.depth_width_m))
 	bf.shot_fired.emit({
 		"from": Vector3(mx, mh, md),
-		"to": Vector3(mx + float(dir) * travel, mh + slope_h * travel, md + slope_d * travel),
+		"to": to,
 		"flight": flight,
 		"team": s.team,
 		"hit": hit,

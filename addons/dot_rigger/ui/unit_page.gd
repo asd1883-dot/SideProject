@@ -9,6 +9,7 @@ class_name DRUnitPage
 ##   왼쪽: 유닛 목록(부모 → 자식 나무) · [+ 자식 유닛] · [씬 열기] · [저장] · 모습 칸(몸 · 상의 · 하의 · 동작 표 · 키 — 자식은 "부모 값 / 바꿈" + ↺)
 ##         · 장비 요약(뼈 소켓 → 무기 · 헬멧 — 고치기는 ② 장비 탭 · 씬 독 · 기즈모. 예전 "무기" 칸(weapon_asset)은 10-16 소켓 방식으로 갈음)
 ##   가운데: 3D 도트 미리보기(게임과 같은 DRDotView3D · 초당 12번) — 세트 · 상태를 고르면 동작 표대로 비중을 뽑아 튼다 · 다시 고르기 · 좌우 · 도트 크기
+##         · 피격 반응(10-21): 피격 동작 확률 · 최대 초 · IK 피격(세기 · 길이) — 유닛 루트 칸 · [🎯 맞혀 보기] 를 켜고 몸을 누르면 그 부위에 앞에서 맞은 것처럼
 ##   오른쪽: 그 유닛의 동작 표(DRMotionTableEditor — 인스펙터와 같은 화면: 세트 → 상태 → 동작 · % · 상하체 합성 · 3D 동작 내보내기)
 ##
 ## 에디터에서는 유닛을 고르면 그 씬을 에디터에 열고, 칸을 바꾸면 되돌리기(Ctrl+Z)에 남긴다 → 씬에 * 표시, [저장] = 씬 저장.
@@ -59,6 +60,22 @@ var _dot_ob: OptionButton
 var _style: DRDotStyle
 # 동작 표
 var _motion_ed: DRMotionTableEditor
+# 피격 반응(10-21) — [표시 이름, 칸, 최소, 최대, 눈금, 보이는 값 × 이 수 = 유닛 값, 단위, 풍선 도움말]
+const HIT_FIELDS := [
+	["피격 동작 확률", "hit_anim_chance", 0.0, 100.0, 5.0, 0.01, "%", "맞을 때 자세별 피격 동작(동작 표의 피격 · 피격+앉기 · 피격+엎드림)을 틀 확률. 안 틀면 하던 동작 그대로 — IK 피격만(0 % = 늘 IK 피격만 · 100 % = 늘 피격 동작)"],
+	["최대", "hit_anim_max_sec", 0.25, 3.0, 0.05, 1.0, "초", "피격 동작을 틀면 이만큼까지 보여 주고 다음 동작으로(Idle_Hit 2.3 초 · Crouch_Hit 1.8 초 · 엎드림 1.2 초). 그 전이라도 쓰러짐 · 패닉 · 걷기 · 사격이 오면 바로 넘김 — 시뮬 경직(0.25 초)과 따로, 화면만"],
+	["IK 세기", "hit_ik_deg", 0.0, 60.0, 1.0, 1.0, "°", "IK 피격 — 맞은 부위가 총알 방향으로 젖혀지는 최대 각"],
+	["길이", "hit_ik_sec", 0.1, 1.5, 0.05, 1.0, "초", "IK 피격 — 젖혀졌다 돌아오는 시간"],
+]
+const HIT_HELP := "맞으면 ① 확률대로 자세별 피격 동작(최대 초까지) ② IK 피격 — 총알이 맞은 부위(머리 · 가슴 · 배 · 팔 · 다리)가 총알 방향으로 젖혀졌다 돌아온다(동작 위에 덧씌움 — 피격 동작과 같이도).\n" + \
+	"[🎯 맞혀 보기] 를 켜고 미리보기 속 몸을 누르면 그 부위에 앞(보는 쪽의 적)에서 맞은 것처럼. 게임은 시뮬 총알이 맞은 자리로 같게"
+var _hit_btn: Button
+var _hit_ik_chk: CheckBox
+var _hit_sp: Dictionary = {}         # 칸 -> SpinBox
+var _hit_lock := false
+var _hit_marks: Node2D               # 미리보기 위 맞은 자리 · 총알 방향 표시
+var _hit_mark := {}                  # {pos(캔버스), t(초), part}
+var _pv_hit_left := 0.0              # 미리보기 피격 동작을 더 보여 줄 초(0 = 아님 — 끝나면 원래 상태로)
 
 
 func _init() -> void:
@@ -248,6 +265,11 @@ func _build_ui() -> void:
 		_dots.px_per_m = v
 		_ground.queue_redraw())
 	ctl.add_child(_size)
+	_build_hit_panel(mid)
+	pvc.gui_input.connect(_on_preview_input)
+	_hit_marks = Node2D.new()
+	_hit_marks.draw.connect(_draw_hit_marks)
+	_pv_vp.add_child(_hit_marks)                   # 도트 화면 위
 	_now = Label.new()
 	_now.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_now.add_theme_font_size_override("font_size", 12)
@@ -263,6 +285,193 @@ func _build_ui() -> void:
 	_motion_ed.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_motion_ed.exported.connect(_on_exported)
 	sc.add_child(_motion_ed)
+
+
+## 피격 반응 칸(10-21) — 미리보기 바로 아래(눌러 시험해 보는 곳 옆). 유닛 루트 칸(인스펙터 "피격" 묶음과 같은 값)
+func _build_hit_panel(parent: Control) -> void:
+	var head := HBoxContainer.new()
+	parent.add_child(head)
+	var t := Label.new()
+	t.text = "피격 반응"
+	t.tooltip_text = HIT_HELP
+	t.mouse_filter = Control.MOUSE_FILTER_PASS
+	head.add_child(t)
+	_hit_btn = Button.new()
+	_hit_btn.text = "🎯 맞혀 보기"
+	_hit_btn.toggle_mode = true
+	_hit_btn.focus_mode = Control.FOCUS_NONE
+	_hit_btn.tooltip_text = "켜고 미리보기 속 몸을 누르면 그 부위에 앞(보는 쪽의 적)에서 총알이 맞은 것처럼 — IK 피격 + 확률대로 자세별 피격 동작. 다시 누르면 끔"
+	_hit_btn.toggled.connect(func(on: bool) -> void:
+		_hit_btn.self_modulate = Color(1.0, 0.45, 0.4) if on else Color.WHITE
+		if on:
+			_now.text = "🎯 맞혀 보기 — 미리보기 속 몸(머리 · 가슴 · 배 · 팔 · 다리)을 누르세요")
+	head.add_child(_hit_btn)
+	_hit_ik_chk = CheckBox.new()
+	_hit_ik_chk.text = "IK 피격"
+	_hit_ik_chk.focus_mode = Control.FOCUS_NONE
+	_hit_ik_chk.tooltip_text = "총알이 맞은 부위가 총알 방향으로 젖혀졌다 돌아온다(부위 = 맞은 점에서 가장 가까운 뼈 마디). 끄면 확률대로 피격 동작만"
+	_hit_ik_chk.toggled.connect(func(on: bool) -> void: _set_hit_prop("hit_ik_enabled", on))
+	head.add_child(_hit_ik_chk)
+	var g := GridContainer.new()
+	g.columns = 4
+	parent.add_child(g)
+	for f in HIT_FIELDS:
+		var l := Label.new()
+		l.text = String(f[0])
+		l.tooltip_text = String(f[7])
+		l.mouse_filter = Control.MOUSE_FILTER_PASS
+		g.add_child(l)
+		var sp := SpinBox.new()
+		sp.min_value = float(f[2])
+		sp.max_value = float(f[3])
+		sp.step = float(f[4])
+		sp.suffix = String(f[6])
+		sp.custom_minimum_size = Vector2(96, 0)
+		sp.tooltip_text = String(f[7])
+		var prop := String(f[1])
+		var scale := float(f[5])
+		sp.set_meta(&"hit_scale", scale)
+		sp.value_changed.connect(func(v: float) -> void: _set_hit_prop(prop, v * scale))
+		g.add_child(sp)
+		_hit_sp[prop] = sp
+	var help := Label.new()
+	help.text = HIT_HELP
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.add_theme_font_size_override("font_size", 11)
+	help.add_theme_color_override("font_color", Color(0.62, 0.66, 0.72))
+	parent.add_child(help)
+
+
+## 피격 칸 = 유닛 루트 값(되돌리기 · 인스펙터로 바뀐 것도). IK 를 끄면 IK 세기 · 길이 칸은 잠근다
+func _show_hit_settings() -> void:
+	if _hit_ik_chk == null or _root == null:
+		return
+	_hit_lock = true
+	_hit_ik_chk.button_pressed = _root.hit_ik_enabled
+	for prop in _hit_sp:
+		var sp := _hit_sp[prop] as SpinBox
+		sp.value = float(_root.get(prop)) / float(sp.get_meta(&"hit_scale", 1.0))
+		sp.editable = _root.hit_ik_enabled or (prop != "hit_ik_deg" and prop != "hit_ik_sec")
+	_hit_lock = false
+
+
+## 피격 칸 하나 — 유닛 루트에(에디터 = 되돌리기 한 칸, 잇달아 바꾸면 합침) · 미리보기 사본에도 바로(다시 조립하지 않음)
+func _set_hit_prop(prop: String, value: Variant) -> void:
+	if _hit_lock or _root == null or not is_instance_valid(_root):
+		return
+	var old: Variant = _root.get(prop)
+	if _same(old, value):
+		return
+	if Engine.is_editor_hint() and _root.is_inside_tree():
+		var ur := EditorInterface.get_editor_undo_redo()
+		ur.create_action("유닛: 피격 %s" % prop, UndoRedo.MERGE_ENDS, _root)
+		ur.add_do_property(_root, prop, value)
+		ur.add_undo_property(_root, prop, old)
+		ur.commit_action()
+	else:
+		_root.set(prop, value)
+	if _prev_ch != null and is_instance_valid(_prev_ch):
+		_prev_ch.set(prop, value)
+	_xsig = _equip_walk(true)
+	_show_hit_settings()
+
+
+## 미리보기를 눌렀다 — 맞혀 보기 중이면 그 자리에 맞힌다
+func _on_preview_input(ev: InputEvent) -> void:
+	var mb := ev as InputEventMouseButton
+	if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT or _hit_btn == null or not _hit_btn.button_pressed:
+		return
+	hit_test(mb.position)
+
+
+## 미리보기 캔버스 점 pos 에 총알이 앞에서 맞은 것처럼 — 화면에 그린 뼈 마디(굵기 빼고)에서 가장 가까운 곳을 맞은 점으로,
+## 총알 방향 = 보는 쪽(적이 있는 쪽)에서 몸 쪽. IK 피격 + 확률대로 자세별 피격 동작. 돌려주는 값 = {part, point, anim(튼 동작 · ""), rolled(피격 동작 틀기로 함)}
+func hit_test(pos: Vector2) -> Dictionary:
+	if _prev_ch == null or _prev_ch.get_skeleton() == null:
+		return {}
+	var sk := _prev_ch.get_skeleton()
+	var sg := sk.global_transform
+	var best_d := 18.0
+	var best_p := Vector3.INF
+	for seg in DRCharacter3D.HIT_SEGS:
+		var a := sk.find_bone(String(seg[0]))
+		if a < 0:
+			continue
+		var ga := sk.get_bone_global_pose(a)
+		var pa := sg * ga.origin
+		var pb := sg * (ga.origin + ga.basis.y.normalized() * DRCharacter3D.HIT_HEAD_LEN)
+		if String(seg[1]) != "":
+			var b := sk.find_bone(String(seg[1]))
+			if b < 0:
+				continue
+			pb = sg * sk.get_bone_global_pose(b).origin
+		var ca := _dots.world_to_canvas(pa)
+		var cb := _dots.world_to_canvas(pb)
+		var cp := Geometry2D.get_closest_point_to_segment(pos, ca, cb)
+		var d := pos.distance_to(cp) - float(seg[2]) * _dots.px_per_m
+		if d < best_d:
+			best_d = d
+			var k := 0.0 if ca.distance_to(cb) < 0.001 else ca.distance_to(cp) / ca.distance_to(cb)
+			best_p = pa.lerp(pb, clampf(k, 0.0, 1.0))
+	if best_p == Vector3.INF:
+		_now.text = "🎯 몸에 안 맞음 — 미리보기 속 몸(머리 · 가슴 · 배 · 팔 · 다리)을 누르세요"
+		return {}
+	var dir := Vector3(-float(_facing), 0.0, 0.0)          # 보는 쪽(적)에서 몸 쪽으로
+	var part := _prev_ch.hit_react(best_p, dir)
+	var rolled := randf() < _prev_ch.hit_anim_chance
+	var anim := ""
+	if rolled:
+		anim = _play_hit_motion()
+	if not _playing:
+		_playing = true
+		_play_btn.text = "⏸ 멈춤"
+	_hit_mark = {"pos": pos, "t": 0.0, "part": part}
+	_hit_marks.queue_redraw()
+	var anim_txt := "안 틂(하던 동작 그대로)"
+	if anim != "":
+		anim_txt = "%s 틂(최대 %.2f 초)" % [anim, _prev_ch.hit_anim_max_sec]
+	elif rolled:
+		anim_txt = "— 이 자세의 피격 동작이 동작 표에 없음"
+	_now.text = "🎯 맞음: %s — IK 피격 %s · 피격 동작 %s (확률 %d %%)" % [part if part != "" else "?",
+		("%.0f°" % _prev_ch.hit_ik_deg) if _prev_ch.hit_ik_enabled else "꺼짐", anim_txt, roundi(_prev_ch.hit_anim_chance * 100.0)]
+	return {"part": part, "point": best_p, "anim": anim, "rolled": rolled}
+
+
+## 미리보기 상태의 자세에 맞는 피격 동작을 튼다(동작 표의 피격 · 피격+앉기 · 피격+엎드림) — 최대 초 뒤 원래 상태로. 튼 동작 이름(없으면 "")
+func _play_hit_motion() -> String:
+	if _root == null or _root.motions == null or _prev_ch == null:
+		return ""
+	var t := _root.motions
+	var st := "피격"
+	if _pv_state.contains("앉"):
+		st = "피격+앉기"
+	elif _pv_state.contains("엎드") or _pv_state.contains("포복"):
+		st = "피격+엎드림"
+	var m := t.pick_state(st, _prev_ch.motion_names())
+	if m == "":
+		return ""
+	_prev_ch.play_motion(m, 0.1)
+	var ap := _prev_ch.get_animation_player()
+	_pv_hit_left = minf(ap.get_animation(m).length, _prev_ch.hit_anim_max_sec) if ap.has_animation(m) else 0.0
+	return m
+
+
+## 맞은 자리(빨간 ×) · 총알 방향(노란 화살 — 보는 쪽에서 몸 쪽으로) — 0.8 초 동안 옅어지며
+func _draw_hit_marks() -> void:
+	if _hit_mark.is_empty():
+		return
+	var a := clampf(1.0 - float(_hit_mark["t"]) / 0.8, 0.0, 1.0)
+	if a <= 0.0:
+		return
+	var p: Vector2 = _hit_mark["pos"]
+	var c := Color(1.0, 0.25, 0.2, a)
+	_hit_marks.draw_line(p + Vector2(-6, -6), p + Vector2(6, 6), c, 2.0)
+	_hit_marks.draw_line(p + Vector2(-6, 6), p + Vector2(6, -6), c, 2.0)
+	var f := float(_facing)
+	var y := Color(1.0, 0.85, 0.3, a)
+	_hit_marks.draw_line(p + Vector2(f * 46.0, 0.0), p + Vector2(f * 9.0, 0.0), y, 2.0)
+	_hit_marks.draw_line(p + Vector2(f * 9.0, 0.0), p + Vector2(f * 16.0, -4.0), y, 2.0)
+	_hit_marks.draw_line(p + Vector2(f * 9.0, 0.0), p + Vector2(f * 16.0, 4.0), y, 2.0)
 
 
 ## 도트 느낌(10-16) — 예전 ① 탭의 도트화 · 외곽선 칸(픽셀 퍼펙트 등)을 3D 로. 게임 화면과 같은 파일(DRDotStyle.DEFAULT_PATH)
@@ -572,6 +781,10 @@ func _root_sig() -> String:
 ## xform = false → 구조(경로 · 뼈 · 받침 방식 · 모델 씬 · 보이기 · 표지 손 — 바뀌면 다시 조립), true → 자리 · 손 비중 · 보간(바뀌면 사본 자리만)
 func _equip_walk(xform: bool) -> String:
 	var parts := PackedStringArray()
+	if xform and _root != null:                 # 루트의 조준 · 피격 칸(② 탭 · 인스펙터 · 되돌리기로 바뀐 것도 미리보기 사본에 — sync_from)
+		for k in DRCharacter3D.AIM_PROPS + DRCharacter3D.HIT_PROPS:
+			parts.append(str(_root.get(k)))
+		parts.append(str(_root.aim_motion_weights))
 	for s in DRCharacter3D.find_anchors(_root):
 		if s.owner != _root:
 			continue
@@ -623,6 +836,7 @@ func _refresh_all() -> void:
 	_sig = _root_sig()
 	_xsig = _equip_walk(true)
 	_fill_fields()
+	_show_hit_settings()
 	_motion_ed.set_table(_root.motions)
 	_rebuild_preview()
 
@@ -990,6 +1204,16 @@ func _process(delta: float) -> void:
 		if _dots.origin != o:
 			_dots.origin = o
 			_ground.queue_redraw()
+	if not _hit_mark.is_empty():
+		_hit_mark["t"] = float(_hit_mark["t"]) + delta
+		_hit_marks.queue_redraw()
+		if float(_hit_mark["t"]) > 0.8:
+			_hit_mark = {}
+	if _pv_hit_left > 0.0 and _playing:
+		_pv_hit_left -= delta
+		if _pv_hit_left <= 0.0:
+			_pv_hit_left = 0.0
+			play_state(_pv_state)                  # 피격 동작 끝 — 원래 상태로
 	if _prev_ch != null and _playing:
 		_acc += delta
 		if _acc >= (1.0 / _style.step_hz if _style.step_hz > 0.0 else 0.0):
@@ -1011,6 +1235,7 @@ func _process(delta: float) -> void:
 			if xs != _xsig:
 				_xsig = xs
 				_sync_equip()
+				_show_hit_settings()
 
 
 ## 장비 자리 · 손 비중 · 보간 · 동작별 자리만 바뀌었다(기즈모 · ② 탭) — 다시 조립하지 않고 미리보기 사본의 같은 노드만 맞춘다

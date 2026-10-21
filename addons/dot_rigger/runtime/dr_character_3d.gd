@@ -10,7 +10,7 @@ class_name DRCharacter3D
 ##     ├ <몸 glb 인스턴스>(human_base)       — 구조 그대로: AnimationPlayer(root_node "..") 의 트랙 `%GeneralSkeleton:<뼈>` 가 그대로 풀린다
 ##     │   ├ Armature/GeneralSkeleton
 ##     │   │    ├ SlotTop · SlotBottom · SlotBase (MeshInstance3D — 슬롯 메시. 원래 통메시 Body 는 뺐다)
-##     │   │    └ DR_AimSolver(무기를 들었을 때 · 맨 앞 — 조준 IK, 10-21) · DR_GripSolver(받침대가 있을 때) · DR_<손>Ref · DR_<손>Elbow · DR_<손>ArmIK · DR_<손>HandRot (손 표지마다 — 팔 IK 수정자)
+##     │   │    └ DR_AimSolver(무기를 들었을 때 · 맨 앞 — 조준 IK, 10-21) · DR_Aim<손>Elbow · ArmIK · HandRot(조준 팔) · DR_HitSolver(IK 피격, 10-21) · DR_GripSolver(받침대가 있을 때) · DR_<손>Ref · DR_<손>Elbow · DR_<손>ArmIK · DR_<손>HandRot (손 표지마다 — 팔 IK 수정자)
 ##     │   └ AnimationPlayer
 ##     ├ 오른손 (BoneAttachment3D = 소켓, 씬에 든 노드 — 10-16)  └ kar98k (장비 = 모델 씬 인스턴스)  └ 왼손 (DRHandTarget3D 표지)
 ##     └ 양손 (DRGripMount3D = 받침대 — 두 손 사이 보간 · 땅 고정, 10-16)  └ mg42  └ 오른손 · 왼손 (표지 — 두 손 다 IK)
@@ -32,7 +32,8 @@ class_name DRCharacter3D
 ##   ch.rotation.y = atan2(dir.x, dir.z)    # dir 쪽을 보게(+X = PI/2)
 ##   ch.scale = Vector3.ONE * (1.75 / ch.model_height())
 ##   ch.set_tint(Color(0.45, 0.45, 0.45)) ; ch.set_fade(0.3)    # 죽은 병사 어둡게 · 도트식으로 사라지기
-##   ch.set_aim_target(적_가슴_세상좌표)       # 사격 · 조준 동작에서 허리 · 가슴을 돌려 총구가 그리로(조준 IK, 10-21) · clear_aim_target()
+##   ch.set_aim_target(적_가슴_세상좌표)       # 사격 · 조준 동작에서 팔(견착) · 허리로 총구 높낮이를 그리로(조준 IK, 10-21) · clear_aim_target()
+##   ch.hit_react(맞은_점, 총알_방향)          # IK 피격 — 맞은 부위가 젖혀졌다 돌아옴(10-21). 자세별 피격 동작은 게임 화면이 hit_anim_chance 로
 
 const BODY_DEFAULT := "res://source3d/characters/human_base/human_base.glb"
 const SHADER_PATH := "res://addons/dot_rigger/shaders/dot_char.gdshader"
@@ -119,6 +120,21 @@ static var _md5_cache := {}          # parts.json 경로 -> md5("" = 없음)
 ## (상하체 합성 "A+B" 는 제 것이 없으면 상체 B 것) — ② 장비 탭 동작 표의 "조준" 칸
 @export var aim_motion_weights: Dictionary[String, float] = {}
 
+@export_group("피격")
+## 피격 반응(10-21). 사용자: "idle 히트 · 앉기 히트 · 누워서 히트 애니메이션을 쓰되, IK 히트 토글을 누르면 부위별 맞는 레이 히트 기준으로
+## 맞는 IK 애니메이션이 보간되는 것도 · 이 애니메이션이 출력될 확률을 정하는 인풋 필드"
+## 피격 동작 확률(0 ~ 1) — 맞을 때 자세별 피격 동작(동작 표의 피격 · 피격+앉기 · 피격+엎드림)을 틀 확률. 안 틀면 하던 동작 그대로(IK 피격만). 게임 화면이 굴린다
+@export_range(0.0, 1.0, 0.05) var hit_anim_chance := 0.5
+## 피격 동작 최대 초 — 피격 동작(Idle_Hit 2.3 초 등)을 틀면 이만큼까지 보여 주고 다음 동작으로 넘긴다(그 전이라도 쓰러짐 · 패닉 · 걷기 · 사격이 오면 바로).
+## 시뮬의 피격 경직(0.25 초)과 따로 — 화면만
+@export_range(0.25, 3.0, 0.05, "suffix:s") var hit_anim_max_sec := 1.0
+## IK 피격 — 총알이 맞은 점에서 가장 가까운 부위(머리 · 가슴 · 배 · 팔 · 다리)가 총알 방향으로 젖혀졌다 돌아온다. 동작 위에 덧씌움(피격 동작을 틀어도 같이)
+@export var hit_ik_enabled := true
+## IK 세기 — 맞은 부위가 젖혀지는 최대 각(°)
+@export_range(0.0, 60.0, 1.0, "suffix:°") var hit_ik_deg := 15.0
+## IK 길이 — 젖혀졌다 돌아오는 시간(초)
+@export_range(0.1, 1.5, 0.05, "suffix:s") var hit_ik_sec := 0.4
+
 @export_group("미리보기 (에디터)")
 ## 에디터 3D 화면에서 이 동작 자세로 보여 준다(동작 표의 동작 · 내보낸 3D 동작 묶음에 있어야 함)
 @export var preview_motion := "":
@@ -196,6 +212,11 @@ var _aim_arm_ik: TwoBoneIK3D = null
 var _aim_arm_rot: CopyTransformModifier3D = null
 var _aim_arm_hand := -1                        # 그 손 뼈
 var _aim_head := -1                            # 머리 뼈(팔이 든 각을 일부 따라감 — 뺨을 개머리판에)
+# IK 피격(10-21) — 아래 "피격 반응" 절
+var _hit_solver: SkeletonModifier3D = null
+var _hits: Array[HitReaction] = []             # 지금 도는 반응(최대 HIT_MAX — 넘치면 오래된 것부터 뺌)
+var _hit_dt := 0.0                             # 지난 풀이 뒤 흐른 시간(step_motion 이 모은다)
+var _hit_release := [0.0, 0.0]                  # 손마다 지금 IK 를 푼 정도(팔이 맞았을 때 — 0 = 그대로)
 
 
 # ---------------------------------------------------------------- 만들기
@@ -370,7 +391,10 @@ func step_motion(dt: float) -> bool:
 		return false
 	var before := _ap.current_animation_position
 	_aim_dt += dt                              # 조준 수정자가 이번 갱신에 쓴다(빠르기 · 표적 섞기)
+	_hit_dt += dt                              # IK 피격 수정자도
 	_ap.advance(dt)
+	if not _hits.is_empty() and _skel != null:  # 자세가 멈춰 있어도(끝난 동작 · 멈춤) 피격 반응은 흘러야 — 뼈대를 다시 풀게
+		_skel.set_bone_pose_rotation(0, _skel.get_bone_pose_rotation(0))
 	var wrapped := _ap.current_animation_position < before
 	if _grip_t >= 0.0:
 		_grip_t += dt
@@ -1015,6 +1039,7 @@ const SIDE_NAMES := ["왼손", "오른손"]
 const SIDE_TAGS := ["Left", "Right"]
 const SOLVER_SCRIPT := preload("res://addons/dot_rigger/runtime/dr_grip_solver_3d.gd")
 const AIM_SOLVER_SCRIPT := preload("res://addons/dot_rigger/runtime/dr_aim_solver_3d.gd")
+const HIT_SOLVER_SCRIPT := preload("res://addons/dot_rigger/runtime/dr_hit_solver_3d.gd")
 ## 동작별 무기 자리(10-19) — 장비 노드의 메타 칸 이름. 값 = {동작 이름: Transform3D}, 그 동작에서 장비 자리 = 기본 자리(transform) × 이 값
 ## (장비 자신의 축 기준 위치 · 회전 차이 — 받침을 바꿔도(잡기 오른손 → 양손) 뜻이 같다). 동작 표의 상하체 합성 "A+B" 는 제 것이 없으면 상체 B 것을 쓴다.
 ## 사용자(10-16): "2번 탭은 애니메이션별로 양손이든 왼손이든 오른손이든 총기 위치 회전 오프셋을 지정해 둘 수 있는 리소스 툴인 거지?" → 10-19 "2번 작업도 시행"
@@ -1037,6 +1062,17 @@ class HandIK:
 	var w := 0.0
 	var w_from := 0.0
 	var w_to := 0.0
+
+
+## IK 피격 반응 하나(10-21) — 뼈 사슬(아래부터) · 몫 · 돌림 축(뼈대 공간) · 흐른 시간 · 최대 각(라디안)
+class HitReaction:
+	var part := ""
+	var side := -1                          # 팔이면 그 손(0 = 왼손 · 1 = 오른손) — 그 손 IK 를 잠깐 풀어 총에서 튕겼다 돌아오게
+	var bones := PackedInt32Array()
+	var shares := PackedFloat32Array()
+	var axis := Vector3.RIGHT
+	var t := 0.0
+	var amp := 0.0
 
 
 ## 동작별 자리를 얹는 장비 하나(10-19) — base = 기본 자리(씬에 저장된 transform), cur = 지금 얹은 차이, from → to = 섞는 중
@@ -1111,10 +1147,11 @@ func refresh_equipment() -> void:
 		_skel.add_child(_solver)
 		_skel.move_child(_solver, 0)       # 수정자 차례 맨 앞(손 IK 보다 먼저 — 동작 자세로)
 	_make_aim()                            # 그보다 더 앞(허리를 돌린 자세로 받침대 · 손 IK 가 푼다)
+	_make_hit()                            # 조준 바로 뒤(젖혀진 자세로 받침대 · 손 IK 가 푼다)
 	for side in 2:
 		if found[side] != null:
 			_make_ik(side, found[side][0], found[side][1])
-	if _aim_solver != null or _solver != null or _hands[0] != null or _hands[1] != null:
+	if _hit_solver != null or _aim_solver != null or _solver != null or _hands[0] != null or _hands[1] != null:
 		_skel.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE if edited else Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL
 	_aim_offsets(_motion, true)                # 지금 동작의 동작별 자리를 바로(안 움직였으면 아래 sync_support 가 손 IK 목표를)
 	sync_support()
@@ -1246,7 +1283,7 @@ func sync_from(src: DRCharacter3D) -> void:
 			if pn is DRGripMount3D and n is DRGripMount3D:
 				for k in ["blend", "right_offset", "left_offset"]:
 					pn.set(k, n.get(k))
-	for k in AIM_PROPS:                        # 조준 칸(유닛 루트)
+	for k in AIM_PROPS + HIT_PROPS:            # 조준 · 피격 칸(유닛 루트)
 		set(k, src.get(k))
 	aim_motion_weights = src.aim_motion_weights.duplicate()
 	refresh_muzzle()                           # 총구 · 견착 표지를 기즈모로 옮겼을 수 있다
@@ -1770,6 +1807,179 @@ func _tracks_of(anim: Animation) -> Dictionary:
 	return out
 
 
+# ---------------------------------------------------------------- 피격 반응(10-21)
+## 사용자(10-21): "idle 히트 · 앉기 히트 · 누워서 히트 애니메이션을 쓰되, IK 히트 토글을 누르면 자세별 히트 애니메이션도 쓰지만 부위별 맞는 레이 히트
+## 기준으로 맞는 IK 애니메이션이 보간되는 것도 · 이 애니메이션이 출력될 확률을 정하는 인풋 필드 — 잘 생각해야 해. UI/UX 적 배치도"
+##   자세별 피격 동작 = 동작 표의 피격 · 피격+앉기 · 피격+엎드림(게임 화면이 hit_anim_chance 로 굴려 틀지 정한다 — BattleView3D._on_hit).
+##   IK 피격 = hit_react(맞은 점, 총알 방향): 맞은 점에서 가장 가까운 뼈 마디(몸통 · 팔 · 다리는 굵기를 빼고 잰 거리)의 부위를 고르고, 그 부위의 뼈 사슬을
+##   "맞은 점이 총알 방향으로 밀리게" 도는 축(사슬 뿌리 → 맞은 점 × 총알 방향)으로 젖혔다 돌아오게 한다. 세기 곡선 = (t/τ)·e^(1 − t/τ)(τ = 길이의 1/4 — 첫 장에서
+##   거의 끝까지 젖혀지고 서서히 돌아옴). 여러 발이면 더한다(최대 HIT_MAX). 동작 위에 덧씌우므로 피격 동작을 틀어도 · 안 틀어도 같이.
+
+## 부위 → 돌릴 뼈와 몫(아래부터). 몸에 없는 뼈는 빼고 나머지 몫을 다시 나눈다
+const HIT_PARTS := {
+	"머리": [["Neck", 0.4], ["Head", 0.6]],
+	"가슴": [["Spine", 0.2], ["Chest", 0.35], ["UpperChest", 0.45]],
+	"배": [["Spine", 0.55], ["Chest", 0.45]],
+	"왼팔": [["LeftShoulder", 0.35], ["LeftUpperArm", 0.65]],
+	"오른팔": [["RightShoulder", 0.35], ["RightUpperArm", 0.65]],
+	"왼다리": [["LeftUpperLeg", 0.7], ["LeftLowerLeg", 0.3]],
+	"오른다리": [["RightUpperLeg", 0.7], ["RightLowerLeg", 0.3]],
+}
+## 맞은 부위를 고르는 뼈 마디 [뼈, 끝 뼈("" = 그 뼈 위로 HIT_HEAD_LEN), 굵기 m, 부위]
+const HIT_SEGS := [
+	["Hips", "Spine", 0.15, "배"], ["Spine", "Chest", 0.15, "배"], ["Chest", "UpperChest", 0.15, "가슴"], ["UpperChest", "Neck", 0.15, "가슴"],
+	["Neck", "Head", 0.06, "머리"], ["Head", "", 0.1, "머리"],
+	["LeftUpperArm", "LeftLowerArm", 0.05, "왼팔"], ["LeftLowerArm", "LeftHand", 0.045, "왼팔"],
+	["RightUpperArm", "RightLowerArm", 0.05, "오른팔"], ["RightLowerArm", "RightHand", 0.045, "오른팔"],
+	["LeftUpperLeg", "LeftLowerLeg", 0.08, "왼다리"], ["LeftLowerLeg", "LeftFoot", 0.06, "왼다리"],
+	["RightUpperLeg", "RightLowerLeg", 0.08, "오른다리"], ["RightLowerLeg", "RightFoot", 0.06, "오른다리"],
+]
+const HIT_HEAD_LEN := 0.2
+## 동시에 도는 반응 수(기관총에 여러 발 — 넘치면 오래된 것부터 뺌)
+const HIT_MAX := 4
+## 팔이 맞으면 그 손 IK(총 표지에 붙임)를 이만큼까지 풀었다 다시 잡는다 — 안 풀면 손이 총에 묶여 팔꿈치만 조금 움직인다(10-21 실측 0.8 cm)
+const HIT_ARM_RELEASE := 0.85
+## 피격 칸(sync_from 이 옮긴다 — ① 탭 미리보기 사본)
+const HIT_PROPS := ["hit_anim_chance", "hit_anim_max_sec", "hit_ik_enabled", "hit_ik_deg", "hit_ik_sec"]
+
+
+## IK 피격 수정자를 만든다(refresh_equipment — 무기가 없어도). 조준 수정자 · 조준 팔 IK 바로 뒤, 받침대 풀이 · 손 IK 보다 앞
+func _make_hit() -> void:
+	_hits.clear()
+	if _skel == null:
+		return
+	_hit_solver = HIT_SOLVER_SCRIPT.new()
+	_hit_solver.name = "DR_HitSolver"
+	_hit_solver.set("character", self)
+	_skel.add_child(_hit_solver)
+	var idx := 0
+	for n in [_aim_solver, _aim_arm_pole, _aim_arm_ik, _aim_arm_rot]:
+		if n != null:
+			idx = maxi(idx, (n as Node).get_index() + 1)
+	_skel.move_child(_hit_solver, idx)
+
+
+## 총알이 맞은 점(세상 좌표) · 총알 방향(세상)으로 IK 피격을 건다 — 돌려주는 값 = 맞은 부위(머리 · 가슴 · 배 · 왼팔 · 오른팔 · 왼다리 · 오른다리, 몸에서 멀면 "").
+## 반응은 다음 뼈대 갱신(step_motion)부터 보인다. hit_ik_enabled 가 꺼져 있으면 부위만 돌려준다. power = 세기 배율
+func hit_react(point: Vector3, dir: Vector3, power := 1.0) -> String:
+	if _skel == null:
+		return ""
+	var to_s := _skel.global_transform.affine_inverse() if _skel.is_inside_tree() else _skel_to_char().affine_inverse()
+	var p := to_s * point
+	var part := hit_part_at(p)
+	if part == "" or not hit_ik_enabled or _hit_solver == null or hit_ik_deg <= 0.0:
+		return part
+	var h := HitReaction.new()
+	h.part = part
+	h.side = 0 if part == "왼팔" else (1 if part == "오른팔" else -1)
+	var total := 0.0
+	for b in HIT_PARTS[part]:
+		var bi := _skel.find_bone(String(b[0]))
+		if bi >= 0:
+			h.bones.append(bi)
+			h.shares.append(float(b[1]))
+			total += float(b[1])
+	if h.bones.is_empty():
+		return part
+	for i in h.shares.size():
+		h.shares[i] /= total
+	var d := (to_s.basis * dir).normalized()
+	var r := p - _skel.get_bone_global_pose(h.bones[0]).origin
+	var axis := r.cross(d)                      # 사슬 뿌리를 축으로 맞은 점이 총알 방향으로 밀리게
+	if axis.length_squared() < 1e-8:
+		axis = Vector3.UP.cross(d)
+	if axis.length_squared() < 1e-8:
+		return part
+	h.axis = axis.normalized()
+	h.amp = deg_to_rad(hit_ik_deg) * power
+	_hits.append(h)
+	if _hits.size() > HIT_MAX:
+		_hits.remove_at(0)
+	return part
+
+
+## 뼈대 공간 점 p 에서 가장 가까운 부위(뼈 마디까지 거리 − 굵기). 몸에서 0.35 m 넘게 떨어지면 ""
+func hit_part_at(p: Vector3) -> String:
+	var best := ""
+	var bd := 0.35
+	for sg in HIT_SEGS:
+		var a := _skel.find_bone(String(sg[0]))
+		if a < 0:
+			continue
+		var ga := _skel.get_bone_global_pose(a)
+		var bpos := ga.origin + ga.basis.y.normalized() * HIT_HEAD_LEN
+		if String(sg[1]) != "":
+			var b := _skel.find_bone(String(sg[1]))
+			if b < 0:
+				continue
+			bpos = _skel.get_bone_global_pose(b).origin
+		var d := p.distance_to(Geometry3D.get_closest_point_to_segment(p, ga.origin, bpos)) - float(sg[2])
+		if d < bd:
+			bd = d
+			best = String(sg[3])
+	return best
+
+
+## 지금 도는 IK 피격 반응 수(검사 · ① 탭)
+func hit_count() -> int:
+	return _hits.size()
+
+
+## 지금 도는 반응들 [{part, t(초), angle(°)}] — 검사 · ① 탭
+func hit_report() -> Array:
+	var out: Array = []
+	var tau := maxf(hit_ik_sec, 0.05) * 0.25
+	for h in _hits:
+		out.append({"part": h.part, "t": h.t, "angle": rad_to_deg(h.amp * (h.t / tau) * exp(1.0 - h.t / tau))})
+	return out
+
+
+## IK 피격 풀이 — 피격 수정자(조준 뒤 · 손 IK 앞)가 부른다. 시간을 흘려 각을 정하고 사슬에 몫만큼 돌린다
+func _solve_hits(sk: Skeleton3D) -> void:
+	var dt := _hit_dt
+	_hit_dt = 0.0
+	if _hits.is_empty() or sk == null:
+		if _hit_release[0] > 0.0 or _hit_release[1] > 0.0:
+			_release_hands(0.0, 0.0)
+		return
+	var dur := maxf(hit_ik_sec, 0.05)
+	var tau := dur * 0.25
+	var rel := [0.0, 0.0]
+	var i := _hits.size() - 1
+	while i >= 0:
+		var h := _hits[i]
+		h.t += dt
+		if h.t >= dur * 1.5:
+			_hits.remove_at(i)
+			i -= 1
+			continue
+		var f := (h.t / tau) * exp(1.0 - h.t / tau)
+		var a := h.amp * f
+		if h.side >= 0:
+			rel[h.side] = maxf(rel[h.side], f * HIT_ARM_RELEASE)
+		if absf(a) > 1e-5:
+			for k in h.bones.size():
+				var bi := h.bones[k]
+				var g := sk.get_bone_global_pose(bi)
+				g.basis = Basis(h.axis, a * h.shares[k]) * g.basis
+				sk.set_bone_global_pose(bi, g)
+		i -= 1
+	_release_hands(rel[0], rel[1])
+
+
+## 팔이 맞은 손의 IK 를 잠깐 푼다(뒤의 손 IK 수정자가 이번 갱신에 쓴다) — 바뀔 때만 넣는다
+func _release_hands(l: float, r: float) -> void:
+	var want := [l, r]
+	for side in 2:
+		if is_equal_approx(float(_hit_release[side]), float(want[side])):
+			continue
+		_hit_release[side] = want[side]
+		var h: HandIK = _hands[side]
+		if h != null and h.ik != null and is_instance_valid(h.ik) and h.w > 0.001:
+			h.ik.influence = h.w * (1.0 - float(want[side]))
+			h.rot.influence = h.ik.influence
+
+
 ## 이 노드 아래(skip — 몸 모델 — 빼고)의 소켓(BoneAttachment3D)을 씬 순서대로. 소켓 안으로는 더 내려가지 않는다
 static func find_sockets(root: Node, skip: Node = null) -> Array[BoneAttachment3D]:
 	var out: Array[BoneAttachment3D] = []
@@ -1914,7 +2124,7 @@ func _make_ik(side: int, marker: Node3D, anchor: Node3D) -> void:
 
 
 func _free_ik() -> void:
-	var nodes: Array = [_solver, _aim_solver, _aim_arm_rot, _aim_arm_ik, _aim_arm_pole, _aim_hand]
+	var nodes: Array = [_solver, _aim_solver, _aim_arm_rot, _aim_arm_ik, _aim_arm_pole, _aim_hand, _hit_solver]
 	for h in _hands:
 		if h != null:
 			nodes.append_array([(h as HandIK).rot, (h as HandIK).ik, (h as HandIK).pole, (h as HandIK).ref, (h as HandIK).wrist])
@@ -1926,6 +2136,8 @@ func _free_ik() -> void:
 			nn.free()                          # 바로 — 같은 이름으로 다시 만들 때 겹치지 않게
 	_solver = null
 	_aim_solver = null
+	_hit_solver = null
+	_hits.clear()
 	_aim_arm_rot = null
 	_aim_arm_ik = null
 	_aim_arm_pole = null

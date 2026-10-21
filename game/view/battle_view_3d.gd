@@ -16,6 +16,9 @@ class_name BattleView3D
 ##   - 복장 보기(wear_mode): 유닛 복장 / 상의만 / 하의만 / 내복 — 상의 · 하의를 따로 입히는 3D 슬롯이 도는지 바로 본다
 ##   - 조준 IK(10-21): 쏘는 표적(Ballistics.aim_point — 두뇌가 고른 적의 겨눌 곳) · 조종 중이면 조준점을 캐릭터에 준다 —
 ##     사격 · 조준 동작에서 팔(견착) · 허리로 총구 높낮이가 표적으로(DRCharacter3D.set_aim_target — 좌우는 동작 그대로)
+##   - 피격 반응(10-21): 시뮬이 맞은 점 · 총알 방향을 주면(Battlefield.soldier_hit) 그 부위 IK 피격(DRCharacter3D.hit_react) +
+##     유닛의 피격 동작 확률(hit_anim_chance)로 자세별 피격 동작을 틀지 굴린다 — 안 틀면 하던 동작 그대로. 틀면 hit_anim_max_sec 까지 보여 준다
+##     (시뮬 경직 0.25 초보다 길게 — 그 전이라도 쓰러짐 · 패닉 · 움직임 · 사격이 오면 바로 넘긴다)
 ## 연산: 노드 · 셰이더 값은 바뀔 때만 넣는다(자리 · 방향 · 사라지기 단계). 무거운 것(슬롯 나누기 · 동작별 그립)은 캐릭터를 만들 때 한 번 · 캐시.
 
 ## 도트 느낌(외곽선 · 픽셀 퍼펙트 · 명암 · 도트 크기 · 각도 · 초당 장수) — Dot Rigger ① 유닛 탭이 고치는 것과 같은 파일.
@@ -61,6 +64,9 @@ class Entry3D extends BattleView.Entry:
 	var pos := Vector3.INF                  # 마지막으로 넣은 자리(같으면 다시 안 넣는다)
 	var fade_q := 16                        # 마지막으로 넣은 사라지기 단계(FADE_STEPS = 다 보임)
 	var state := ""                         # 지금 동작을 고른 동작 표의 상태
+	var hit_rolled := false                  # 이번 피격(경직)에서 피격 동작 확률을 굴렸나 — 경직 중 여러 발에 다시 안 굴린다
+	var skip_hit := false                    # 굴려서 피격 동작을 안 틀기로 함(하던 동작 그대로 — IK 피격만)
+	var hit_until := 0.0                     # 피격 동작을 이 시각(_clock)까지 보여 준다(0 = 아님)
 	var reroll := false                     # 그 상태에 고를 동작이 여럿 — 반복 동작이 한 바퀴 돌면 다시 고른다
 
 
@@ -74,6 +80,9 @@ var _dot: DRDotView3D = null
 var _pool3d: Dictionary = {}         # 프리팹 경로 -> Array[DRCharacter3D] (쉬는 캐릭터)
 var _avail3d: Dictionary = {}        # 프리팹 경로 -> 동작 이름들(같은 프리팹 캐릭터는 같은 동작 묶음을 같이 쓴다)
 var _warned: Dictionary = {}         # 이미 경고한 것(같은 경고를 병사마다 되풀이하지 않게)
+var _hit_rng := RandomNumberGenerator.new()    # 피격 동작 확률(화면만 — 시뮬 난수와 따로)
+## 피격 반응 집계(검사 · 상태 글자): 맞음 · 피격 동작 틂 · 안 틂(하던 동작) · IK 피격
+var hit_stats := {"hits": 0, "anim": 0, "skip": 0, "ik": 0}
 
 
 func _ready() -> void:
@@ -199,6 +208,14 @@ func _face_yaw(facing: int) -> float:
 
 # ───────────── BattleView 의 퍼펫 자리를 3D 로 바꿔 끼운다 ─────────────
 
+## 전장을 붙인다(BattleView) + 피격 신호(10-21 — 맞은 점 · 총알 방향)
+func setup(bf: Battlefield) -> void:
+	super(bf)
+	_hit_rng.randomize()
+	if bf != null and not bf.soldier_hit.is_connected(_on_hit):
+		bf.soldier_hit.connect(_on_hit)
+
+
 func _attach(s: BattleSoldier) -> void:
 	if s == null or _entries.has(s.id):
 		return
@@ -247,6 +264,7 @@ func _on_died(s: BattleSoldier) -> void:
 		return
 	e.dead_t = 0.0
 	e.label = ""
+	e.hit_until = 0.0
 	e.cands = _death_keys(s.stance)
 	var had_motion := e.motion != ""
 	e.motion = ""
@@ -284,6 +302,9 @@ func _update_soldier(e: Entry, delta: float, _step: float) -> void:
 	var s := e3.s
 	# 몸 상태를 한 수로 — 바뀐 프레임에만 동작 후보 · 글자를 다시 만든다(BattleView 와 같다)
 	var sig := s.override | (s.move_state << 3) | (s.act_state << 6) | (s.stance << 9)
+	if e3.hit_until > 0.0 and (_clock >= e3.hit_until or not _hit_hold_ok(s)):
+		e3.hit_until = 0.0
+		e3.sig = -1                               # 피격 동작을 그만 보여 줌 — 지금 상태로 다시 고른다
 	if sig != e3.sig or s.intent_name != e3.last_intent:
 		e3.last_intent = s.intent_name
 		e3.label = _label_for(s)
@@ -368,6 +389,15 @@ func _pick_motion(e: Entry) -> void:
 		e3.motion = ""
 		return
 	var ap := e3.ch.get_animation_player()
+	# 피격(10-21): 굴려서 피격 동작을 안 틀기로 했으면 하던 동작 그대로(IK 피격만) · 피격 동작을 보여 주는 중이면 그대로
+	if s.override != BattleBody.Ovr.HIT:
+		e3.hit_rolled = false
+		e3.skip_hit = false
+	elif e3.skip_hit and e3.motion != "":
+		return
+	if e3.hit_until > _clock and _hit_hold_ok(s):
+		return
+	e3.hit_until = 0.0
 	var st := mt.state_of(e3.cands, e3.avail)
 	var m := ""
 	if st != "" and st == e3.state and e3.motion != "" and mt.has_motion(st, e3.motion) and String(ap.current_animation) == e3.motion:
@@ -378,6 +408,8 @@ func _pick_motion(e: Entry) -> void:
 	e3.reroll = st != "" and mt.variant_count(st, e3.avail) > 1
 	if m != "" and (m != e3.motion or String(ap.current_animation) != m):
 		e3.ch.play_motion(m, blend_sec if e3.motion != "" else 0.0)
+		if st.begins_with("피격") and ap.has_animation(m):   # 자세별 피격 동작 — 시뮬 경직(0.25 초)보다 길게, 유닛의 최대 초까지 보여 준다
+			e3.hit_until = _clock + minf(ap.get_animation(m).length, e3.ch.hit_anim_max_sec)
 	e3.motion = m
 	# 걷기에 달리기 동작을 빌려 쓰는 동안은 걷는 속도만큼 느리게(BattleView 와 같다)
 	var spd := 1.0
@@ -386,6 +418,36 @@ func _pick_motion(e: Entry) -> void:
 		if s.stance == BattleBody.Stance.CROUCH:
 			spd *= s.type.crouch_move_mult
 	ap.speed_scale = clampf(spd, 0.1, 1.0)
+
+
+## 피격 동작을 계속 보여 줘도 되나 — 쓰러짐 · 패닉 · 제압 · 움직임(걷기 · 달리기 · 포복) · 사격 · 장전 · 투척이 오면 바로 넘긴다
+static func _hit_hold_ok(s: BattleSoldier) -> bool:
+	return (s.override == BattleBody.Ovr.NONE or s.override == BattleBody.Ovr.HIT) 		and (s.move_state == BattleBody.Move.IDLE or s.move_state == BattleBody.Move.COVER) 		and (s.act_state == BattleBody.Act.NONE or s.act_state == BattleBody.Act.AIM)
+
+
+## 맞음(살아 있음, 10-21) — 피격 동작 확률을 굴리고(경직 하나에 한 번 · 피격 동작을 보여 주는 중이면 안 굴림 — 처음부터 다시 안 틀게)
+## 맞은 점 · 총알 방향으로 IK 피격(화면 안 병사만 — 화면 밖은 동작을 안 돌린다)
+func _on_hit(s: BattleSoldier, info: Dictionary) -> void:
+	var e := _entries.get(s.id, null) as Entry3D
+	if e == null or e.ch == null:
+		return
+	hit_stats["hits"] += 1
+	if not e.hit_rolled and e.hit_until <= 0.0:
+		e.hit_rolled = true
+		e.skip_hit = _hit_rng.randf() >= e.ch.hit_anim_chance
+		hit_stats["skip" if e.skip_hit else "anim"] += 1
+	var pt: Vector3 = info.get("point", Vector3.INF)
+	if pt == Vector3.INF or not e.ch.hit_ik_enabled or not show_puppets or _dot == null:
+		return
+	var foot := to_canvas(s.x, 0.0, s.depth)
+	if foot.x <= _vis_x0 or foot.x >= _vis_x1:
+		return
+	var d: Vector3 = info.get("dir", Vector3.ZERO)      # x 1 m 마다 (x · 높이 · 깊이 m)
+	var back := Vector3(pt.x - d.x, pt.y - d.y, pt.z - d.z / maxf(_bf.depth_width_m, 0.001))    # 총알이 x 1 m 앞에 있던 점(시뮬 좌표)
+	var wp := _dot.ground_to_world(to_canvas(pt.x, 0.0, pt.z)) + Vector3(0.0, pt.y, 0.0)
+	var wb := _dot.ground_to_world(to_canvas(back.x, 0.0, back.z)) + Vector3(0.0, back.y, 0.0)
+	if e.ch.hit_react(wp, wp - wb) != "":
+		hit_stats["ik"] += 1
 
 
 ## 반복 동작이 한 바퀴 돌았을 때 — 그 표 상태의 동작 중에서 비중대로 다시 고른다(같은 것이 나오면 그대로 이어 감).

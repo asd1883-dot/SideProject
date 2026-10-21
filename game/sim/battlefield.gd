@@ -14,6 +14,8 @@ class_name Battlefield
 signal shot_fired(shot: Dictionary)
 signal soldier_spawned(s: BattleSoldier)
 signal soldier_died(s: BattleSoldier)
+## 맞았지만 살아 있다(10-21 — 화면의 피격 반응). info = {point: 맞은 점(x m · 높이 m · 깊이 0~1), dir: 총알 방향(x · 높이 · 깊이 m — 정규화 안 함), shooter}
+signal soldier_hit(s: BattleSoldier, info: Dictionary)
 signal soldier_panicked(s: BattleSoldier)
 signal equipment_added(eq: BattleEquipment)
 
@@ -38,7 +40,7 @@ var rng := RandomNumberGenerator.new()
 var stats := {"shots": 0, "hits": 0, "blocked": 0, "kills": [0, 0], "panics": [0, 0], "claims": 0, "abandoned": 0}
 
 var _buckets: Dictionary = {}       # 구역 번호 -> Array[BattleSoldier]
-var _pending: Array = []            # 날아가는 중인 총알의 결과 [{t, target, dmg, shooter, near, power}]
+var _pending: Array = []            # 날아가는 중인 총알의 결과 [{t, target, dmg, shooter, near, power, point, dir}]
 var _next_id := 1
 var _prune_timer := PRUNE_EVERY
 var _next_squad_id := 1
@@ -289,9 +291,10 @@ func fire(s: BattleSoldier) -> void:
 	Ballistics.fire(self, s)
 
 
-## 비행 시간 뒤에 적용할 결과를 걸어 둔다
-func schedule_impact(flight: float, target: BattleSoldier, dmg: float, shooter: BattleSoldier, near: Array, power: float) -> void:
-	_pending.append({"t": time + flight, "target": target, "dmg": dmg, "shooter": shooter, "near": near, "power": power})
+## 비행 시간 뒤에 적용할 결과를 걸어 둔다. point · dir = 맞은 점 · 총알 방향(화면의 피격 반응이 부위를 고른다 — 판정에는 안 씀)
+func schedule_impact(flight: float, target: BattleSoldier, dmg: float, shooter: BattleSoldier, near: Array, power: float,
+		point := Vector3.INF, dir := Vector3.ZERO) -> void:
+	_pending.append({"t": time + flight, "target": target, "dmg": dmg, "shooter": shooter, "near": near, "power": power, "point": point, "dir": dir})
 
 
 func _apply_pending() -> void:
@@ -303,7 +306,7 @@ func _apply_pending() -> void:
 			for n in (p["near"] as Array):
 				add_suppression(n as BattleSoldier, float(p["power"]))
 			if p["target"] != null:
-				_hit(p["target"] as BattleSoldier, float(p["dmg"]), p["shooter"] as BattleSoldier)
+				_hit(p["target"] as BattleSoldier, float(p["dmg"]), p["shooter"] as BattleSoldier, p.get("point", Vector3.INF), p.get("dir", Vector3.ZERO))
 		i -= 1
 
 
@@ -315,7 +318,7 @@ func add_suppression(s: BattleSoldier, amount: float) -> void:
 	s.suppression = minf(BattleBody.SUPPRESS_MAX, s.suppression + amount / maxf(s.stat(StatMod.SUPPRESS_RESIST, s.type.suppress_resist), 0.1) * lerpf(1.6, 0.8, morale))
 
 
-func _hit(target: BattleSoldier, dmg: float, shooter: BattleSoldier) -> void:
+func _hit(target: BattleSoldier, dmg: float, shooter: BattleSoldier, point := Vector3.INF, dir := Vector3.ZERO) -> void:
 	if not target.alive:
 		return
 	stats["hits"] += 1
@@ -328,6 +331,7 @@ func _hit(target: BattleSoldier, dmg: float, shooter: BattleSoldier) -> void:
 		target.ovr_timer = BattleBody.HIT_STUN
 		BattleBody.stop_act(target)
 		add_suppression(target, 0.5)
+	soldier_hit.emit(target, {"point": point, "dir": dir, "shooter": shooter})
 
 
 func _kill(s: BattleSoldier, shooter: BattleSoldier) -> void:
