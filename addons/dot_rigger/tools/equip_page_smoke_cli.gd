@@ -13,6 +13,8 @@ extends SceneTree
 ## [8] 잡기(10-16): 오른손 · 왼손 · 양손 · 고정 — 무기 자리 그대로 · 따라가는 손 IK · 게임 길
 ## [9] 동작별 무기 자리(10-19): 이 동작만(띠 · 크기 없음) · 끌기 → 그 동작만 · 다른 동작 기본 · 상하체 합성 = 상체 것 · 표 칸 · 모든 동작 끌기 = 기본 자리만 ·
 ##     숫자 칸 · 게임 길 섞어 옮기기 · 맞추기(양손 · 소켓) · 복사 · 붙여넣기 · 기본으로 · asset.json 왕복
+## [10] 조준 IK(10-21): 조준 칸 = 유닛 값 · 미리보기(높낮이 · 옆 → 허리 · 가슴) · 표적 십자 · 총구 선 · 한계 · 한계 칸 · 비중 0 동작 안내 ·
+##     동작 표 조준 칸(기본 · 따로 · 합성 = 상체) · 비중 절반 · 기본으로 · 끔(잠김) · 미리보기 끔
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -515,6 +517,109 @@ func _offset_checks(page: DREquipPage) -> void:
 	page._playing = true
 
 
+## 높낮이(도, 수평 = 0)
+static func _elev(v: Vector3) -> float:
+	return rad_to_deg(asin(clampf(v.normalized().y, -1.0, 1.0)))
+
+
+func _mt_row(page: DREquipPage, motion: String) -> TreeItem:
+	var it := page._mt.get_root().get_first_child() if page._mt.get_root() != null else null
+	while it != null and it.get_text(0) != motion:
+		it = it.get_next()
+	return it
+
+
+func _mark_count(page: DREquipPage) -> int:
+	page._draw_marks()
+	if page._imesh.get_surface_count() == 0:
+		return 0
+	return (page._imesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+
+
+## [10] 조준 IK(10-21) — 왼쪽 조준 칸 · 미리보기(옆 · 높낮이 → 허리 · 가슴) · 표적 · 총구 선 · 동작 표 조준 칸 · 동작별 비중 · 기본으로 · 한계 · 꺼짐
+func _aim_checks(page: DREquipPage) -> void:
+	print("[10] 조준 IK — 조준 칸 · 미리보기 · 표적 · 총구 선 · 동작 표 조준 칸 · 동작별 비중")
+	page.select_unit(BASE)
+	await _frames(3)
+	var r0 := page._root
+	_check(page._aim_chk.button_pressed == r0.aim_enabled and r0.aim_enabled and absf((page._aim_sp["aim_up_deg"] as SpinBox).value - r0.aim_up_deg) < 0.01,
+		"조준 칸 = 유닛 값(켬 · 위 한계 %.0f° · 아래 %.0f° · 옆 %.0f° · 빠르기 %.0f°/s)" % [r0.aim_up_deg, r0.aim_down_deg, r0.aim_side_deg, r0.aim_speed_deg])
+	page._playing = false
+	page.play_motion("Firing_Rifle")
+	page._seek(0.3)
+	page._aim_side_sl.value = 0.0
+	page._aim_height_sl.value = 20.0
+	var marks_off := _mark_count(page)
+	page.set_aim_preview(true)
+	await _frames(2)
+	var ar := page._prev.aim_report()
+	_check(page._aim_btn.button_pressed and not ar.is_empty() and absf(_elev(ar["dir"]) - 20.0) < 0.5 and page._aim_lbl.text.contains("+20"),
+		"조준 미리보기 높낮이 +20° → 총구 높낮이 %.1f° · 허리 · 가슴 돌림 위아래 %+.1f°「%s」" % [_elev(ar.get("dir", Vector3.ZERO)), float(ar.get("pitch", 0)), page._aim_lbl.text])
+	page._update_info()
+	_check(page._info.text.contains("허리 · 가슴 돌림"), "정보 줄: …%s" % page._info.text.right(64))
+	var marks_on := _mark_count(page)
+	_check(marks_on == marks_off + 8, "미리보기 표시 — 표적 십자 · 총구 선(선 정점 %d → %d)" % [marks_off, marks_on])
+	page._aim_side_sl.value = 10.0
+	await _frames(1)
+	ar = page._prev.aim_report()
+	_check(absf(float(ar.get("yaw", 0)) - 10.0) < 0.2, "옆 +10° → 돌림 옆 %+.1f°" % float(ar.get("yaw", 0)))
+	page._aim_side_sl.value = 0.0
+	page._aim_height_sl.value = 60.0
+	await _frames(1)
+	ar = page._prev.aim_report()
+	_check(bool(ar.get("clamped", false)) and absf(float(ar["pitch"]) - r0.aim_up_deg) < 0.5, "높낮이 +60° = 위 한계 %.0f° 에서 멈춤(돌림 %+.1f°)" % [r0.aim_up_deg, float(ar.get("pitch", 0))])
+	var up0 := r0.aim_up_deg
+	(page._aim_sp["aim_up_deg"] as SpinBox).value = 25.0
+	await _frames(1)
+	page._force_pose()
+	ar = page._prev.aim_report()
+	_check(absf(r0.aim_up_deg - 25.0) < 0.01 and absf(page._prev.aim_up_deg - 25.0) < 0.01 and absf(float(ar.get("pitch", 0)) - 25.0) < 0.5,
+		"위 한계 칸 25° → 유닛 값 · 미리보기 사본 · 돌림 %+.1f°" % float(ar.get("pitch", 0)))
+	(page._aim_sp["aim_up_deg"] as SpinBox).value = up0
+	page._aim_height_sl.value = 15.0
+	await _frames(1)
+	# 비중 0 동작 · 안내
+	page.play_motion("Rifle_Idle")
+	page._force_pose()
+	page._update_info()
+	_check(page._prev.aim_report().is_empty() and page._info.text.contains("이 동작은 0 %"), "Rifle_Idle(조준 비중 0) = 안 돎 · 안내「…%s」" % page._info.text.right(40))
+	# 동작 표 조준 칸
+	page._fill_motion_table()
+	var rf := _mt_row(page, "Firing_Rifle")
+	var ri := _mt_row(page, "Rifle_Idle")
+	_check(rf != null and ri != null and absf(rf.get_range(4) - 1.0) < 0.001 and absf(ri.get_range(4)) < 0.001 and rf.is_editable(4),
+		"동작 표 조준 칸: Firing_Rifle %.2f · Rifle_Idle %.2f(기본 — 동작 표의 사격 · 조준 상태)" % [rf.get_range(4) if rf else -1.0, ri.get_range(4) if ri else -1.0])
+	page.set_aim_weight("Firing_Rifle", 0.5)
+	await _frames(1)
+	page._fill_motion_table()
+	rf = _mt_row(page, "Firing_Rifle")
+	_check(absf(float(r0.aim_motion_weights.get("Firing_Rifle", -1.0)) - 0.5) < 0.001 and absf(page._prev.aim_weight_for("Firing_Rifle") - 0.5) < 0.001
+		and absf(rf.get_range(4) - 0.5) < 0.001, "Firing_Rifle 조준 0.5 → 유닛 aim_motion_weights · 미리보기 사본 · 표 칸")
+	_check(absf(r0.aim_weight_for("Crouch_Idle+Firing_Rifle") - 0.5) < 0.001, "상하체 합성 Crouch_Idle+Firing_Rifle = 상체 Firing_Rifle 값 0.5")
+	page.play_motion("Firing_Rifle")
+	page._force_pose()
+	ar = page._prev.aim_report()
+	_check(absf(float(ar.get("weight", 0)) - 0.5) < 0.001, "비중 0.5 = 돌림도 절반(비중 %.2f · 위아래 %+.1f°)" % [float(ar.get("weight", 0)), float(ar.get("pitch", 0))])
+	page.set_aim_weight("Firing_Rifle", null)
+	page.set_aim_weight("Rifle_Idle", 1.0)
+	_check(not r0.aim_motion_weights.has("Firing_Rifle") and absf(float(r0.aim_motion_weights.get("Rifle_Idle", -1.0)) - 1.0) < 0.001, "조준 비중 기본으로(Firing_Rifle) · Rifle_Idle 따로 1")
+	page.set_aim_weight("Rifle_Idle", 0.0)
+	_check(r0.aim_motion_weights.is_empty(), "기본과 같은 값으로 고치면 따로 값을 지움(aim_motion_weights 비어 있음)")
+	# 꺼짐
+	page._aim_chk.button_pressed = false
+	await _frames(1)
+	page._force_pose()
+	page._fill_motion_table()
+	rf = _mt_row(page, "Firing_Rifle")
+	_check(not r0.aim_enabled and not page._prev.aim_enabled and page._prev.aim_report().is_empty() and not rf.is_editable(4) and not (page._aim_sp["aim_up_deg"] as SpinBox).editable,
+		"조준 끔 → 유닛 · 미리보기 사본 · 안 돎 · 표 칸 · 숫자 칸 잠김")
+	page._aim_chk.button_pressed = true
+	await _frames(1)
+	page.set_aim_preview(false)
+	_check(not page._aim_btn.button_pressed and page._prev.aim_report().is_empty() and _mark_count(page) == marks_off, "조준 미리보기 끔 → 동작 그대로 · 표시 없음")
+	page._playing = true
+
+
 func _dot(mi: MeshInstance3D) -> bool:
 	if mi.mesh == null or mi.mesh.get_surface_count() == 0:
 		return false
@@ -682,6 +787,7 @@ func _run() -> void:
 	await _gizmo_checks(page)
 	await _grip_checks(page)
 	await _offset_checks(page)
+	await _aim_checks(page)
 
 	# 치우기
 	page._drop_root()

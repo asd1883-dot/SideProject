@@ -3,7 +3,8 @@ extends SceneTree
 ## 3D 화면(BattleView3D) 검사 — 창 없이(--headless) 전투를 돌리며 3D 캐릭터 쪽 논리가 도는지 본다(10-16).
 ##   Godot --headless --path <프로젝트> --script res://game/tools/view3d_smoke.gd [-- --seconds=60 --squads=2 --seed=1941]
 ## 보는 것: 병사마다 캐릭터가 붙는가 · 상태에 맞는 동작이 나오는가(멈춘 채인 병사 비율) · 쓰러진 병사가 풀로 돌아가 다시 쓰이는가 ·
-##          무기(뼈 소켓 · 10-16)의 왼손 IK 비중이 동작마다 바뀌는가(조준 = 붙임 · 장전 · 수류탄 = 놓음) · 복장 보기 4가지(병종 복장 / 상의만 / 하의만 / 내복)가 슬롯을 바꾸는가.
+##          무기(뼈 소켓 · 10-16)의 왼손 IK 비중이 동작마다 바뀌는가(조준 = 붙임 · 장전 · 수류탄 = 놓음) · 복장 보기 4가지(병종 복장 / 상의만 / 하의만 / 내복)가 슬롯을 바꾸는가 ·
+##          사격하는 병사에게 조준 표적이 가고 허리 · 가슴이 표적으로 도는가(조준 IK, 10-21).
 ## 그림은 안 본다(렌더 없음) — 모양은 창으로 보는 시험장(battle_test.tscn)에서. 마지막 줄이 "VIEW3D SMOKE OK" 면 통과.
 
 const TYPE_PATH := "res://game/units/rifleman.tres"
@@ -128,6 +129,56 @@ func _run() -> void:
 		fails.append("쓰러진 병사가 풀로 안 돌아감")
 	if ik_moves == 0:
 		fails.append("왼손 IK 비중이 동작 따라 안 바뀜")
+
+	# 2-2) 조준 IK(10-21) — 화면을 줄여 전장 전체가 보이게(화면 밖 병사는 동작 · 표적을 안 돌린다) 20 초 더. 위 수치와 따로
+	view.scale = Vector2(0.25, 0.25)
+	var aim_want := 0                      # 적을 겨눈(두뇌 표적) 채 조준 비중이 있는 동작(사격 · 조준)인 병사 · 프레임
+	var aim_frames := 0                    # 그중 캐릭터에 조준 표적이 간 것(표적은 동작 박자 — 초당 step_hz 번 — 에 넣는다)
+	var aim_solved := 0                    # 1 초마다 조준하던 병사의 뼈대를 바로 갱신해 잰 수(이 검사는 프레임을 안 넘겨 뼈대 갱신이 미뤄져 있다)
+	var aim_err := 0.0                     # 그때 돌린 총구 기준 ↔ 겨눌 방향 최대(한계에 걸린 것 빼고)
+	var aim_clamped := 0
+	var aim_pitch := 0.0                   # 돌린 위아래 각 최대(절댓값)
+	for k in int(20.0 / DT):
+		bf.step(DT)
+		view._process(DT)
+		var probe_now := k % 60 == 59
+		for v in view._entries.values():
+			var e := v as BattleView3D.Entry3D
+			if e.dead_t >= 0.0 or e.ch == null or e.s.target == null or not e.s.target.alive or e.ch.aim_weight_for(e.motion) <= 0.0:
+				continue
+			var fx := view.to_canvas(e.s.x, 0.0, e.s.depth).x
+			if fx <= view._vis_x0 or fx >= view._vis_x1:
+				continue
+			aim_want += 1
+			if not e.ch.has_aim_target():
+				continue
+			aim_frames += 1
+			if probe_now:
+				var sk := e.ch.get_skeleton()
+				sk.set_bone_pose_rotation(0, sk.get_bone_pose_rotation(0))
+				sk.notification(Skeleton3D.NOTIFICATION_UPDATE_SKELETON)
+				var ar := e.ch.aim_report()
+				if ar.is_empty():
+					continue
+				aim_solved += 1
+				aim_pitch = maxf(aim_pitch, absf(float(ar["pitch"])))
+				if bool(ar["clamped"]):
+					aim_clamped += 1
+				else:
+					aim_err = maxf(aim_err, float(ar["err"]))
+		for team in 2:
+			if bf.count_fighting(team) == 0:
+				bf.deploy_squad(team, type)
+	view.scale = Vector2.ONE
+	var aim_pct := 100.0 * float(aim_frames) / maxf(float(aim_want), 1.0)
+	print("조준  사격 · 조준 동작 병사 · 프레임 %d 중 조준 표적 %.1f %% · 1 초마다 잰 %d번: 겨눌 방향과 최대 %.2f° · 위아래 돌림 최대 %.1f° · 한계 걸림 %d" % [
+		aim_want, aim_pct, aim_solved, aim_err, aim_pitch, aim_clamped])
+	if aim_solved == 0 or aim_err > 1.0:
+		fails.append("조준 IK 가 표적으로 안 돌림(잰 %d번 · 최대 %.2f°)" % [aim_solved, aim_err])
+	if aim_want == 0:
+		fails.append("사격 · 조준하는 병사가 없음")
+	elif aim_pct < 80.0:
+		fails.append("사격 중 조준 표적이 간 병사 %.1f %%" % aim_pct)
 
 	# 3) 복장 보기 — 슬롯마다 입은 복장
 	var probe: DRCharacter3D = null

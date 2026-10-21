@@ -223,6 +223,34 @@ func _go() -> void:
 		eqp.set_per_motion(false)
 		_expect(stored and in_file and gone and redo2 and not ew.has_meta(DRCharacter3D.MOTION_OFFSETS_META),
 			"② 동작별 자리: 이 동작만 끌기 → 열린 씬 장비 메타(Firing_Rifle)만 · 기본 자리 그대로 · 저장에 담김 → Ctrl+Z 빠짐 → Ctrl+Y → Ctrl+Z (%s %s %s %s)" % [stored, in_file, gone, redo2])
+		# 조준 IK(10-21): 조준 미리보기 → 미리보기 사본만 돈다(열린 씬엔 표적 없음) · 동작 표 조준 비중 → 열린 씬 루트 aim_motion_weights ·
+		#   위 한계 칸 → 루트 값 → 탭 창 Ctrl+Z 둘 다 빠짐 → Ctrl+Y → Ctrl+Z
+		eqp.play_motion("Firing_Rifle")
+		eqp._aim_height_sl.value = 20.0
+		eqp.set_aim_preview(true)
+		await _frames(10)
+		var aimed: bool = not eqp._prev.aim_report().is_empty() and er.aim_report().is_empty() and not er.has_aim_target()
+		var up0: float = er.aim_up_deg
+		eqp.set_aim_weight("Firing_Rifle", 0.5)
+		await _frames(10)
+		(eqp._aim_sp["aim_up_deg"] as SpinBox).value = up0 - 10.0
+		await _frames(10)
+		var set_ok: bool = absf(float(er.aim_motion_weights.get("Firing_Rifle", -1.0)) - 0.5) < 0.001 and absf(er.aim_up_deg - (up0 - 10.0)) < 0.01 \
+			and absf(eqp._prev.aim_weight_for("Firing_Rifle") - 0.5) < 0.001
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var undo_up: bool = absf(er.aim_up_deg - up0) < 0.01 and absf((eqp._aim_sp["aim_up_deg"] as SpinBox).value - up0) < 0.01
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var undo_w: bool = not er.aim_motion_weights.has("Firing_Rifle") and absf(eqp._prev.aim_weight_for("Firing_Rifle") - 1.0) < 0.001
+		eqp._unhandled_key_input(_ctrl_key(KEY_Y))
+		await _frames(30)
+		var redo_w: bool = er.aim_motion_weights.has("Firing_Rifle")
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		eqp.set_aim_preview(false)
+		_expect(aimed and set_ok and undo_up and undo_w and redo_w and er.aim_motion_weights.is_empty(),
+			"② 조준: 미리보기 사본만 돎 · 조준 비중 · 위 한계 → 열린 씬 루트 → Ctrl+Z 한계 · Ctrl+Z 비중 빠짐(미리보기도) → Ctrl+Y → Ctrl+Z (%s %s %s %s %s)" % [aimed, set_ok, undo_up, undo_w, redo_w])
 		eqp._playing = true
 		# 머리 소켓 더하기 → 열린 씬에 붙고 캐릭터가 잇는다 → 되돌리기
 		var n0: int = eqp._sockets().size()
