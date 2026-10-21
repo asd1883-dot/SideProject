@@ -318,8 +318,11 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
   총구 선 초록 = 표적으로 · 주황 = 한계 · 노란 십자 = 견착점, 꺼진 채 끌어도 켜짐 · 비중 0 동작이면 조준하는 동작으로 바꿈) · 오른쪽 동작 표 `조준` 칸(그 동작의 조준 비중 — 흐림 = 기본: 동작 표의 "사격" · "조준" 상태면 1). 게임: `ch.set_aim_target(세상 좌표)`
   (BattleView3D 가 두뇌 표적의 겨눌 곳을 넘김) · `clear_aim_target()` · `aim_report()`. 고정 받침대 무기는 몸으로 안 겨눔.
   **레이(총구 선) · 견착점 위치 = `[총구 표지]` · `[견착 표지]`**(무기 아래 Marker3D — 기즈모로 옮김, 총구 +Z = 방향 · `[자동으로]` = 지우고 메시에서 다시 잼 · asset.json `aim_markers`).
+- **피격 반응(10-21)** — ① 유닛 탭 미리보기 아래 `피격 반응`: `피격 동작 확률 %`(맞을 때 자세별 피격 동작 — 동작 표의 피격 · 피격+앉기 · 피격+엎드림 — 을 틀 확률, 안 틀면 하던 동작 그대로) ·
+  `최대 초`(틀면 이만큼까지 — 쓰러짐 · 움직임 · 사격이 오면 바로 넘김) · `☑ IK 피격` · `IK 세기 °` · `길이 초`(총알이 맞은 부위가 총알 방향으로 젖혀졌다 돌아옴 — 동작 위에 덧씌움, 팔이면 손이 총에서 튕김) ·
+  `[🎯 맞혀 보기]`(켜고 몸을 누르면 그 부위에 앞에서 맞은 것처럼). 게임: 시뮬 `soldier_hit`(맞은 점 · 방향) → `BattleView3D` 가 굴리고 `ch.hit_react(점, 방향)`.
 - 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · "조준 IK" 절 · `runtime/dr_aim_solver_3d.gd` · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd` · `ui/transform_gizmo.gd`(기즈모 — 화면 좌표로 그리고 고르며 끌기는 광선 ↔ 평면, 손잡이 크기는 화면 기준).
-- 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `tools/aim_check_cli.gd`(조준 IK) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
+- 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `tools/aim_check_cli.gd`(조준 IK) · `tools/hit_check_cli.gd`(피격 반응) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
 - kar98k(모델 · 무기 씬 · 구운 그림)는 10-21 부터 저장소에 있다 — 새로 받은 PC 도 기본형 군인이 무기를 든 채 열린다.
 - 옛 길(남음): 루트 칸 `weapon_asset` + `attach_weapon` + `DRGripFit`(동작마다 총을 두 손에 다시 맞추던 것) — 소켓 무기가 없을 때만 쓴다.
 
