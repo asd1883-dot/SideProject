@@ -36,6 +36,7 @@ static func step(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 		return
 	var t := s.type
 	var w := t.weapon
+	s.tick_mods(dt)                                 # 시간이 다 된 버프 · 디버프를 뺀다(§2-13)
 
 	# 저절로 돌아오는 수치 — 사기가 낮으면 제압이 늦게 빠진다(§2-8). 빙의 병사는 분대 사기와 무관(보통 기준)
 	var morale := s.squad.morale if (s.squad != null and not s.detached) else 0.6
@@ -93,15 +94,15 @@ static func step(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 	# 규칙 하나: 행동 중이면 이동은 정지. "걸으며 쏘기" 특성이 있으면 조준 · 사격 중에도 걷는다(장전은 멈춰서)
 	var may_move := not busy or (t.fire_while_walking and s.act_state != Act.RELOAD)
 	if dir != 0 and may_move:
-		var speed := t.walk_speed
+		var speed := s.stat(StatMod.WALK_SPEED, t.walk_speed)        # 속도는 최종 수치(수정자 반영, §2-13)
 		if s.stance == Stance.PRONE:
-			speed = t.crawl_speed
+			speed = s.stat(StatMod.CRAWL_SPEED, t.crawl_speed)
 			s.move_state = Move.CRAWL
 		elif s.stance == Stance.CROUCH:
-			speed = t.walk_speed * t.crouch_move_mult
+			speed = speed * t.crouch_move_mult
 			s.move_state = Move.WALK
 		elif s.want_run and not busy:
-			speed = t.run_speed
+			speed = s.stat(StatMod.RUN_SPEED, t.run_speed)
 			s.move_state = Move.RUN
 		else:
 			s.move_state = Move.WALK

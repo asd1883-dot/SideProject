@@ -35,6 +35,12 @@ var ammo := 0
 var suppression := 0.0          # 1 을 넘으면 제압(몸 덮어쓰기)
 var bloom_deg := 0.0            # 연사로 넓어진 퍼짐(도)
 
+# ── 수정자(§2-13): 버프 · 디버프 · 좌석 효율. 최종 수치는 stat() 한 곳 ──
+var mods: Array[StatMod] = []
+var _mod_sum: Dictionary = {}       # 수치 이름 -> [더하기의 합, 곱하기의 곱] — mods 가 바뀔 때만 다시 만든다
+var _mods_dirty := false
+var _timed_mods := 0                # 시간이 있는 수정자 수(0 이면 매 걸음 훑지 않는다)
+
 # ── 엄폐(§2-9) ──
 var cover: BattleCover = null   # 분대가 배정해 준 엄폐물
 var slot := -1                  # 그 엄폐물의 칸 번호
@@ -69,6 +75,76 @@ var alive: bool:
 ## 지금 쓸 수 있는 능력 목록 — 병종의 것(배열을 새로 만들지 않고 그대로 돌려준다)
 func abilities() -> Array[Ability]:
 	return type.abilities
+
+
+# ───────────── 수정자 · 최종 수치 ─────────────
+
+## 최종 수치 = (기본 + 더하기의 합) × 곱하기의 곱. 기본 = 부르는 쪽이 병종 · 무기에서 넣는 값(StatMod 의 수치 이름)
+func stat(name: StringName, base: float) -> float:
+	if mods.is_empty():
+		return base
+	if _mods_dirty:
+		_rebuild_mods()
+	var v: Variant = _mod_sum.get(name)
+	if v == null:
+		return base
+	var p: Array = v
+	return (base + float(p[0])) * float(p[1])
+
+
+## 수정자를 붙인다. 시간이 있는 것은 복사해서 붙인다(같은 .tres 를 여러 병사가 쓰면 남은 시간이 따로여야 하므로) — 붙은 것을 돌려준다
+func add_mod(m: StatMod) -> StatMod:
+	var mm := m
+	if m.duration >= 0.0:
+		mm = m.duplicate() as StatMod
+		mm.tag = m.tag
+		mm.time_left = m.duration
+		_timed_mods += 1
+	mods.append(mm)
+	_mods_dirty = true
+	return mm
+
+
+## 그 꼬리표의 수정자를 모두 뺀다. 뺀 수
+func remove_mods(tag: String) -> int:
+	var n := 0
+	var i := mods.size() - 1
+	while i >= 0:
+		if mods[i].tag == tag:
+			if mods[i].time_left >= 0.0:
+				_timed_mods -= 1
+			mods.remove_at(i)
+			n += 1
+		i -= 1
+	if n > 0:
+		_mods_dirty = true
+	return n
+
+
+## 시간이 있는 수정자의 시간을 줄이고 다 된 것을 뺀다(몸이 매 걸음 부른다 — 시간 있는 것이 없으면 바로 나간다)
+func tick_mods(dt: float) -> void:
+	if _timed_mods == 0:
+		return
+	var i := mods.size() - 1
+	while i >= 0:
+		var m := mods[i]
+		if m.time_left >= 0.0:
+			m.time_left -= dt
+			if m.time_left <= 0.0:
+				mods.remove_at(i)
+				_timed_mods -= 1
+				_mods_dirty = true
+		i -= 1
+
+
+func _rebuild_mods() -> void:
+	_mods_dirty = false
+	_mod_sum.clear()
+	for m in mods:
+		var p: Array = _mod_sum.get(m.stat, [0.0, 1.0])
+		p[0] = float(p[0]) + m.add
+		p[1] = float(p[1]) * m.mul
+		_mod_sum[m.stat] = p
 
 
 ## 싸울 수 있나(죽지도 패닉도 아님)

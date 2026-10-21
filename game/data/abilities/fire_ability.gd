@@ -47,7 +47,7 @@ func wants(s: BattleSoldier) -> bool:
 func begin(s: BattleSoldier, _bf: Battlefield) -> void:
 	s.phase = Phase.PREP
 	s.act_state = BattleBody.Act.AIM
-	s.act_timer = s.type.weapon.aim_time
+	s.act_timer = s.stat(StatMod.AIM_TIME, s.type.weapon.aim_time)
 
 
 func step(s: BattleSoldier, bf: Battlefield, dt: float) -> bool:
@@ -60,7 +60,7 @@ func step(s: BattleSoldier, bf: Battlefield, dt: float) -> bool:
 			s.phase = Phase.EXEC
 			s.act_state = BattleBody.Act.FIRE
 			s.act_timer = BattleBody.FIRE_POSE
-			s.fire_cooldown = s.type.weapon.fire_interval
+			s.fire_cooldown = s.stat(StatMod.FIRE_INTERVAL, s.type.weapon.fire_interval)
 		return true
 	# 실행(한 발 쏜 뒤 사격 자세가 보이는 동안)
 	s.act_timer -= dt

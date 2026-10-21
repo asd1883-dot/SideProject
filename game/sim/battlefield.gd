@@ -243,7 +243,7 @@ func add_suppression(s: BattleSoldier, amount: float) -> void:
 	if s == null or not s.can_fight():
 		return
 	var morale := s.squad.morale if (s.squad != null and not s.detached) else 0.6
-	s.suppression = minf(BattleBody.SUPPRESS_MAX, s.suppression + amount / maxf(s.type.suppress_resist, 0.1) * lerpf(1.6, 0.8, morale))
+	s.suppression = minf(BattleBody.SUPPRESS_MAX, s.suppression + amount / maxf(s.stat(StatMod.SUPPRESS_RESIST, s.type.suppress_resist), 0.1) * lerpf(1.6, 0.8, morale))
 
 
 func _hit(target: BattleSoldier, dmg: float, shooter: BattleSoldier) -> void:

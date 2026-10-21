@@ -38,7 +38,7 @@ func wants(s: BattleSoldier) -> bool:
 func begin(s: BattleSoldier, _bf: Battlefield) -> void:
 	s.phase = Phase.EXEC
 	s.act_state = BattleBody.Act.RELOAD
-	s.act_timer = s.type.weapon.reload_time
+	s.act_timer = s.stat(StatMod.RELOAD_TIME, s.type.weapon.reload_time)
 
 
 func step(s: BattleSoldier, _bf: Battlefield, dt: float) -> bool:

@@ -33,7 +33,7 @@ static func fire(bf: Battlefield, s: BattleSoldier) -> void:
 
 	# 퍼짐 원(도) = 무기 기본 × 자세 × (걸으며 쏘면) × 제압 + 연사로 넓어진 양
 	var moving := s.move_state == BattleBody.Move.WALK or s.move_state == BattleBody.Move.RUN or s.move_state == BattleBody.Move.CRAWL
-	var spread := w.spread_deg * t.spread_stance_mult(s.stance)
+	var spread := s.stat(StatMod.SPREAD, w.spread_deg) * t.spread_stance_mult(s.stance)
 	if moving:
 		spread *= w.spread_move_mult
 	spread *= 1.0 + t.spread_suppressed_add * clampf(s.suppression, 0.0, 1.0)
@@ -54,7 +54,7 @@ static func fire(bf: Battlefield, s: BattleSoldier) -> void:
 	var hit: BattleSoldier = res["hit"]
 	if bool(res["blocked"]):
 		bf.stats["blocked"] += 1
-	bf.schedule_impact(flight, hit, w.damage, s, res["near"], w.suppress_power)
+	bf.schedule_impact(flight, hit, s.stat(StatMod.DAMAGE, w.damage), s, res["near"], w.suppress_power)
 	bf.shot_fired.emit({
 		"from": Vector3(mx, mh, md),
 		"to": Vector3(mx + float(dir) * travel, mh + slope_h * travel, md + slope_d * travel),

@@ -106,8 +106,9 @@ static func tick(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 static func _pick_target(s: BattleSoldier, bf: Battlefield, w: WeaponData) -> void:
 	var best: BattleSoldier = null
 	var best_v := -INF
-	for e in bf.enemies_near(s.team, s.x, w.range_m):
-		var v := 1.0 - absf(e.x - s.x) / maxf(w.range_m, 1.0)
+	var range_m := s.stat(StatMod.RANGE, w.range_m)
+	for e in bf.enemies_near(s.team, s.x, range_m):
+		var v := 1.0 - absf(e.x - s.x) / maxf(range_m, 1.0)
 		if e.is_hidden():
 			v -= 0.4
 		if e == s.target:
