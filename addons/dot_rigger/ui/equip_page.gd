@@ -1244,6 +1244,10 @@ func _show_xform() -> void:
 
 
 const GRIP_NAMES := ["오른손", "왼손", "양손", "고정", "뼈"]
+## 잡기마다 마지막 자리(10-21) — 장비 노드의 메타 칸. 값 = {받침 경로(유닛 루트 기준): 그 받침 아래 장비 자리}.
+## 사용자: "잡기 오른손 · 왼손 · 양손을 엄청 번갈아 움직이면 세팅된 게 전부 망가져" — 바꿀 때마다 그때 보이는 동작 · 시점으로 새로 계산해
+## 동작을 바꿔 가며 4 바퀴 오가니 무기가 1.9 m · 180° 어긋났다. 이제 떠나는 받침의 자리를 적어 두고, 다시 오면 그대로 되돌린다(받침대 값도 안 덮음)
+const GRIP_MEMORY_META := &"dr_grip_memory"
 
 
 ## 잡기 줄 — 고른 장비(없으면 무기)의 받침 방식 단추 · 양손 보간 · 손마다 무엇을 하나
@@ -1300,7 +1304,8 @@ func set_blend(v: float) -> void:
 
 
 ## 고른 장비를 어디에 고정할지(조인트 느낌 — 사용자 10-16) — 0 = 오른손 · 1 = 왼손 · 2 = 양손(두 손 사이 받침대) · 3 = 고정(땅 받침대).
-## 지금 미리보기 자세에서 장비가 보이는 자리 그대로 받침만 바꾸고(유니티 "자리 유지하며 부모 바꾸기"), 따라갈 손의 표지가 없으면
+## 전에 쓰던 받침으로 돌아가면 그때 자리 그대로(GRIP_MEMORY_META — 받침대 값도 안 덮음). 처음 가는 받침이면 지금 미리보기 자세에서 장비의
+## 기본 자리(동작별 자리 · 조준 미리보기 뺌)가 보이는 곳 그대로 받침만 바꾸고(유니티 "자리 유지하며 부모 바꾸기"), 따라갈 손의 표지가 없으면
 ## 그 손의 지금 자리로 만든다(손이 튀지 않게). 받침이 없으면 만든다(같은 방식의 빈 받침대는 다시 씀). 되돌리기 한 칸
 func set_grip(kind: int) -> void:
 	var e := _equip_from(_node(_sel))
@@ -1318,6 +1323,8 @@ func set_grip(kind: int) -> void:
 		_update_grip_ui()
 		return
 	var follow: Array = [[0], [1], [0, 1], [0, 1]][kind]
+	if _aim_preview:
+		_prev.clear_aim_target(true)                       # 조준으로 돌린 자세를 기본 자리에 굳히지 않게(끝에 다시 켬)
 	var new_marks := {}                                    # 따라갈 손인데 표지가 없으면 — 지금 그 손 자리(장비 기준, 받침을 바꿔도 같다)
 	for side in follow:
 		if DRCharacter3D.find_hand_marker(e, side) == null:
@@ -1327,7 +1334,7 @@ func set_grip(kind: int) -> void:
 	_force_pose()
 	var sk := _prev.get_skeleton()
 	var root_inv := _prev.global_transform.affine_inverse()
-	var e_unit := root_inv * pe.global_transform           # 지금 보이는 자리(유닛 기준)
+	var e_unit := root_inv * pe.global_transform * _prev.get_equip_offset(pe).affine_inverse()   # 기본 자리가 지금 보이는 곳(유닛 기준 — 동작별 자리 뺌)
 	var anchor: Node3D = null
 	var make := false
 	if kind <= 1:
@@ -1355,9 +1362,15 @@ func set_grip(kind: int) -> void:
 			m.mode = mode
 			anchor = m
 			make = true
+	var mem: Dictionary = (e.get_meta(GRIP_MEMORY_META) as Dictionary).duplicate() if e.has_meta(GRIP_MEMORY_META) and e.get_meta(GRIP_MEMORY_META) is Dictionary else {}
+	var mem_old: Variant = e.get_meta(GRIP_MEMORY_META) if e.has_meta(GRIP_MEMORY_META) else null
+	mem[String(_root.get_path_to(e.get_parent()))] = e.transform           # 떠나는 받침의 자리
+	var back: Variant = null if make else mem.get(String(_root.get_path_to(anchor)))
 	var a_unit := Transform3D.IDENTITY
 	var props := {}
-	if anchor is BoneAttachment3D:
+	if back is Transform3D:
+		pass                                               # 전에 쓰던 받침 — 받침 값 · 장비 자리 그대로
+	elif anchor is BoneAttachment3D:
 		a_unit = root_inv * sk.global_transform * sk.get_bone_global_pose(sk.find_bone((anchor as BoneAttachment3D).bone_name))
 	else:
 		a_unit = Transform3D(e_unit.basis.orthonormalized(), e_unit.origin)     # 받침대 = 장비가 지금 있는 자리(배율 뺌) — 장비 로컬엔 배율만
@@ -1366,7 +1379,14 @@ func set_grip(kind: int) -> void:
 			var g := _prev.global_transform * a_unit
 			props["right_offset"] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(String(DRCharacter3D.HAND_BONES[1])))).affine_inverse() * g
 			props["left_offset"] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(String(DRCharacter3D.HAND_BONES[0])))).affine_inverse() * g
-	var e_local := a_unit.affine_inverse() * e_unit
+	var e_local: Transform3D = back if back is Transform3D else a_unit.affine_inverse() * e_unit
+	var warn := ""                                         # 처음 가는 양손 · 고정을 두 손이 총에 없는 자세에서 맞추면 다른 동작이 다 어긋난다
+	var mo := current_motion()
+	if not (back is Transform3D) and kind >= 2 and mo != "":
+		for side in 2:
+			var mk := DRCharacter3D.find_hand_marker(e, side)
+			if mk is DRHandTarget3D and (mk as DRHandTarget3D).weight_for(mo) <= 0.001:
+				warn = " — ⚠ 지금 동작 %s 은 %s IK 비중 0(총을 놓는 동작): 두 손이 총에 있는 동작에서 다시 바꾸세요(Ctrl+Z)" % [mo, DRCharacter3D.SIDE_NAMES[side]]
 	_begin("장비: %s 잡기 = %s" % [e.name, GRIP_NAMES[kind]])
 	if make:
 		for k in props.keys():
@@ -1382,6 +1402,11 @@ func set_grip(kind: int) -> void:
 		for k in props.keys():
 			_op_prop(anchor, k, props[k])
 	_op_reparent(e, anchor, e_local)
+	if _ur != null:
+		_ur.add_do_method(e, "set_meta", GRIP_MEMORY_META, mem)
+		_ur.add_undo_method(e, "set_meta", GRIP_MEMORY_META, mem_old)
+	else:
+		e.set_meta(GRIP_MEMORY_META, mem)
 	for side in new_marks.keys():
 		var mk := _new_marker(new_marks[side], {}, int(side))
 		_op_add(e, mk, [mk])
@@ -1389,8 +1414,11 @@ func set_grip(kind: int) -> void:
 		_ur.add_undo_method(_root, "remove_child", anchor)  # 장비를 원래 받침으로 되돌린 다음에(되돌리기는 넣은 차례대로 돈다)
 	_end(true)
 	_select_node(_root.get_path_to(e))
-	_set_status("%s 잡기 = %s%s%s" % [e.name, GRIP_NAMES[kind], " · 새 받침 %s" % anchor.name if make else "",
-		" · 새 표지 %s" % ", ".join(new_marks.keys().map(func(s): return String(DRCharacter3D.SIDE_NAMES[s]))) if not new_marks.is_empty() else ""])
+	if _aim_preview:
+		_apply_aim_preview()
+	_set_status("%s 잡기 = %s%s%s%s%s" % [e.name, GRIP_NAMES[kind], " · 새 받침 %s" % anchor.name if make else "",
+		" · 전에 쓰던 자리로" if back is Transform3D else " · 지금 자세(%s %d%%)에서 맞춤" % [mo, int(_time_sl.value * 100.0)],
+		" · 새 표지 %s" % ", ".join(new_marks.keys().map(func(s): return String(DRCharacter3D.SIDE_NAMES[s]))) if not new_marks.is_empty() else "", warn])
 
 
 ## 루트 아래에서 안 겹치는 이름
