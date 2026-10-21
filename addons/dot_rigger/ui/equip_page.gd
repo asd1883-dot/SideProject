@@ -499,7 +499,11 @@ func _build_ui() -> void:
 		hs.custom_minimum_size = Vector2(110, 0)
 		hs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		hs.tooltip_text = String(sd[3])
-		hs.value_changed.connect(func(_v: float) -> void: _apply_aim_preview())
+		hs.value_changed.connect(func(_v: float) -> void:
+			if _aim_preview:
+				_apply_aim_preview()
+			else:
+				set_aim_preview(true))           # 꺼진 채 끌면 켠다(끌어도 아무 일이 없는 함정 — 10-21 사용자 "변화 없는데?")
 		arow.add_child(hs)
 		if sd[0] == "옆":
 			_aim_side_sl = hs
@@ -1822,6 +1826,7 @@ func set_aim_setting(prop: String, value: Variant) -> void:
 	else:
 		_set_props_merged("장비: 조준 " + prop, [[_root, prop, value]])
 	_fill_motion_table.call_deferred()      # 켜고 끄면 조준 칸이 바뀐다
+	_update_aim_label()
 
 
 ## 왼쪽 조준 칸 = 유닛 루트 값(되돌리기 · 인스펙터로 바뀐 것도)
@@ -1856,6 +1861,7 @@ func set_aim_weight(motion: String, w: Variant) -> void:
 	_op_prop(_root, "aim_motion_weights", d)
 	_end(false)
 	_fill_motion_table.call_deferred()      # 미뤄서 — 표의 칸 고치기 신호에서도 불린다
+	_update_aim_label()
 
 
 ## 조준 미리보기 켜고 끄기 — 미리보기 병사가 옆 · 높낮이 각을 겨눈다(표적 대신 각 — set_aim_angles)
@@ -1864,6 +1870,13 @@ func set_aim_preview(on: bool) -> void:
 	if _aim_btn != null:
 		_aim_btn.set_pressed_no_signal(on)
 		_aim_btn.self_modulate = Color(1.0, 0.55, 0.85) if on else Color.WHITE   # 켜져 있음이 보이게(표적 십자와 같은 분홍)
+	if on:
+		# 지금 동작이 조준 비중 0 이면(서기 · 장전 … 또는 동작 표에서 조준 상태를 지운 Rifle_Aiming_Idle) 켜도 아무 변화가 없다 → 조준하는 동작으로
+		var cur := current_motion()
+		var am := _aim_motion()
+		if am != cur:
+			play_motion(am)
+			_set_status("조준 미리보기 — %s 은(는) 조준 비중이 0 이라 %s 로 바꿈(그 동작도 돌게 하려면 오른쪽 표 \"조준\" 칸)" % [cur, am])
 	_apply_aim_preview()
 	if on and not _dot_mode:
 		focus_aim()                          # 허리가 도는 것 · 표적 십자가 다 보이게
@@ -1888,9 +1901,7 @@ func focus_aim() -> void:
 func _apply_aim_preview() -> void:
 	var side := _aim_side_sl.value if _aim_side_sl != null else 0.0
 	var height := _aim_height_sl.value if _aim_height_sl != null else 0.0
-	if _aim_lbl != null:
-		_aim_lbl.text = "옆 %+d° · 높낮이 %+d°" % [int(side), int(height)]
-		_aim_lbl.modulate = Color.WHITE if _aim_preview else Color(1, 1, 1, 0.45)
+	_update_aim_label()
 	if _prev == null:
 		return
 	if _aim_preview:
@@ -1898,6 +1909,39 @@ func _apply_aim_preview() -> void:
 	else:
 		_prev.clear_aim_target(true)
 	_force_pose()
+
+
+## 끌기 막대 옆 글자 — 각 + (조준 미리보기 중인데 안 도는 까닭이 있으면) 주황 경고. 보는 곳(막대) 바로 옆에 둔다 — 아래 정보 줄 끝은 안 읽힌다(10-21)
+func _update_aim_label() -> void:
+	if _aim_lbl == null:
+		return
+	var t := "옆 %+d° · 높낮이 %+d°" % [int(_aim_side_sl.value if _aim_side_sl != null else 0.0), int(_aim_height_sl.value if _aim_height_sl != null else 0.0)]
+	var warn := ""
+	if _aim_preview and _prev != null:
+		if _prev.get_weapon_node() == null:
+			warn = "⚠ 무기 없음"
+		elif not _prev.aim_enabled:
+			warn = "⚠ 조준 꺼짐(왼쪽 [조준])"
+		elif _prev.aim_weight_for(current_motion()) <= 0.0:
+			warn = "⚠ 이 동작은 조준 0 % — 오른쪽 표 \"조준\" 칸"
+	_aim_lbl.text = t + ("   " + warn if warn != "" else "")
+	_aim_lbl.add_theme_color_override("font_color", Color(1.0, 0.62, 0.25) if warn != "" else Color(0.92, 0.94, 0.96))
+	_aim_lbl.modulate = Color.WHITE if _aim_preview else Color(1, 1, 1, 0.45)
+
+
+## 조준 미리보기에 쓸 동작 — 지금 동작의 조준 비중이 있으면 그대로, 없으면 Firing_Rifle(비중이 있으면) → 비중이 있는 첫 동작 → 그대로
+func _aim_motion() -> String:
+	var cur := current_motion()
+	if _prev == null or _prev.aim_weight_for(cur) > 0.0:
+		return cur
+	var names := _prev.motion_names()
+	names.sort()
+	if names.has("Firing_Rifle") and _prev.aim_weight_for("Firing_Rifle") > 0.0:
+		return "Firing_Rifle"
+	for n in names:
+		if _prev.aim_weight_for(n) > 0.0:
+			return n
+	return cur
 
 
 ## 동작 표 조준 칸 — 기본(동작 표 상태로 정한 값)은 흐리게
@@ -2035,6 +2079,7 @@ func play_motion(motion: String) -> void:
 			_motion_ob.select(i)
 	_prev.play_motion(motion, 0.0)
 	_acc = 0.0
+	_update_aim_label()                          # 조준 비중 0 동작이면 막대 옆 경고
 	if _per_motion:
 		_show_xform()                          # 숫자 칸 = 이 동작 자리 · 띠 = 이 동작 이름
 	else:
