@@ -10,7 +10,7 @@ class_name DRCharacter3D
 ##     ├ <몸 glb 인스턴스>(human_base)       — 구조 그대로: AnimationPlayer(root_node "..") 의 트랙 `%GeneralSkeleton:<뼈>` 가 그대로 풀린다
 ##     │   ├ Armature/GeneralSkeleton
 ##     │   │    ├ SlotTop · SlotBottom · SlotBase (MeshInstance3D — 슬롯 메시. 원래 통메시 Body 는 뺐다)
-##     │   │    └ DR_AimSolver(무기를 들었을 때 · 맨 앞 — 조준 IK, 10-21) · DR_Aim<손>Elbow · ArmIK · HandRot(조준 팔) · DR_HitSolver(IK 피격, 10-21) · DR_GripSolver(받침대가 있을 때) · DR_<손>Ref · DR_<손>Elbow · DR_<손>ArmIK · DR_<손>HandRot (손 표지마다 — 팔 IK 수정자)
+##     │   │    └ DR_AimSolver(무기를 들었을 때 · 맨 앞 — 조준 IK, 10-21) · DR_Aim<손>Elbow · ArmIK · HandRot(조준 팔) · DR_HitSolver(IK 피격, 10-21) · DR_GripSolver(받침대가 있을 때) · DR_<손>Ref · DR_<손>Elbow · DR_<손>ArmIK · DR_<손>HandRot (손 표지마다 — 팔 IK 수정자) · DR_HitArmSolver(손 IK 로 잡은 팔의 피격, 맨 뒤)
 ##     │   └ AnimationPlayer
 ##     ├ 오른손 (BoneAttachment3D = 소켓, 씬에 든 노드 — 10-16)  └ kar98k (장비 = 모델 씬 인스턴스)  └ 왼손 (DRHandTarget3D 표지)
 ##     └ 양손 (DRGripMount3D = 받침대 — 두 손 사이 보간 · 땅 고정, 10-16)  └ mg42  └ 오른손 · 왼손 (표지 — 두 손 다 IK)
@@ -216,7 +216,7 @@ var _aim_head := -1                            # 머리 뼈(팔이 든 각을 �
 var _hit_solver: SkeletonModifier3D = null
 var _hits: Array[HitReaction] = []             # 지금 도는 반응(최대 HIT_MAX — 넘치면 오래된 것부터 뺌)
 var _hit_dt := 0.0                             # 지난 풀이 뒤 흐른 시간(step_motion 이 모은다)
-var _hit_release := [0.0, 0.0]                  # 손마다 지금 IK 를 푼 정도(팔이 맞았을 때 — 0 = 그대로)
+var _hit_post: SkeletonModifier3D = null        # 손 IK 로 잡은 팔의 피격 — 수정자 차례 맨 뒤
 
 
 # ---------------------------------------------------------------- 만들기
@@ -1067,9 +1067,13 @@ class HandIK:
 ## IK 피격 반응 하나(10-21) — 뼈 사슬(아래부터) · 몫 · 돌림 축(뼈대 공간) · 흐른 시간 · 최대 각(라디안)
 class HitReaction:
 	var part := ""
-	var side := -1                          # 팔이면 그 손(0 = 왼손 · 1 = 오른손) — 그 손 IK 를 잠깐 풀어 총에서 튕겼다 돌아오게
+	var side := -1                          # 팔이면 그 손(0 = 왼손 · 1 = 오른손) — 그 손이 IK 로 잡고 있으면 손 IK 뒤에 돌려 총에서 튕겼다 돌아오게
 	var bones := PackedInt32Array()
 	var shares := PackedFloat32Array()
+	var bone := -1                          # 맞은 뼈 마디의 뼈 · 그 뼈 기준 맞은 점 · 총알 방향(뼈대 공간) — 축은 처음 돌릴 때 그때 자세로(_hit_axis)
+	var local := Vector3.ZERO
+	var dir := Vector3.ZERO
+	var ready := false
 	var axis := Vector3.RIGHT
 	var t := 0.0
 	var amp := 0.0
@@ -1151,6 +1155,7 @@ func refresh_equipment() -> void:
 	for side in 2:
 		if found[side] != null:
 			_make_ik(side, found[side][0], found[side][1])
+	_make_hit_post()                       # 맨 뒤(손 IK 로 잡은 팔의 피격 — 잡은 자세 위에)
 	if _hit_solver != null or _aim_solver != null or _solver != null or _hands[0] != null or _hands[1] != null:
 		_skel.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE if edited else Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL
 	_aim_offsets(_motion, true)                # 지금 동작의 동작별 자리를 바로(안 움직였으면 아래 sync_support 가 손 IK 목표를)
@@ -1837,8 +1842,9 @@ const HIT_SEGS := [
 const HIT_HEAD_LEN := 0.2
 ## 동시에 도는 반응 수(기관총에 여러 발 — 넘치면 오래된 것부터 뺌)
 const HIT_MAX := 4
-## 팔이 맞으면 그 손 IK(총 표지에 붙임)를 이만큼까지 풀었다 다시 잡는다 — 안 풀면 손이 총에 묶여 팔꿈치만 조금 움직인다(10-21 실측 0.8 cm)
-const HIT_ARM_RELEASE := 0.85
+## 총알 방향과 (사슬 뿌리 → 맞은 점)이 이루는 각의 사인이 이보다 작으면(30° 미만 — 앞으로 뻗은 팔을 앞에서) 아래로 쳐지게 섞는다.
+## 안 섞으면 양손 잡기 씬에서 왼팔이 맞아도 팔꿈치가 거꾸로 1.2 cm(10-21 사용자 씬 실측)
+const HIT_PUSH_MIN_SIN := 0.5
 ## 피격 칸(sync_from 이 옮긴다 — ① 탭 미리보기 사본)
 const HIT_PROPS := ["hit_anim_chance", "hit_anim_max_sec", "hit_ik_enabled", "hit_ik_deg", "hit_ik_sec"]
 
@@ -1859,6 +1865,17 @@ func _make_hit() -> void:
 	_skel.move_child(_hit_solver, idx)
 
 
+## 손 IK 로 무기를 잡은 팔의 피격 수정자 — 손 IK 를 다 만든 뒤 맨 뒤에(손 IK 가 없으면 안 만듦)
+func _make_hit_post() -> void:
+	if _hit_solver == null or (_hands[0] == null and _hands[1] == null):
+		return
+	_hit_post = HIT_SOLVER_SCRIPT.new()
+	_hit_post.name = "DR_HitArmSolver"
+	_hit_post.set("character", self)
+	_hit_post.set("after_hands", true)
+	_skel.add_child(_hit_post)
+
+
 ## 총알이 맞은 점(세상 좌표) · 총알 방향(세상)으로 IK 피격을 건다 — 돌려주는 값 = 맞은 부위(머리 · 가슴 · 배 · 왼팔 · 오른팔 · 왼다리 · 오른다리, 몸에서 멀면 "").
 ## 반응은 다음 뼈대 갱신(step_motion)부터 보인다. hit_ik_enabled 가 꺼져 있으면 부위만 돌려준다. power = 세기 배율
 func hit_react(point: Vector3, dir: Vector3, power := 1.0) -> String:
@@ -1866,12 +1883,13 @@ func hit_react(point: Vector3, dir: Vector3, power := 1.0) -> String:
 		return ""
 	var to_s := _skel.global_transform.affine_inverse() if _skel.is_inside_tree() else _skel_to_char().affine_inverse()
 	var p := to_s * point
-	var part := hit_part_at(p)
+	var seg := _hit_seg_at(p)
+	var part := String(seg[0])
 	if part == "" or not hit_ik_enabled or _hit_solver == null or hit_ik_deg <= 0.0:
 		return part
 	var h := HitReaction.new()
 	h.part = part
-	h.side = 0 if part == "왼팔" else (1 if part == "오른팔" else -1)
+	h.side = 0 if part == "왼팔" else (1 if part == "오른팔" else -1)   # 그 손이 IK 로 잡고 있으면 손 IK 뒤에 돌린다(_hit_after_hand)
 	var total := 0.0
 	for b in HIT_PARTS[part]:
 		var bi := _skel.find_bone(String(b[0]))
@@ -1883,14 +1901,11 @@ func hit_react(point: Vector3, dir: Vector3, power := 1.0) -> String:
 		return part
 	for i in h.shares.size():
 		h.shares[i] /= total
-	var d := (to_s.basis * dir).normalized()
-	var r := p - _skel.get_bone_global_pose(h.bones[0]).origin
-	var axis := r.cross(d)                      # 사슬 뿌리를 축으로 맞은 점이 총알 방향으로 밀리게
-	if axis.length_squared() < 1e-8:
-		axis = Vector3.UP.cross(d)
-	if axis.length_squared() < 1e-8:
+	h.dir = (to_s.basis * dir).normalized()
+	if h.dir.length_squared() < 0.5:
 		return part
-	h.axis = axis.normalized()
+	h.bone = int(seg[1])
+	h.local = _skel.get_bone_global_pose(h.bone).affine_inverse() * p
 	h.amp = deg_to_rad(hit_ik_deg) * power
 	_hits.append(h)
 	if _hits.size() > HIT_MAX:
@@ -1900,7 +1915,13 @@ func hit_react(point: Vector3, dir: Vector3, power := 1.0) -> String:
 
 ## 뼈대 공간 점 p 에서 가장 가까운 부위(뼈 마디까지 거리 − 굵기). 몸에서 0.35 m 넘게 떨어지면 ""
 func hit_part_at(p: Vector3) -> String:
+	return String(_hit_seg_at(p)[0])
+
+
+## [부위, 그 뼈 마디의 뼈] — hit_part_at
+func _hit_seg_at(p: Vector3) -> Array:
 	var best := ""
+	var bb := -1
 	var bd := 0.35
 	for sg in HIT_SEGS:
 		var a := _skel.find_bone(String(sg[0]))
@@ -1917,7 +1938,8 @@ func hit_part_at(p: Vector3) -> String:
 		if d < bd:
 			bd = d
 			best = String(sg[3])
-	return best
+			bb = a
+	return [best, bb]
 
 
 ## 지금 도는 IK 피격 반응 수(검사 · ① 탭)
@@ -1934,50 +1956,71 @@ func hit_report() -> Array:
 	return out
 
 
-## IK 피격 풀이 — 피격 수정자(조준 뒤 · 손 IK 앞)가 부른다. 시간을 흘려 각을 정하고 사슬에 몫만큼 돌린다
+## IK 피격 풀이 — 피격 수정자(조준 뒤 · 손 IK 앞)가 부른다. 시간을 흘려 끝난 반응을 빼고, 몸통 · 머리 · 다리 · 손 IK 없는 팔을 돌린다
 func _solve_hits(sk: Skeleton3D) -> void:
 	var dt := _hit_dt
 	_hit_dt = 0.0
 	if _hits.is_empty() or sk == null:
-		if _hit_release[0] > 0.0 or _hit_release[1] > 0.0:
-			_release_hands(0.0, 0.0)
 		return
 	var dur := maxf(hit_ik_sec, 0.05)
-	var tau := dur * 0.25
-	var rel := [0.0, 0.0]
 	var i := _hits.size() - 1
 	while i >= 0:
 		var h := _hits[i]
 		h.t += dt
 		if h.t >= dur * 1.5:
 			_hits.remove_at(i)
-			i -= 1
-			continue
-		var f := (h.t / tau) * exp(1.0 - h.t / tau)
-		var a := h.amp * f
-		if h.side >= 0:
-			rel[h.side] = maxf(rel[h.side], f * HIT_ARM_RELEASE)
-		if absf(a) > 1e-5:
-			for k in h.bones.size():
-				var bi := h.bones[k]
-				var g := sk.get_bone_global_pose(bi)
-				g.basis = Basis(h.axis, a * h.shares[k]) * g.basis
-				sk.set_bone_global_pose(bi, g)
 		i -= 1
-	_release_hands(rel[0], rel[1])
+	_solve_hit_pass(sk, false)
 
 
-## 팔이 맞은 손의 IK 를 잠깐 푼다(뒤의 손 IK 수정자가 이번 갱신에 쓴다) — 바뀔 때만 넣는다
-func _release_hands(l: float, r: float) -> void:
-	var want := [l, r]
-	for side in 2:
-		if is_equal_approx(float(_hit_release[side]), float(want[side])):
+## 손 IK 로 무기를 잡은 팔 — 맨 뒤 피격 수정자가 부른다(손 IK 가 잡은 자세 위에 덧씌움 → 손이 총에서 튕겼다 돌아온다).
+## 손 IK 앞에서 돌리면 IK 가 도로 잡아 팔꿈치만 0.8 cm, IK 를 풀면 팔이 동작 원래 자세로 튐(양손 잡기 씬 26 cm — 10-21)
+func _solve_hits_after_hands(sk: Skeleton3D) -> void:
+	if not _hits.is_empty() and sk != null:
+		_solve_hit_pass(sk, true)
+
+
+## 반응의 돌림 축 — 처음 돌릴 때 한 번, 그 수정자 차례의 자세로(손 IK 로 잡은 팔은 잡은 자세 — 동작 원래 자세와 6 cm 넘게 다를 수 있다).
+## 사슬 뿌리를 축으로 맞은 점이 총알 방향으로 밀리게
+func _hit_axis(sk: Skeleton3D, h: HitReaction) -> void:
+	h.ready = true
+	var r := sk.get_bone_global_pose(h.bone) * h.local - sk.get_bone_global_pose(h.bones[0]).origin
+	var d := h.dir
+	var s := r.cross(d).length() / maxf(r.length(), 1e-4)
+	if s < HIT_PUSH_MIN_SIN:
+		# 총알이 사슬을 따라 들어옴(겨눈 팔을 앞에서) — 돌림으로는 맞은 점이 총알 방향으로 거의 안 밀린다 → 아래로 쳐지는 몫을 섞는다
+		d = (d + Vector3.DOWN * (1.0 - s / HIT_PUSH_MIN_SIN)).normalized()
+	var axis := r.cross(d)
+	if axis.length_squared() < 1e-8:
+		axis = Vector3.UP.cross(d)
+	if axis.length_squared() < 1e-8:
+		h.amp = 0.0
+		return
+	h.axis = axis.normalized()
+
+
+## 그 손이 IK 로 무엇을 잡고 있어 팔 피격을 손 IK 뒤에 넣는가
+func _hit_after_hand(side: int) -> bool:
+	var h: HandIK = _hands[side] if side >= 0 else null
+	return h != null and h.w > 0.001 and _hit_post != null
+
+
+## 반응들을 사슬에 몫만큼 돌린다 — after = 손 IK 뒤 몫(손 IK 로 잡은 팔)만 / 그 밖의 것만
+func _solve_hit_pass(sk: Skeleton3D, after: bool) -> void:
+	var tau := maxf(hit_ik_sec, 0.05) * 0.25
+	for h in _hits:
+		if _hit_after_hand(h.side) != after:
 			continue
-		_hit_release[side] = want[side]
-		var h: HandIK = _hands[side]
-		if h != null and h.ik != null and is_instance_valid(h.ik) and h.w > 0.001:
-			h.ik.influence = h.w * (1.0 - float(want[side]))
-			h.rot.influence = h.ik.influence
+		if not h.ready:
+			_hit_axis(sk, h)
+		var a := h.amp * (h.t / tau) * exp(1.0 - h.t / tau)
+		if absf(a) <= 1e-5:
+			continue
+		for k in h.bones.size():
+			var bi := h.bones[k]
+			var g := sk.get_bone_global_pose(bi)
+			g.basis = Basis(h.axis, a * h.shares[k]) * g.basis
+			sk.set_bone_global_pose(bi, g)
 
 
 ## 이 노드 아래(skip — 몸 모델 — 빼고)의 소켓(BoneAttachment3D)을 씬 순서대로. 소켓 안으로는 더 내려가지 않는다
@@ -2124,7 +2167,7 @@ func _make_ik(side: int, marker: Node3D, anchor: Node3D) -> void:
 
 
 func _free_ik() -> void:
-	var nodes: Array = [_solver, _aim_solver, _aim_arm_rot, _aim_arm_ik, _aim_arm_pole, _aim_hand, _hit_solver]
+	var nodes: Array = [_solver, _aim_solver, _aim_arm_rot, _aim_arm_ik, _aim_arm_pole, _aim_hand, _hit_solver, _hit_post]
 	for h in _hands:
 		if h != null:
 			nodes.append_array([(h as HandIK).rot, (h as HandIK).ik, (h as HandIK).pole, (h as HandIK).ref, (h as HandIK).wrist])
@@ -2137,6 +2180,7 @@ func _free_ik() -> void:
 	_solver = null
 	_aim_solver = null
 	_hit_solver = null
+	_hit_post = null
 	_hits.clear()
 	_aim_arm_rot = null
 	_aim_arm_ik = null
