@@ -545,13 +545,21 @@ func _aim_checks(page: DREquipPage) -> void:
 	_check(page._aim_chk.button_pressed == r0.aim_enabled and r0.aim_enabled and absf((page._aim_sp["aim_up_deg"] as SpinBox).value - r0.aim_up_deg) < 0.01,
 		"조준 칸 = 유닛 값(켬 · 위 한계 %.0f° · 아래 %.0f° · 옆 %.0f° · 빠르기 %.0f°/s)" % [r0.aim_up_deg, r0.aim_down_deg, r0.aim_side_deg, r0.aim_speed_deg])
 	page._playing = false
-	page.play_motion("Firing_Rifle")
-	page._seek(0.3)
-	page._aim_side_sl.value = 0.0
-	page._aim_height_sl.value = 20.0
-	var marks_off := _mark_count(page)
+	# 조준 비중 0 동작에서 켜면 조준하는 동작으로 바꾼다(10-21 사용자 "토글 누르고 막 끌었는데 변화 없는데?" — 사용자 동작 표의 Rifle_Aiming_Idle 이 0)
+	page.play_motion("Rifle_Idle")
 	page.set_aim_preview(true)
 	await _frames(2)
+	_check(page.current_motion() == "Firing_Rifle" and page._status.text.contains("Firing_Rifle 로 바꿈") and not page._prev.aim_report().is_empty(),
+		"조준 비중 0 동작(Rifle_Idle)에서 켬 → Firing_Rifle 로 바꿈 · 돎「%s」" % page._status.text.left(60))
+	page.set_aim_preview(false)
+	page.play_motion("Firing_Rifle")
+	page._seek(0.3)
+	page._aim_side_sl.set_value_no_signal(0.0)
+	page._aim_height_sl.set_value_no_signal(0.0)
+	var marks_off := _mark_count(page)
+	page._aim_height_sl.value = 20.0                 # 꺼진 채 끌면 켜진다
+	await _frames(2)
+	_check(page._aim_preview, "꺼진 채 높낮이를 끌면 조준 미리보기가 켜짐")
 	var ar := page._prev.aim_report()
 	_check(page._aim_btn.button_pressed and not ar.is_empty() and absf(_elev(ar["dir"]) - 20.0) < 0.5 and page._aim_lbl.text.contains("+20"),
 		"조준 미리보기 높낮이 +20° → 총구 높낮이 %.1f° · 허리 · 가슴 돌림 위아래 %+.1f°「%s」" % [_elev(ar.get("dir", Vector3.ZERO)), float(ar.get("pitch", 0)), page._aim_lbl.text])
@@ -582,7 +590,8 @@ func _aim_checks(page: DREquipPage) -> void:
 	page.play_motion("Rifle_Idle")
 	page._force_pose()
 	page._update_info()
-	_check(page._prev.aim_report().is_empty() and page._info.text.contains("이 동작은 0 %"), "Rifle_Idle(조준 비중 0) = 안 돎 · 안내「…%s」" % page._info.text.right(40))
+	_check(page._prev.aim_report().is_empty() and page._info.text.contains("이 동작은 0 %") and page._aim_lbl.text.contains("조준 0 %"),
+		"Rifle_Idle(조준 비중 0) = 안 돎 · 막대 옆 경고「%s」 · 정보 줄 안내" % page._aim_lbl.text)
 	# 동작 표 조준 칸
 	page._fill_motion_table()
 	var rf := _mt_row(page, "Firing_Rifle")
