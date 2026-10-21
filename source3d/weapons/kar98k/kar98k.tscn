@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://source3d/weapons/kar98k/kar98k.glb" id="1_glb"]
+
+[node name="kar98k" instance=ExtResource("1_glb")]
+
+[node name="bullet" parent="." index="3"]
+visible = false
+
+[node name="bullets" parent="." index="4"]
+visible = false

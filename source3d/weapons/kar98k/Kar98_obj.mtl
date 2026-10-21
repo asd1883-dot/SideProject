@@ -1,0 +1,10 @@
+# Kar98_obj.obj 의 재질. 도트 굽기는 색 텍스처만 쓰므로 BaseColor(1k)만 연결했다. 원본 묶음(노멀·거칠기·금속 2k 포함)은 Desktop\kar98k.
+newmtl blue
+Kd 1.000 1.000 1.000
+d 1.0
+map_Kd kar98k_texture_blue_BaseColor.png
+
+newmtl red
+Kd 1.000 1.000 1.000
+d 1.0
+map_Kd kar98k_texture_red_BaseColor.png
