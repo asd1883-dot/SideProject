@@ -313,7 +313,7 @@ CLI 에서는 `--zorder=Hips,Torso,Head,...` (레이어 이름, 뒤→앞) 로 �
   저장 = 장비 노드 메타 `dr_motion_offsets`(무기 축 기준 — 잡기를 바꿔도 뜻이 같다) · 게임은 동작이 바뀔 때 손 IK 비중과 같이 섞어 옮긴다 · `무기 기본 자리로 저장` 에도 담김.
 - 코드: `runtime/dr_character_3d.gd` "소켓 · 장비" 절(`refresh_equipment` · `find_sockets` · `sync_support` · `support_report`) · `runtime/dr_hand_target_3d.gd` · `core/equip_hold.gd`(`DREquipHold` — 모델 목록 · 맞추기 · asset.json) · `ui/equip_page.gd` · `ui/transform_gizmo.gd`(기즈모 — 화면 좌표로 그리고 고르며 끌기는 광선 ↔ 평면, 손잡이 크기는 화면 기준).
 - 검사: `tools/equip_page_smoke_cli.gd`(창 없이) · `pipeline/check_editor.py --headless`(에디터 안 — 열린 씬 · 되돌리기 · 저장 · 미리보기 소켓이 뼈를 따라감) · 그림 `tools/equip3d_shots_cli.gd`.
-- ⚠ kar98k 는 라이선스 확인 전이라 `.gitignore` — 새로 받은 PC 에서는 기본형 군인의 무기가 빠진 채 열린다(오류 메시지는 뜸).
+- kar98k(모델 · 무기 씬 · 구운 그림)는 10-21 부터 저장소에 있다 — 새로 받은 PC 도 기본형 군인이 무기를 든 채 열린다.
 - 옛 길(남음): 루트 칸 `weapon_asset` + `attach_weapon` + `DRGripFit`(동작마다 총을 두 손에 다시 맞추던 것) — 소켓 무기가 없을 때만 쓴다.
 
 ## (10-16 지움) 장비(무기·헬멧) 굽기 창 — 예전 2D 기록
