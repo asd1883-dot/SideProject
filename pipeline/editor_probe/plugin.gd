@@ -206,6 +206,25 @@ func _go() -> void:
 		await _frames(30)
 		_expect(to_mount and back and again and ew.get_parent() == parent0 and ew.owner == er,
 			"② 잡기: 양손(받침대 · 오른손 표지 · 두 손 IK) → 탭 창 Ctrl+Z 원래 소켓 · 주인 그대로 → Ctrl+Y 다시 → Ctrl+Z (%s %s %s)" % [to_mount, back, again])
+		# 잡기 기억(10-21): 동작을 바꿔 가며 양손 → 오른손 → 처음 소켓 자리 그대로 · 기억 메타가 씬에 · 탭 창 Ctrl+Z 두 번 → 기억 메타도 처음대로
+		var x_sock: Transform3D = ew.transform
+		var mem0: Variant = ew.get_meta(DREquipPage.GRIP_MEMORY_META) if ew.has_meta(DREquipPage.GRIP_MEMORY_META) else null
+		eqp.play_motion("Walk_With_Rifle")
+		eqp._seek(0.6)
+		eqp.set_grip(2)
+		await _frames(10)
+		eqp.play_motion("Firing_Rifle")
+		eqp._seek(0.2)
+		eqp.set_grip(0)
+		await _frames(10)
+		var kept: bool = ew.get_parent() == parent0 and ew.transform.is_equal_approx(x_sock) and ew.has_meta(DREquipPage.GRIP_MEMORY_META)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(20)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(20)
+		var mem1: Variant = ew.get_meta(DREquipPage.GRIP_MEMORY_META) if ew.has_meta(DREquipPage.GRIP_MEMORY_META) else null
+		_expect(kept and ew.get_parent() == parent0 and ew.transform.is_equal_approx(x_sock) and str(mem1) == str(mem0),
+			"② 잡기 기억: 다른 동작에서 양손 → 오른손 = 처음 소켓 자리 그대로 · 기억 메타 → Ctrl+Z 두 번 = 메타도 처음대로 (%s)" % kept)
 		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
 		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
 		eqp._select_node(er.get_path_to(ew))
