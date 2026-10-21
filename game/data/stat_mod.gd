@@ -21,6 +21,12 @@ const DAMAGE := &"damage"
 const TRAVERSE := &"traverse_deg_s"
 ## 클수록 좋은 수치 — 효율을 곱한다. 나머지(시간 · 퍼짐)는 효율로 나눈다
 const HIGHER_BETTER: Array[StringName] = [WALK_SPEED, RUN_SPEED, CRAWL_SPEED, SUPPRESS_RESIST, RANGE, DAMAGE, TRAVERSE]
+## 확인 글자에 쓰는 이름
+const STAT_NAMES := {
+	&"walk_speed": "걷기 속도", &"run_speed": "달리기 속도", &"crawl_speed": "포복 속도", &"suppress_resist": "제압 내성",
+	&"range_m": "사거리", &"aim_time": "조준 시간", &"fire_interval": "연사 간격", &"reload_time": "장전 시간",
+	&"spread_deg": "퍼짐", &"damage": "피해", &"traverse_deg_s": "선회",
+}
 
 ## 어느 수치를 바꾸나(위 이름)
 @export var stat: StringName = &""
@@ -53,7 +59,7 @@ static func efficiency_mul(stat_name: StringName, eff: float) -> float:
 	return eff if HIGHER_BETTER.has(stat_name) else 1.0 / maxf(eff, 0.01)
 
 
-## 확인용 한 줄 — 라벨이 없으면 수치 · 값으로
+## 확인용 한 줄 — 수치 · 값 · (남은 시간) ← 라벨
 func describe() -> String:
 	var v := ""
 	if not is_equal_approx(mul, 1.0):
@@ -61,4 +67,5 @@ func describe() -> String:
 	if not is_zero_approx(add):
 		v += "%+.2f" % add
 	var t := "" if time_left < 0.0 else " (%.1f초)" % time_left
-	return "%s %s%s" % [label if label != "" else String(stat), v, t]
+	var nm: String = STAT_NAMES.get(stat, String(stat))
+	return "%s %s%s%s" % [nm, v, t, ("  ← " + label) if label != "" else ""]

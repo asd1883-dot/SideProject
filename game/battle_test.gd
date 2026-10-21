@@ -3,7 +3,7 @@ extends Node2D
 ## 전투 시험장 — 뼈대가 도는 것을 눈으로 보는 곳.  이 씬을 열고 F6.   (보병_추상화.md §4-3)
 ##
 ## 지휘(평소):
-##   1 우리 편(왼쪽) 소총 분대 투입 · 2 적 분대 투입 · T 적 자동 투입 켬/끔
+##   1 우리 편(왼쪽) 소총 분대 투입 · 2 적 분대 투입 · 3 · 4 MG42 팀(기관총수 3 + MG42 — 운용 장비, 10-21) 우리 편 · 적 · T 적 자동 투입 켬/끔
 ##   Q 전진 / W 정지 / E 후퇴 — 우리 편 모든 분대에 명령(강제가 아니라 가중치)
 ##   A · D 또는 ← · → 화면 이동 · 휠 확대/축소 · Space 멈춤
 ## 빙의(직접 조종): 우리 병사를 마우스 왼쪽 단추로 누르면 그 병사가 된다 · Esc 로 풀고 지휘로 돌아옴
@@ -17,6 +17,7 @@ extends Node2D
 ## 빙의 = 병사 기록의 "의도" 칸을 AI 두뇌 대신 여기서(키보드 · 마우스로) 채우는 것뿐이다.
 
 const TYPE_PATH := "res://game/units/rifleman.tres"
+const MG_TEAM_PATH := "res://game/units/mg42_team.tres"
 const TestField := preload("res://game/tools/test_field.gd")
 const AUTO_DEPLOY_EVERY := 25.0
 const AUTO_DEPLOY_BELOW := 12            # 적이 이보다 적으면 새 분대를 보낸다
@@ -30,6 +31,8 @@ var view: BattleView
 var cam: Camera2D
 var _label: Label
 var _type: SoldierType
+var _mg_team: SquadComp = null            # MG42 팀 분대 구성(없으면 3 · 4 키가 아무것도 안 한다)
+var _start_mg := false                    # 검사용: 처음에 양쪽에 MG42 팀 하나씩(--mg)
 var _possessed: BattleSoldier = null
 var _stance := 0                          # 빙의 병사의 자세(BattleBody.Stance)
 var _reload_req := false
@@ -51,6 +54,8 @@ var _dot_arg := 0                         # 검사용 --dot=N (3D 도트 크기)
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.42, 0.47, 0.42))
 	_type = load(TYPE_PATH) as SoldierType
+	if ResourceLoader.exists(MG_TEAM_PATH):
+		_mg_team = load(MG_TEAM_PATH) as SquadComp
 	_read_args()
 	bf = Battlefield.new()
 	bf.name = "Battlefield"
@@ -80,13 +85,17 @@ func _ready() -> void:
 	if _type == null:
 		_label.text = "병종 리소스가 없습니다: %s\nGodot --headless --path <프로젝트> --script res://game/tools/make_default_units.gd 를 먼저 돌리세요" % TYPE_PATH
 		return
-	view.prewarm(_type, _start_squads * 2 * _type.squad_size)
+	view.prewarm(_type, _start_squads * 2 * _type.squad_size + (2 * _mg_team.members.size() if (_start_mg and _mg_team != null) else 0))   # 기관총수도 같은 기본형 군인 프리팹
 	for i in _start_squads:
 		bf.deploy_squad(0, _type)
 		bf.deploy_squad(1, _type)
+	if _start_mg and _mg_team != null:
+		bf.deploy_comp(0, _mg_team)
+		bf.deploy_comp(1, _mg_team)
 
 
-## 명령줄(검사용): -- --shot=<폴더> [--seconds=30] [--cam=50] [--squads=2] [--possess] [--view=2d|3d] [--wear=type|top|bottom|none] [--dot=2]
+## 명령줄(검사용): -- --shot=<폴더> [--seconds=30] [--cam=50] [--squads=2] [--possess] [--mg] [--view=2d|3d] [--wear=type|top|bottom|none] [--dot=2]
+## --mg = 처음에 양쪽에 MG42 팀(운용 장비)도 하나씩
 ## 6초마다 화면을 저장하고 닫힌다. --possess = 8초에 우리 병사 하나를 빙의했다가 16초에 푼다(빙의 길에 오류가 없는지)
 func _read_args() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -108,6 +117,8 @@ func _read_args() -> void:
 			_start_squads = maxi(int(s.substr(7)), 1)
 		elif s == "possess":
 			_auto_possess = true
+		elif s == "mg":
+			_start_mg = true
 	if _shot_dir != "":
 		if _quit_at < 0.0:
 			_quit_at = 30.0
@@ -229,7 +240,7 @@ func _update_hud() -> void:
 	if _possessed != null:
 		lines.append("A·D 이동  Shift 달리기  W·S 깊이  C 앉기  Z 엎드림  마우스 조준·사격  R 장전  Esc 풀기")
 	else:
-		lines.append("1 분대 투입  2 적 분대  T 적 자동(%s)  Q 전진  W 정지  E 후퇴  A·D 화면  휠 확대  병사 클릭 = 빙의" % ("켬" if _auto_enemy else "끔"))
+		lines.append("1 분대 투입  2 적 분대  3·4 MG42 팀(우리·적)  T 적 자동(%s)  Q 전진  W 정지  E 후퇴  A·D 화면  휠 확대  병사 클릭 = 빙의" % ("켬" if _auto_enemy else "끔"))
 	if view is BattleView3D:
 		lines.append("%s   F4 복장 보기  F5 도트 크기" % (view as BattleView3D).status_text())
 	var listed := 0
@@ -306,6 +317,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 			bf.deploy_squad(0, _type)
 		KEY_2:
 			bf.deploy_squad(1, _type)
+		KEY_3:
+			if _mg_team != null:
+				bf.deploy_comp(0, _mg_team)
+		KEY_4:
+			if _mg_team != null:
+				bf.deploy_comp(1, _mg_team)
 		KEY_T:
 			_auto_enemy = not _auto_enemy
 		KEY_Q:

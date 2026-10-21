@@ -32,6 +32,7 @@ class_name BattleView
 ## 모든 동작을 반복으로(반복 표시 없이 구운 동작을 계속 돌려 볼 때만 — 켜면 "사망"도 반복된다)
 @export var puppet_force_loop := false
 
+const EquipMarks := preload("res://game/view/equip_marks.gd")    # 운용 장비 자리 표시(모델이 생기기 전까지)
 const OVERLAP_M := 1.2             # x 가 이보다 가까우면 화면에서 겹친다고 본다
 const REORDER_SEC := 0.1           # z 띠를 다시 매기는 주기
 const TRACER_MIN_SEC := 0.06       # 총알 자국이 보이는 최소 시간(실제 비행은 너무 짧아 안 보인다)
@@ -203,6 +204,14 @@ func describe(s: BattleSoldier) -> String:
 		lines.append("동작: %s   ← 후보 %s" % [e.motion if e.motion != "" else "(맞는 동작 없음 — 멈춘 채)", " → ".join(e.cands)])
 	var mag := s.type.weapon.mag_size if (s.type != null and s.type.weapon != null) else 0
 	lines.append("제압 %.2f / %.1f   체력 %.0f   탄약 %d / %d   연사 퍼짐 +%.1f°" % [s.suppression, BattleBody.SUPPRESS_ON, s.hp, s.ammo, mag, s.bloom_deg])
+	if s.ability != null:
+		lines.append("능력 [%s] %s" % [s.ability.display_name, Ability.PHASE_NAMES[clampi(s.phase, 0, 2)]])
+	if s.seat_eq != null:
+		lines.append("좌석: %s %s  — %s" % [s.seat_eq.type.seats[s.seat_idx].role, "(자리에 앉음)" if s.seat_eq.at_seat(s) else "(가는 중)", s.seat_eq.describe()])
+	if s.carrying != null:
+		lines.append("운반: %s" % s.carrying.type.display_name)
+	for m in s.mods:
+		lines.append("수정자  " + m.describe())
 	if s.cover != null:
 		lines.append("엄폐물 #%d (%s)  칸 %d" % [s.cover.id, BattleCover.KIND_NAMES[s.cover.kind], s.slot])
 	if s.target != null:
@@ -629,6 +638,8 @@ func _draw_ground() -> void:
 		if font != null:
 			_bg.draw_string(font, Vector2(cx0, y0 - hpx - 6.0), "%s #%d  칸 %d/%d" % [BattleCover.KIND_NAMES[c.kind], c.id,
 				c.slot_owner.size() - c.free_count(), c.slot_owner.size()], HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11, Color(1.0, 1.0, 1.0, 0.55))
+	if not _bf.equipments.is_empty():
+		EquipMarks.draw_ground(self, _bg, _bf)                  # 운용 장비 · 좌석 자리(§2-13 — 모델 없이 자리 표시만)
 
 
 # ───────────── 그리기: 퍼펫 위(상자 · 글자 · 총알 자국) ─────────────
@@ -684,6 +695,8 @@ func _draw_overlay() -> void:
 					var pos := Vector2(cx - LABEL_W * 0.5, top - 11.0)
 					_fg.draw_string_outline(font, pos, e.label, HORIZONTAL_ALIGNMENT_CENTER, LABEL_W, 11, 3, Color(0.0, 0.0, 0.0, 0.85))
 					_fg.draw_string(font, pos, e.label, HORIZONTAL_ALIGNMENT_CENTER, LABEL_W, 11, Color.WHITE)
+	if not _bf.equipments.is_empty():
+		EquipMarks.draw_overlay(self, _fg, _bf, font if show_labels else null)
 	# 총알 자국 — from → to 로 날아가는 짧은 선, 도착 뒤 잠깐 점(맞음 = 붉은색 · 엄폐/땅에 막힘 = 흙색 · 빗나감 = 없음)
 	for tr in _tracers:
 		var d: Dictionary = tr
