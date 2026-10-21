@@ -27,6 +27,70 @@ func _frames(n: int) -> void:
 		await process_frame
 
 
+## 미리보기 속 그 뼈(마디 가운데)의 캔버스 점
+func _bone_canvas(page: DRUnitPage, a: String, b: String = "") -> Vector2:
+	var sk := page._prev_ch.get_skeleton()
+	var pa := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(a)).origin
+	if b != "":
+		pa = (pa + sk.global_transform * sk.get_bone_global_pose(sk.find_bone(b)).origin) * 0.5
+	return page._dots.world_to_canvas(pa)
+
+
+## [6] 피격 반응(10-21) — 칸 = 유닛 값 · 칸 → 루트 · 미리보기 · 맞혀 보기(부위 · IK 피격 · 확률 100 / 0 % · 자세별 피격 동작 · 끝나면 원래 상태) · IK 끔 · 빗나감
+func _hit_checks(page: DRUnitPage) -> void:
+	print("[6] 피격 반응 — 칸 · 맞혀 보기(부위 · IK 피격 · 확률 · 자세별 피격 동작)")
+	page.select_unit(BASE)
+	await _frames(10)
+	var r0 := page._root
+	var ch := page._prev_ch
+	_check((page._hit_sp["hit_anim_chance"] as SpinBox).value == r0.hit_anim_chance * 100.0 and page._hit_ik_chk.button_pressed == r0.hit_ik_enabled
+		and absf((page._hit_sp["hit_ik_deg"] as SpinBox).value - r0.hit_ik_deg) < 0.01,
+		"칸 = 유닛 값(피격 동작 확률 %d %% · 최대 %.2f 초 · IK %s · 세기 %.0f° · 길이 %.2f 초)" % [roundi(r0.hit_anim_chance * 100.0), r0.hit_anim_max_sec,
+		"켬" if r0.hit_ik_enabled else "끔", r0.hit_ik_deg, r0.hit_ik_sec])
+	var chance0 := r0.hit_anim_chance
+	(page._hit_sp["hit_anim_chance"] as SpinBox).value = 100.0
+	_check(absf(r0.hit_anim_chance - 1.0) < 0.001 and absf(ch.hit_anim_chance - 1.0) < 0.001 and page._prev_ch == ch, "확률 칸 100 % → 유닛 1.0 · 미리보기 사본(다시 조립 안 함)")
+	page._hit_btn.button_pressed = true
+	page.play_state("서기")
+	await _frames(3)
+	var r1 := page.hit_test(_bone_canvas(page, "UpperChest"))
+	_check(String(r1.get("part", "")) == "가슴" and String(r1.get("anim", "")) == "Idle_Hit" and ch.hit_count() >= 1 and ch.current_motion() == "Idle_Hit"
+		and page._pv_hit_left > 0.0 and not page._hit_mark.is_empty(),
+		"서기 · 가슴을 누름 → 부위 가슴 · IK 피격 · 피격 동작 %s(%.2f 초) · 표시「%s」" % [r1.get("anim", "-"), page._pv_hit_left, page._now.text.left(50)])
+	for i in 8:
+		page._process(0.2)
+	_check(ch.current_motion() == "Rifle_Idle" and page._pv_hit_left == 0.0, "최대 %.2f 초 뒤 원래 상태(서기 — %s)" % [r0.hit_anim_max_sec, ch.current_motion()])
+	(page._hit_sp["hit_anim_chance"] as SpinBox).value = 0.0
+	var n0 := ch.hit_count()
+	var r2 := page.hit_test(_bone_canvas(page, "Head"))
+	_check(String(r2.get("part", "")) == "머리" and not bool(r2.get("rolled", true)) and ch.current_motion() == "Rifle_Idle" and ch.hit_count() > n0,
+		"확률 0 %% · 머리를 누름 → IK 피격만 · 하던 동작 그대로(%s)" % ch.current_motion())
+	page._hit_ik_chk.button_pressed = false
+	for i in 8:
+		page._process(0.2)
+	var n1 := ch.hit_count()
+	var r3 := page.hit_test(_bone_canvas(page, "LeftUpperArm", "LeftLowerArm"))
+	_check(not r0.hit_ik_enabled and not ch.hit_ik_enabled and String(r3.get("part", "")) == "왼팔" and ch.hit_count() == n1 and not (page._hit_sp["hit_ik_deg"] as SpinBox).editable,
+		"IK 피격 끔 → 부위(%s)만 · 반응 없음 · 세기 · 길이 칸 잠김" % r3.get("part", "-"))
+	page._hit_ik_chk.button_pressed = true
+	(page._hit_sp["hit_anim_chance"] as SpinBox).value = 100.0
+	var stance_anims := {}
+	for st in [["앉기", "Crouch_Hit"], ["엎드림", "Rifle_Prone_Hit_Reaction"]]:
+		page.play_state(String(st[0]))
+		await _frames(3)
+		var rr := page.hit_test(_bone_canvas(page, "Chest"))
+		stance_anims[st[0]] = rr.get("anim", "")
+		for i in 8:
+			page._process(0.2)
+	_check(stance_anims.get("앉기") == "Crouch_Hit" and stance_anims.get("엎드림") == "Rifle_Prone_Hit_Reaction",
+		"자세별 피격 동작: 앉기 → %s · 엎드림 → %s" % [stance_anims.get("앉기", "-"), stance_anims.get("엎드림", "-")])
+	var rm := page.hit_test(Vector2(5.0, 5.0))
+	_check(rm.is_empty() and page._now.text.contains("안 맞음"), "몸 밖을 누름 → 안 맞음 안내")
+	(page._hit_sp["hit_anim_chance"] as SpinBox).value = chance0 * 100.0
+	page._hit_btn.button_pressed = false
+	_check(absf(r0.hit_anim_chance - chance0) < 0.001, "확률 되돌림 %d %%" % roundi(chance0 * 100.0))
+
+
 func _run() -> void:
 	var page := DRUnitPage.new()
 	root.add_child(page)
@@ -101,6 +165,8 @@ func _run() -> void:
 	st.light_bands = old_bands
 	st.dot_px = 2
 	page._apply_style()
+
+	await _hit_checks(page)
 
 	# 치우기(시험 파일)
 	page._drop_root()

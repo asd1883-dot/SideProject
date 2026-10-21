@@ -119,6 +119,23 @@ func _go() -> void:
 	unit._unhandled_key_input(_ctrl_key(KEY_Z))             # 탭 창에서 누른 Ctrl+Z(10-16 — 전에는 에디터 창에서만 됐다)
 	await _frames(30)
 	_expect(absf(unit._root.height_m - old_h) < 0.001 and absf((unit._fields["height_m"]["ctl"] as SpinBox).value - old_h) < 0.001, "① 유닛 탭: 탭 창 Ctrl+Z 로 되돌리면 칸도 따라옴")
+	# 피격 반응(10-21): 피격 동작 확률 칸 → 열린 씬 루트 · 미리보기 사본(다시 조립 안 함) → 맞혀 보기(가슴) → 탭 창 Ctrl+Z → 칸 · 사본도
+	var pc0: float = unit._root.hit_anim_chance
+	var pv0 = unit._prev_ch
+	(unit._hit_sp["hit_anim_chance"] as SpinBox).value = 100.0
+	await _frames(5)
+	var hset: bool = absf(unit._root.hit_anim_chance - 1.0) < 0.001 and unit._prev_ch == pv0 and absf(unit._prev_ch.hit_anim_chance - 1.0) < 0.001
+	unit.play_state("서기")
+	await _frames(5)
+	var hsk: Skeleton3D = unit._prev_ch.get_skeleton()
+	var hcp: Vector2 = unit._dots.world_to_canvas(hsk.global_transform * hsk.get_bone_global_pose(hsk.find_bone("UpperChest")).origin)
+	var hr: Dictionary = unit.hit_test(hcp)
+	var hhit: bool = String(hr.get("part", "")) == "가슴" and String(hr.get("anim", "")) != "" and unit._prev_ch.hit_count() > 0
+	unit._unhandled_key_input(_ctrl_key(KEY_Z))
+	await _frames(30)
+	var hundo: bool = absf(unit._root.hit_anim_chance - pc0) < 0.001 and absf((unit._hit_sp["hit_anim_chance"] as SpinBox).value - pc0 * 100.0) < 0.01 \
+		and absf(unit._prev_ch.hit_anim_chance - pc0) < 0.001
+	_expect(hset and hhit and hundo, "① 피격: 확률 칸 → 열린 씬 루트 · 미리보기 사본 · 맞혀 보기 가슴 → %s · 탭 창 Ctrl+Z → 칸 · 사본도 (%s %s %s)" % [hr.get("anim", "-"), hset, hhit, hundo])
 
 	# ② 장비 탭 — ① 의 [② 탭] 단추로(같은 유닛)
 	unit._on_open_equip()

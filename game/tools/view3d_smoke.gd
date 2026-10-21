@@ -139,9 +139,23 @@ func _run() -> void:
 	var aim_clamped := 0
 	var aim_moving := 0                    # 표적이 바뀌어 따라가는 중(초당 aim_speed_deg) · 동작이 바뀌어 비중을 섞는 중
 	var aim_pitch := 0.0                   # 돌린 위아래 각 최대(절댓값)
+	# 피격 반응(10-21)도 같은 20 초에 — 화면 전체가 보여야 IK 피격이 걸린다
+	var hs0: Dictionary = view.hit_stats.duplicate()
+	var hold_max := 0.0                    # 피격 동작을 보여 준 시간(초) 최대 — 시뮬 경직 0.25 초보다 길어야
+	var hold_seen := {}                    # 병사 id -> 마지막으로 본 hit_until
+	var ik_seen := 0                       # IK 피격 반응이 도는 병사 · 프레임
 	for k in int(20.0 / DT):
 		bf.step(DT)
 		view._process(DT)
+		for v in view._entries.values():
+			var eh := v as BattleView3D.Entry3D
+			if eh.ch == null:
+				continue
+			if eh.hit_until > 0.0 and float(hold_seen.get(eh.s.id, -1.0)) != eh.hit_until:
+				hold_seen[eh.s.id] = eh.hit_until
+				hold_max = maxf(hold_max, eh.hit_until - view._clock)
+			if eh.ch.hit_count() > 0:
+				ik_seen += 1
 		var probe_now := k % 60 == 59
 		for v in view._entries.values():
 			var e := v as BattleView3D.Entry3D
@@ -182,6 +196,25 @@ func _run() -> void:
 		fails.append("사격 · 조준하는 병사가 없음")
 	elif aim_pct < 80.0:
 		fails.append("사격 중 조준 표적이 간 병사 %.1f %%" % aim_pct)
+	# 피격 반응(10-21): 맞음 → 확률대로 피격 동작(안 틀면 하던 동작) · IK 피격 · 피격 동작은 시뮬 경직보다 길게
+	var hh := int(view.hit_stats["hits"]) - int(hs0["hits"])
+	var ha := int(view.hit_stats["anim"]) - int(hs0["anim"])
+	var hk := int(view.hit_stats["skip"]) - int(hs0["skip"])
+	var hi := int(view.hit_stats["ik"]) - int(hs0["ik"])
+	var chance := (pool[0] as DRCharacter3D).hit_anim_chance if not pool.is_empty() else 0.5
+	var skip_pct := 100.0 * float(hk) / maxf(float(ha + hk), 1.0)
+	print("피격  맞음 %d · 굴림 %d(피격 동작 %d · 안 틂 %d = %.0f %% — 확률 %.0f %%) · IK 피격 %d · 반응 도는 병사 · 프레임 %d · 피격 동작 보여 줌 최대 %.2f 초" % [
+		hh, ha + hk, ha, hk, skip_pct, chance * 100.0, hi, ik_seen, hold_max])
+	if hh == 0:
+		fails.append("20 초 동안 맞은 병사가 없음")
+	elif ha + hk == 0 or ha + hk > hh:
+		fails.append("피격 동작 확률을 안 굴림(맞음 %d · 굴림 %d)" % [hh, ha + hk])
+	elif hi == 0 or ik_seen == 0:
+		fails.append("IK 피격이 안 걸림")
+	if ha + hk >= 10 and absf(skip_pct / 100.0 - (1.0 - chance)) > 0.3:
+		fails.append("피격 동작 안 튼 비율 %.0f %% 가 확률과 너무 다름" % skip_pct)
+	if ha > 0 and hold_max < 0.5:
+		fails.append("피격 동작을 %.2f 초만 보여 줌(시뮬 경직보다 길어야)" % hold_max)
 
 	# 3) 복장 보기 — 슬롯마다 입은 복장
 	var probe: DRCharacter3D = null
