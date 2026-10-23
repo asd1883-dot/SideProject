@@ -7,19 +7,19 @@
 			"parts": {
 				"Hips": {
 					"crop": [
-						103,
-						122,
-						45,
-						37
+						104,
+						121,
+						42,
+						35
 					],
 					"image": "Sprint/parts/Hips.png"
 				},
 				"L_Calf": {
 					"crop": [
 						111,
-						159,
+						160,
 						54,
-						39
+						38
 					],
 					"image": "Sprint/parts/L_Calf.png"
 				},
@@ -34,28 +34,28 @@
 				},
 				"L_Forearm": {
 					"crop": [
-						148,
-						101,
-						28,
+						149,
+						104,
+						29,
 						27
 					],
 					"image": "Sprint/parts/L_Forearm.png"
 				},
 				"L_Thigh": {
 					"crop": [
-						111,
+						112,
 						127,
-						54,
-						56
+						53,
+						55
 					],
 					"image": "Sprint/parts/L_Thigh.png"
 				},
 				"L_UpperArm": {
 					"crop": [
-						144,
+						145,
 						73,
-						27,
-						46
+						26,
+						48
 					],
 					"image": "Sprint/parts/L_UpperArm.png"
 				},
@@ -79,28 +79,28 @@
 				},
 				"R_Forearm": {
 					"crop": [
-						97,
-						95,
+						96,
+						96,
 						22,
-						32
+						34
 					],
 					"image": "Sprint/parts/R_Forearm.png"
 				},
 				"R_Thigh": {
 					"crop": [
-						103,
-						130,
-						51,
-						54
+						104,
+						131,
+						50,
+						53
 					],
 					"image": "Sprint/parts/R_Thigh.png"
 				},
 				"R_UpperArm": {
 					"crop": [
-						98,
+						96,
 						77,
-						34,
-						32
+						36,
+						33
 					],
 					"image": "Sprint/parts/R_UpperArm.png"
 				},
@@ -109,7 +109,7 @@
 						109,
 						73,
 						62,
-						66
+						65
 					],
 					"image": "Sprint/parts/Torso.png"
 				}

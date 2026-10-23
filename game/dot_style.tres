@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="DRDotStyle" format=3]
+[gd_resource type="Resource" script_class="DRDotStyle" format=3 uid="uid://43eb2ksb4bwe"]
 
-[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_dot_style.gd" id="1_style"]
+[ext_resource type="Script" uid="uid://q5p0mchx5d8w" path="res://addons/dot_rigger/runtime/dr_dot_style.gd" id="1_style"]
 
 [resource]
 script = ExtResource("1_style")
+dot_px = 4

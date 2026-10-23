@@ -1,27 +1,23 @@
-[gd_resource type="Resource" script_class="MotionTable" format=3]
+[gd_resource type="Resource" script_class="MotionTable" format=3 uid="uid://c0dbcb31kgbcf"]
 
-[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_motion_clip.gd" id="1_ggnai"]
-[ext_resource type="Script" path="res://game/data/motion_table.gd" id="1_x1ky6"]
+[ext_resource type="Script" uid="uid://bawwti3wbl4cw" path="res://addons/dot_rigger/runtime/dr_motion_clip.gd" id="1_ggnai"]
+[ext_resource type="Script" uid="uid://cvkkqhq4j8uly" path="res://game/data/motion_table.gd" id="1_x1ky6"]
+[ext_resource type="Script" uid="uid://b7ql85qugrbxb" path="res://addons/dot_rigger/runtime/dr_motion_set.gd" id="3_eneax"]
 
-[sub_resource type="Resource" id="Resource_eneax"]
+[sub_resource type="Resource" id="Resource_ykdwo"]
 script = ExtResource("1_ggnai")
 state = "서기"
 anim = "Rifle_Idle"
 
-[sub_resource type="Resource" id="Resource_ykdwo"]
+[sub_resource type="Resource" id="Resource_rokfx"]
 script = ExtResource("1_ggnai")
 state = "걷기"
 anim = "Walk_With_Rifle"
 
-[sub_resource type="Resource" id="Resource_rokfx"]
+[sub_resource type="Resource" id="Resource_sy5b1"]
 script = ExtResource("1_ggnai")
 state = "달리기"
 anim = "Sprint"
-
-[sub_resource type="Resource" id="Resource_sy5b1"]
-script = ExtResource("1_ggnai")
-state = "서기+조준"
-anim = "Rifle_Aiming_Idle"
 
 [sub_resource type="Resource" id="Resource_85iwe"]
 script = ExtResource("1_ggnai")
@@ -126,7 +122,23 @@ script = ExtResource("1_ggnai")
 state = "사망+엎드림"
 anim = "Prone_Death"
 
+[sub_resource type="Resource" id="Resource_ymqe5"]
+script = ExtResource("3_eneax")
+name = "서기"
+states = PackedStringArray("서기", "서기+사격", "서기+장전", "서기+투척", "서기+근접", "걷기", "걷기+조준", "걷기+사격", "걷기+장전", "걷기+투척", "걷기+근접", "달리기", "달리기+조준", "달리기+사격", "달리기+장전", "달리기+투척", "달리기+근접", "피격", "제압", "패닉", "사망", "서기+조준")
+
+[sub_resource type="Resource" id="Resource_pynyx"]
+script = ExtResource("3_eneax")
+name = "앉기"
+states = PackedStringArray("앉기", "앉기+조준", "앉기+사격", "앉기+장전", "앉기+투척", "앉기+근접", "앉아걷기", "앉아걷기+조준", "앉아걷기+사격", "앉아걷기+장전", "앉아걷기+투척", "앉아걷기+근접", "피격+앉기", "제압+앉기", "패닉+앉기", "사망+앉기")
+
+[sub_resource type="Resource" id="Resource_wbio5"]
+script = ExtResource("3_eneax")
+name = "엎드림"
+states = PackedStringArray("엎드림", "엎드림+조준", "엎드림+사격", "엎드림+장전", "엎드림+투척", "엎드림+근접", "포복", "포복+조준", "포복+사격", "포복+장전", "포복+투척", "포복+근접", "피격+엎드림", "제압+엎드림", "패닉+엎드림", "사망+엎드림")
+
 [resource]
 script = ExtResource("1_x1ky6")
-clips = Array[ExtResource("1_ggnai")]([SubResource("Resource_eneax"), SubResource("Resource_ykdwo"), SubResource("Resource_rokfx"), SubResource("Resource_sy5b1"), SubResource("Resource_85iwe"), SubResource("Resource_dhw2d"), SubResource("Resource_kkv45"), SubResource("Resource_c4rc8"), SubResource("Resource_7xc0q"), SubResource("Resource_cm0b1"), SubResource("Resource_lwb48"), SubResource("Resource_rd5gd"), SubResource("Resource_g8wfn"), SubResource("Resource_vbmeh"), SubResource("Resource_0lkre"), SubResource("Resource_hoe6v"), SubResource("Resource_a0hkq"), SubResource("Resource_s2si2"), SubResource("Resource_vvxn0"), SubResource("Resource_cc0al"), SubResource("Resource_kbv0j"), SubResource("Resource_ipdlj"), SubResource("Resource_q8p7h"), SubResource("Resource_icjpi")])
+clips = Array[ExtResource("1_ggnai")]([SubResource("Resource_ykdwo"), SubResource("Resource_rokfx"), SubResource("Resource_sy5b1"), SubResource("Resource_85iwe"), SubResource("Resource_dhw2d"), SubResource("Resource_kkv45"), SubResource("Resource_c4rc8"), SubResource("Resource_7xc0q"), SubResource("Resource_cm0b1"), SubResource("Resource_lwb48"), SubResource("Resource_rd5gd"), SubResource("Resource_g8wfn"), SubResource("Resource_vbmeh"), SubResource("Resource_0lkre"), SubResource("Resource_hoe6v"), SubResource("Resource_a0hkq"), SubResource("Resource_s2si2"), SubResource("Resource_vvxn0"), SubResource("Resource_cc0al"), SubResource("Resource_kbv0j"), SubResource("Resource_ipdlj"), SubResource("Resource_q8p7h"), SubResource("Resource_icjpi")])
+sets = Array[ExtResource("3_eneax")]([SubResource("Resource_ymqe5"), SubResource("Resource_pynyx"), SubResource("Resource_wbio5")])
 library_path = "res://game/motions/rifleman_anims.res"

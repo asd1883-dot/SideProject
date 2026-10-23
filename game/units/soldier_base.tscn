@@ -1,26 +1,33 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://dcu4co5fjhgbc"]
 
-[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_character_3d.gd" id="1_char"]
-[ext_resource type="Resource" path="res://game/units/rifleman_motions.tres" id="2_mot"]
+[ext_resource type="Script" uid="uid://rky2fq8cfyim" path="res://addons/dot_rigger/runtime/dr_character_3d.gd" id="1_char"]
+[ext_resource type="Resource" uid="uid://c0dbcb31kgbcf" path="res://game/units/rifleman_motions.tres" id="2_mot"]
+[ext_resource type="Script" uid="uid://myvxcp03nvma" path="res://addons/dot_rigger/runtime/dr_grip_mount_3d.gd" id="3_3atbq"]
 [ext_resource type="PackedScene" path="res://source3d/weapons/kar98k/kar98k.tscn" id="3_k98"]
-[ext_resource type="Script" path="res://addons/dot_rigger/runtime/dr_hand_target_3d.gd" id="4_hand"]
+[ext_resource type="Script" uid="uid://db2jpbnor4xss" path="res://addons/dot_rigger/runtime/dr_hand_target_3d.gd" id="4_hand"]
 
 [node name="기본형군인" type="Node3D" unique_id=1055925878]
 script = ExtResource("1_char")
 outfit_top = "res://outfits/uniform_m36/outfit.json"
 outfit_bottom = "res://outfits/uniform_m36/outfit.json"
 motions = ExtResource("2_mot")
+aim_up_deg = 21.0
 
 [node name="오른손" type="BoneAttachment3D" parent="." unique_id=392684096]
+transform = Transform3D(0, -0.9569546, 0, 0, 0, -0.9569546, 0.9569546, 0, 0, -0.7068273, 1.371075, -0.047140423)
 bone_name = "RightHand"
+bone_idx = 34
 use_external_skeleton = true
 external_skeleton = NodePath("")
 
 [node name="kar98k" parent="오른손" unique_id=776820278 instance=ExtResource("3_k98")]
-transform = Transform3D(0.20659992, 0.9783812, 0.009317189, -0.60064536, 0.11930667, 0.7905638, 0.77236134, -0.16892686, 0.6123087, 0.02154994, 0.13010162, 0.04280165)
+transform = Transform3D(0.09318015, 0.9884536, -0.1195049, -0.5617889, 0.15129167, 0.8133301, 0.8220178, -0.008649729, 0.5693979, 0.013599634, 0.08882296, 0.06972529)
+metadata/dr_motion_offsets = {
+"Idle_Hit": Transform3D(0.92428863, -0.036205117, -0.37997332, 0.029187746, 0.9992806, -0.024215298, 0.38057667, 0.011291359, 0.9246804, 7.6942146e-05, -0.00012035854, -4.0732324e-05)
+}
 
 [node name="왼손" type="Marker3D" parent="오른손/kar98k" unique_id=760705746]
-transform = Transform3D(-0.45697308, -0.8698072, -0.18604025, -0.034929298, -0.19144659, 0.9808814, -0.88879436, 0.45473465, 0.057104196, 0, -0.024999857, 0.36447468)
+transform = Transform3D(-0.67153287, -0.7178263, -0.18376337, -0.04095028, -0.21167003, 0.9764829, -0.73984236, 0.6632655, 0.112748206, 0.1293756, -0.20223886, 0.33735687)
 gizmo_extents = 0.06
 script = ExtResource("4_hand")
 motion_weights = Dictionary[String, float]({
@@ -30,6 +37,7 @@ motion_weights = Dictionary[String, float]({
 "Crouch_Idle+Toss_Grenade": 0.0,
 "Crouch_Reload": 0.0,
 "Crouch_Rifle_Kneel_Hit_To_Back": 0.0,
+"Idle_Hit": 0.0,
 "Prone_Death": 0.0,
 "Prone_Throw_Grenade": 0.0,
 "Sprint": 0.0,
@@ -37,3 +45,29 @@ motion_weights = Dictionary[String, float]({
 "Stand_Rifle_Hit_To_Back": 0.0,
 "Toss_Grenade": 0.0
 })
+
+[node name="오른손" type="Marker3D" parent="오른손/kar98k" unique_id=878455704]
+transform = Transform3D(0.04968969, -0.27846062, 0.9591614, 0.9127454, -0.37723795, -0.15680361, 0.40549576, 0.8832617, 0.23541881, -0.05353737, -0.0046719313, -0.024637043)
+gizmo_extents = 0.06
+script = ExtResource("4_hand")
+side = 1
+
+[node name="견착" type="Marker3D" parent="오른손/kar98k" unique_id=90959265]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0001050845, -0.030438453, -0.34649524)
+gizmo_extents = 0.05
+
+[node name="총구" type="Marker3D" parent="오른손/kar98k" unique_id=1022269139]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.9298366e-06, 0.044814173, 0.76350474)
+gizmo_extents = 0.05
+
+[node name="양손" type="Node3D" parent="." unique_id=449049205]
+script = ExtResource("3_3atbq")
+right_offset = Transform3D(0.21589305, 1.0223904, 0.009736255, -0.6276631, 0.12467339, 0.82612455, 0.80710316, -0.17652561, 0.63985145, 0.02155006, 0.13010162, 0.04280162)
+left_offset = Transform3D(-0.4819342, -0.04104394, -0.9263054, -0.90574896, -0.20249057, 0.48021147, -0.1983556, 1.0243535, 0.057811152, 0.32638997, -0.08911334, 0.01739645)
+
+[node name="왼손소켓" type="BoneAttachment3D" parent="." unique_id=2118914406]
+transform = Transform3D(0, 0.9569546, 0, 0, 0, -0.9569546, -0.9569546, 0, 0, 0.7068373, 1.3719554, -0.047696825)
+bone_name = "LeftHand"
+bone_idx = 8
+use_external_skeleton = true
+external_skeleton = NodePath("")
