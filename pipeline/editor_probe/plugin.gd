@@ -248,7 +248,7 @@ func _go() -> void:
 		var mg_undo: bool = lmk != null and str(lmk.motion_weights) == str(lw0) and DREquipPage.motion_grip(ew, "Firing_Rifle") == 2
 		eqp.set_per_motion(false)
 		_expect(mg_set and mg_undo, "② 동작마다 잡기: 이 동작만 → [오른손] → 열린 씬 왼손 표지 Firing_Rifle 0 · 미리보기 왼손 놓음 · 다른 동작 그대로 → Ctrl+Z 처음대로 (%s %s)" % [mg_set, mg_undo])
-		# 손 기준 나무(10-27): 무기를 ✋ 왼손에 끌어 놓기 → 왼손 잡기 · 옛 손 소켓 정리(열린 씬) → 탭 창 Ctrl+Z → 소켓 되살아남 · 주인 그대로 → Ctrl+Y → Ctrl+Z
+		# 손 기준 나무(10-27): 무기를 왼손에 끌어 놓기 → 왼손 잡기 · 옛 손 소켓 정리(열린 씬) → 탭 창 Ctrl+Z → 소켓 되살아남 · 주인 그대로 → Ctrl+Y → Ctrl+Z
 		var sock0: Node = ew.get_parent()
 		eqp.play_motion("Rifle_Aiming_Idle")
 		eqp._seek(0.3)
@@ -265,8 +265,8 @@ func _go() -> void:
 		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
 		await _frames(30)
 		_expect(dropped and restored and redone_drop and ew.get_parent() == sock0,
-			"② 손 기준 나무: 무기를 ✋ 왼손에 끌어 놓기 → 왼손 잡기 · 옛 손 소켓 정리 → Ctrl+Z 소켓 되살아남(주인 그대로) → Ctrl+Y → Ctrl+Z (%s %s %s)" % [dropped, restored, redone_drop])
-		# 손 기즈모(10-27): 이 동작만 → ✋ 왼손(표지) 기즈모 끌기 → 열린 씬 왼손 표지 메타(그 동작만) · 표지 기본 그대로 → Ctrl+Z 메타 빠짐
+			"② 손 기준 나무: 무기를 왼손에 끌어 놓기 → 왼손 잡기 · 옛 손 소켓 정리 → Ctrl+Z 소켓 되살아남(주인 그대로) → Ctrl+Y → Ctrl+Z (%s %s %s)" % [dropped, restored, redone_drop])
+		# 손 기즈모(10-27): 이 동작만 → 왼손(표지) 기즈모 끌기 → 열린 씬 왼손 표지 메타(그 동작만) · 표지 기본 그대로 → Ctrl+Z 메타 빠짐
 		var lm2 := DRCharacter3D.find_hand_marker(ew, 0)
 		eqp.play_motion("Rifle_Aiming_Idle")
 		eqp._seek(0.3)
@@ -285,7 +285,7 @@ func _go() -> void:
 		var hand_undo: bool = DRCharacter3D.motion_offsets(lm2).is_empty() and lm2.transform.is_equal_approx(lx0)
 		eqp.set_per_motion(false)
 		eqp._select_node(er.get_path_to(ew))
-		_expect(hand_set and hand_undo, "② 손 기즈모: 이 동작만 ✋ 왼손 끌기 → 열린 씬 왼손 표지에 그 동작 자리(기본 그대로) → Ctrl+Z 빠짐 (%s %s)" % [hand_set, hand_undo])
+		_expect(hand_set and hand_undo, "② 손 기즈모: 이 동작만 왼손 끌기 → 열린 씬 왼손 표지에 그 동작 자리(기본 그대로) → Ctrl+Z 빠짐 (%s %s)" % [hand_set, hand_undo])
 		# 고른 것 유지(10-27 "가끔 안 될 때가 있어"): 무기를 고른 채 잡기 바꿈(무기 경로가 바뀜) → 탭 창 Ctrl+Z(경로가 돌아옴) → 여전히 무기를 고르고 기즈모도 무기
 		eqp._select_node(er.get_path_to(ew))
 		eqp.set_grip(1)
@@ -413,7 +413,7 @@ func _go() -> void:
 	_expect(hub._current == "unit" and unit._prev_ch != null and unit._prev_ch.get_weapon_node() != null, "① 로 돌아와도 미리보기 그대로(소켓 무기)")
 
 	# 고친 코드 적용(10-27 사용자 "적용이 안 되었는데" — 열어 둔 창은 옛 코드라 새 화면이 안 보였다): 지금은 옛 코드 없음(헛경보 없음) ·
-	# 창보다 새 파일이 있으면 [⟳ 고친 코드 적용] 이 보이고 누르면 다시 열기 신호 · 다시 감추기
+	# 창보다 새 파일이 있으면 [고친 코드 적용] 이 보이고 누르면 다시 열기 신호 · 다시 감추기
 	var stale0 := DRHubWindow.stale_scripts()
 	hub._watch_code()
 	var hidden0: bool = not hub._reload_btn.visible
@@ -427,9 +427,9 @@ func _go() -> void:
 	hub._made_at = made0
 	hub._watch_code()
 	_expect(stale0.is_empty() and hidden0 and shown and asked[0] and not hub._reload_btn.visible,
-		"고친 코드 감시: 옛 코드 없음(%s) · 창보다 새 파일 → [⟳ 고친 코드 적용] 보임 · 누르면 다시 열기 신호 · 아니면 숨김 (%s %s %s)" % [", ".join(stale0) if not stale0.is_empty() else "헛경보 없음", hidden0, shown, asked[0]])
+		"고친 코드 감시: 옛 코드 없음(%s) · 창보다 새 파일 → [고친 코드 적용] 보임 · 누르면 다시 열기 신호 · 아니면 숨김 (%s %s %s)" % [", ".join(stale0) if not stale0.is_empty() else "헛경보 없음", hidden0, shown, asked[0]])
 
-	# 플러그인 길: [⟳ 고친 코드 적용] → 옛 코드가 없으면 묻지 않고 창을 새로 만들어 연다
+	# 플러그인 길: [고친 코드 적용] → 옛 코드가 없으면 묻지 않고 창을 새로 만들어 연다
 	var plug: Node = null
 	for n in get_tree().root.find_children("*", "EditorPlugin", true, false):
 		if n.get_script() != null and (n.get_script() as Script).resource_path == "res://addons/dot_rigger/plugin.gd":
@@ -443,7 +443,7 @@ func _go() -> void:
 		reopened = is_instance_valid(nh) and nh != old_hub and nh.visible and nh._reload_btn != null and not nh._reload_btn.visible
 		if is_instance_valid(nh):
 			nh.close_requested.emit()
-	_expect(plug != null and reopened, "플러그인 [⟳ 고친 코드 적용] → 옛 코드 없으면 묻지 않고 새 창으로 다시 엶(%s)" % ("플러그인 찾음" if plug != null else "플러그인 못 찾음"))
+	_expect(plug != null and reopened, "플러그인 [고친 코드 적용] → 옛 코드 없으면 묻지 않고 새 창으로 다시 엶(%s)" % ("플러그인 찾음" if plug != null else "플러그인 못 찾음"))
 
 	# 닫기(X) → 다시 열기: 같은 탭(창이 있으면 같은 자리)
 	(hub._buttons["equip"] as Button).pressed.emit()

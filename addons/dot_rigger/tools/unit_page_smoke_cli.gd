@@ -135,7 +135,7 @@ func _run() -> void:
 	_check((page._fields["outfit_top"]["mark"] as Label).text == "부모 값", "상의 칸 표시 = 부모 값")
 	page._set_prop("outfit_top", "")
 	_check((page._fields["outfit_top"]["mark"] as Label).text == "바꿈" and (page._fields["outfit_top"]["revert"] as Button).visible and page._prev_ch.worn("top") == "",
-		"상의를 (내복)으로 바꾸면 표시 = 바꿈 · ↺ 보임 · 미리보기 상의 벗음")
+		"상의를 (내복)으로 바꾸면 표시 = 바꿈 · 보임 · 미리보기 상의 벗음")
 	page._on_save()
 	var txt := FileAccess.get_file_as_string(cpath)
 	print("        저장한 자식 씬:\n" + txt.indent("          "))
