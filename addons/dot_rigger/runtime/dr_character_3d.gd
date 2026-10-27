@@ -1136,6 +1136,13 @@ func refresh_equipment() -> void:
 				if mk == null:
 					continue
 				marked = true
+				if not edited:                 # 손 표지도 동작별 자리를 얹는다(10-27 사용자 "오른손 왼손도 기즈모로 움직여서 살짝 조정") — 무기와 같은 장치
+					var mq: PoseEquip = old.get(mk, null)
+					if mq == null:
+						mq = PoseEquip.new()
+						mq.e = mk
+						mq.base = mk.transform
+					_pose_equips.append(mq)
 				if anchor_can_grip(a, side) and found[side] == null:
 					found[side] = [mk, a]      # 받침이 그 손 소켓이면(무기가 그 손을 따라감) IK 안 함 — 한 손 받침대의 다른 손은 비중 0 으로 만들어 둠
 			if _sock_weapon == null and marked:
@@ -1274,7 +1281,7 @@ func sync_from(src: DRCharacter3D) -> void:
 				continue
 			var driven := n is BoneAttachment3D or (n is DRGripMount3D and (n as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS)
 			if pn is Node3D and n is Node3D and not driven:
-				if n.get_parent() is BoneAttachment3D or n.get_parent() is DRGripMount3D:      # 장비 — 기본 자리 + 동작별 자리
+				if n.get_parent() is BoneAttachment3D or n.get_parent() is DRGripMount3D or _pose_of(pn) != null:   # 장비 · 손 표지 — 기본 자리 + 동작별 자리
 					if n.has_meta(MOTION_OFFSETS_META):
 						pn.set_meta(MOTION_OFFSETS_META, (n.get_meta(MOTION_OFFSETS_META) as Dictionary).duplicate())
 					elif pn.has_meta(MOTION_OFFSETS_META):
