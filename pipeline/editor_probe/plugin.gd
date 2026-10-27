@@ -286,6 +286,15 @@ func _go() -> void:
 		eqp.set_per_motion(false)
 		eqp._select_node(er.get_path_to(ew))
 		_expect(hand_set and hand_undo, "② 손 기즈모: 이 동작만 ✋ 왼손 끌기 → 열린 씬 왼손 표지에 그 동작 자리(기본 그대로) → Ctrl+Z 빠짐 (%s %s)" % [hand_set, hand_undo])
+		# 고른 것 유지(10-27 "가끔 안 될 때가 있어"): 무기를 고른 채 잡기 바꿈(무기 경로가 바뀜) → 탭 창 Ctrl+Z(경로가 돌아옴) → 여전히 무기를 고르고 기즈모도 무기
+		eqp._select_node(er.get_path_to(ew))
+		eqp.set_grip(1)
+		await _frames(30)
+		var sel_after: bool = eqp._node(eqp._sel) == ew
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(40)
+		var sel_undo: bool = eqp._node(eqp._sel) == ew and giz.target == eqp._prev_node(ew)
+		_expect(sel_after and sel_undo, "② 고른 것 유지: 무기를 고른 채 잡기 바꿈 → Ctrl+Z(무기 경로가 돌아옴) → 여전히 무기 · 기즈모도 무기 (%s %s)" % [sel_after, sel_undo])
 		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
 		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
 		eqp._select_node(er.get_path_to(ew))

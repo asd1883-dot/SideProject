@@ -24,6 +24,9 @@ extends SceneTree
 ##     카메라 끌기 뗌을 못 받아도 풀림 · 끄는 중 오른쪽 = 취소 · 창을 바꾸면 풀림
 ## [14] 손 기준 나무(10-27): 맨 위 = ✋ 오른손 · ✋ 왼손 · 🤝 양손 · 📌 땅 · 장비는 지금 동작에서 쥔 곳 아래 · 끌어 놓기 = 잡기(모든 동작 = 기본 · 이 동작만 = 그 동작, 땅은 모든 동작만) ·
 ##     손 받침대 하나 · 빈 받침 · 옛 손 소켓 정리 · ✋ 손 기즈모(이 동작만 = 그 동작 손 자리 · 총 그대로 / 모든 동작 = 기본 손 자리) · 게임 길 손 자리 섞기
+## [15] 상태 동기화 감사(10-27): 잡기 5 × 범위 2 × 동작 3 마다 나무에서 무기 고르고 끌기 → 끈 만큼 · 범위대로 저장 · 다시 틀어도 그 자리 ·
+##     미리보기 손잡이 근처 총 몸통 → 총 · 🤝 양손 줄 → 그 아래 무기 · Q 도구 안내
+## [16] ✋ 손: 이 프레임 손 그대로 쥐기(10-27): 옛 [표지 ← 지금 손] 없음 · 손 줄일 때만 · 이 동작만 = 그 동작 손 자리 · 모든 동작 = 기본 손 자리 · 3 = 총을 손에 맞추기
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -660,6 +663,157 @@ func _hand_tree_checks(page: DREquipPage) -> void:
 	page._playing = true
 
 
+## [15] 상태 동기화 감사(10-27) — 사용자: "가끔 안 될 때가 있어 · 각 기능마다 현재 상태의 기준으로 인한 동기화가 잘 적용돼야 버그 없이 만들어질 것 같아".
+## 잡기(옛 오른손 소켓 · 오른손 · 왼손 · 양손 · 고정) × 범위(이 동작만 → 모든 동작 — 동작별 자리가 있는 채로) × 동작(조준 · 사격 · 상하체 합성)마다
+## 나무에서 무기를 고르고 W 로 끌면: 보이는 무기가 끈 만큼 움직이고 · 그 범위 기준으로 저장되고(모든 동작 = 기본 자리 · 동작별 자리 그대로 / 이 동작만 = 그 동작 자리 ·
+## 기본 그대로) · 같은 동작을 다시 틀어도 그 자리. + 무기를 고르는 길: 미리보기에서 손잡이 근처 총 몸통 · 🤝 양손 줄 · Q(보기) 도구 안내
+func _sync_audit(page: DREquipPage) -> void:
+	print("[15] 상태 동기화 감사 — 잡기 × 범위 × 동작마다 무기 끌기 · 고르는 길")
+	var fails := PackedStringArray()
+	var n := 0
+	var picks := PackedStringArray()
+	for grip in [-1, 0, 1, 2, 3]:
+		var gname: String = "옛 소켓" if grip < 0 else String(DREquipPage.GRIP_NAMES[grip])
+		page.select_unit(BASE)
+		await _frames(3)
+		page._playing = false
+		page.set_per_motion(false)
+		var w := page._weapon_equip()
+		page._select_node(page._root.get_path_to(w))
+		page.play_motion("Rifle_Aiming_Idle")
+		page._seek(0.3)
+		if grip >= 0:
+			page.set_grip(grip)
+			await _frames(2)
+		w = page._weapon_equip()
+		page.set_tool(Giz.Tool.MOVE)
+		for per in [true, false]:
+			page.set_per_motion(per)
+			for mo in ["Rifle_Aiming_Idle", "Firing_Rifle", "Crouch_Idle+Firing_Rifle"]:
+				page.play_motion(mo)
+				page._seek(0.4)
+				await _frames(2)                          # 나무를 미뤄 다시 채움
+				var tag: String = "%s · %s · %s" % [gname, "이 동작만" if per else "모든 동작", mo]
+				var row := _tree_row_of(page, page._root.get_path_to(w))
+				if row == null:
+					fails.append(tag + ": 나무에 무기 줄 없음")
+					continue
+				row.select(0)                             # 나무에서 무기 줄을 누름(item_selected)
+				await _frames(2)
+				var pw := page._prev_node(w) as Node3D
+				if page._giz.target != pw:
+					fails.append(tag + ": 기즈모 대상이 무기가 아님(%s)" % (page._giz.target.name if page._giz.target != null else "없음"))
+					continue
+				var base0 := w.transform
+				var offs0 := str(DRCharacter3D.motion_offsets(w))
+				var g0 := pw.global_transform
+				_drag_long(page._giz, 25.0)
+				await _frames(1)
+				var g1 := (page._prev_node(w) as Node3D).global_transform
+				var moved := g1.origin.distance_to(g0.origin)
+				var ok_data: bool = (w.transform.is_equal_approx(base0) and DRCharacter3D.offset_key(w, mo) == mo) if per \
+					else (not w.transform.is_equal_approx(base0) and str(DRCharacter3D.motion_offsets(w)) == offs0)
+				page.play_motion(mo)
+				page._seek(0.4)
+				await _frames(1)
+				var g2 := (page._prev_node(w) as Node3D).global_transform
+				var drift := g2.origin.distance_to(g1.origin)
+				n += 1
+				if moved < 0.005 or not ok_data or drift > 0.002:
+					fails.append("%s: 움직임 %.1f cm · 범위대로 저장 %s · 다시 틀면 %.1f mm 어긋남" % [tag, moved * 100.0, ok_data, drift * 1000.0])
+		# 고르는 길 — 미리보기에서 손잡이 근처(손 표지에서 10 px) 총 몸통을 누르면 총(손이 아니라)
+		page.set_per_motion(false)
+		page.play_motion("Rifle_Aiming_Idle")
+		page._seek(0.3)
+		await _frames(2)
+		var pw2 := page._prev_node(w) as Node3D
+		for side in 2:
+			var mk := DRCharacter3D.find_hand_marker(w, side)
+			if mk == null or not (page._prev_node(mk) is Node3D):
+				continue
+			var mp := page._cam.unproject_position((page._prev_node(mk) as Node3D).global_position)
+			var gc := page._cam.unproject_position(Giz.world_aabb(pw2).get_center())
+			var pt := mp + (gc - mp).normalized() * 10.0
+			page._on_view_click(pt)
+			var got := page._node(page._sel)
+			if got != w:
+				picks.append("%s %s 근처 → %s" % [gname, DRCharacter3D.SIDE_NAMES[side], got.name if got != null else "없음"])
+		if grip == 2:                                     # 🤝 양손 줄을 누르면 그 아래 무기를 고른다(받침대는 두 손이 자리를 정해 기즈모가 없다)
+			var both := page._tree.get_root().get_child(2)
+			both.select(0)
+			await _frames(2)
+			if page._node(page._sel) != w or page._giz.target != page._prev_node(w):
+				picks.append("🤝 양손 줄 → %s" % (page._node(page._sel).name if page._node(page._sel) != null else "없음"))
+	_check(fails.is_empty(), "잡기 5 × 범위 2 × 동작 3 = %d번 무기 끌기 — 끈 만큼 움직임 · 범위대로 저장 · 다시 틀어도 그 자리%s" % [n, "" if fails.is_empty() else "\n          ✗ " + "\n          ✗ ".join(fails)])
+	_check(picks.is_empty(), "무기 고르는 길: 미리보기 손잡이 근처 총 몸통 → 총 · 🤝 양손 줄 → 그 아래 무기%s" % ("" if picks.is_empty() else "\n          ✗ " + "\n          ✗ ".join(picks)))
+	page.set_tool(Giz.Tool.VIEW)
+	page._select_node(page._root.get_path_to(page._weapon_equip()))
+	var hint := String(page._status.text).contains("W")
+	page.set_tool(Giz.Tool.MOVE)
+	_check(hint, "Q(보기) 도구에서 무기를 고르면 기즈모가 없다고 안내(W 이동 · E 회전)「%s」" % page._status.text.left(50))
+	page._playing = true
+
+
+## [16] ✋ 손: 이 프레임 손 그대로 쥐기(10-27) — 사용자 "왼손 표지 ← 지금 손, 오른손 표지 ← 지금 손 이런 게 이해가 안 가" → 2 잡기의 옛 단추 둘 대신
+## 나무의 ✋ 손 줄을 골랐을 때만 나오는 단추 하나(맨 위 범위대로) · 3 무기 자리 단추는 "총을 손에 맞추기"
+func _hand_snap_checks(page: DREquipPage) -> void:
+	print("[16] ✋ 손: 이 프레임 손 그대로 쥐기 — 손 줄일 때만 · 범위대로 · 옛 단추 없음")
+	page.select_unit(BASE)
+	await _frames(3)
+	page._playing = false
+	page.set_per_motion(false)
+	var w := page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	page.set_grip(2)
+	await _frames(2)
+	w = page._weapon_equip()
+	var old_btns := _buttons_in(page).filter(func(b: Button) -> bool: return b.text.contains("표지 ← 지금 손"))
+	page._select_node(page._root.get_path_to(w))
+	var hidden_on_weapon: bool = not page._hand_snap_btn.visible
+	page.play_motion("Firing_Rifle")
+	page._seek(0.4)
+	await _frames(2)
+	page._tree.get_root().get_child(1).select(0)       # ✋ 왼손 줄
+	await _frames(1)
+	var lmk := DRCharacter3D.find_hand_marker(w, 0)
+	_check(old_btns.is_empty() and hidden_on_weapon and page._hand_snap_btn.visible and page._hand_snap_btn.text.contains("왼손") and page._hand_snap_btn.text.contains("모든 동작")
+		and page._node(page._sel) == lmk and page._pm_fit_btn.text.begins_with("🔫 총을 손에 맞추기"),
+		"옛 [왼손 · 오른손 표지 ← 지금 손] 없음 · 무기를 고르면 손 단추 숨김 · ✋ 왼손 줄 → [%s] · 3 = [%s]" % [page._hand_snap_btn.text, page._pm_fit_btn.text])
+	# 이 동작만: 그 동작만 지금 손 그대로(손 표지 기본 그대로) — Rifle_Idle 은 동작의 왼손이 총에서 20 cm. 그 프레임에서 동작 손 ↔ 쥐는 자리 0
+	page.set_per_motion(true)
+	page.play_motion("Rifle_Idle")
+	page._seek(0.5)
+	await _frames(2)
+	page._tree.get_root().get_child(1).select(0)
+	await _frames(1)
+	var base0 := lmk.transform
+	var raw0 := float(page._prev.support_now(0).get("dist", 0.0))
+	page._hand_snap_btn.pressed.emit()
+	await _frames(2)
+	page._seek(0.5)
+	var raw1 := float(page._prev.support_now(0).get("dist", 1.0))
+	_check(page._hand_snap_btn.text.contains("Rifle_Idle 만") and lmk.transform.is_equal_approx(base0) and DRCharacter3D.offset_key(lmk, "Rifle_Idle") == "Rifle_Idle"
+		and raw0 > 0.05 and raw1 < 0.01,
+		"이 동작만: [✋ 왼손 … — Rifle_Idle 만] → Rifle_Idle 만 왼손 자리(기본 그대로) · 그 프레임 동작 손 ↔ 쥐는 자리 %.1f → %.2f cm" % [raw0 * 100.0, raw1 * 100.0])
+	# 모든 동작: 기본 손 자리 = 다른 동작(Walk_With_Rifle) 프레임 손 · Rifle_Idle 만 자리는 그대로
+	page.set_per_motion(false)
+	page.play_motion("Walk_With_Rifle")
+	page._seek(0.5)
+	await _frames(2)
+	page._tree.get_root().get_child(1).select(0)
+	await _frames(1)
+	var raw2a := float(page._prev.support_now(0).get("dist", 0.0))
+	page._hand_snap_btn.pressed.emit()
+	await _frames(2)
+	page._seek(0.5)
+	var raw2 := float(page._prev.support_now(0).get("dist", 1.0))
+	_check(page._hand_snap_btn.text.contains("모든 동작") and DRCharacter3D.offset_key(lmk, "Rifle_Idle") == "Rifle_Idle" and raw2 < 0.01 and DRCharacter3D.offset_key(lmk, "Walk_With_Rifle") == "",
+		"모든 동작: [✋ 왼손 … — 모든 동작] → 기본 왼손 자리 = Walk_With_Rifle 프레임 손(%.1f → %.2f cm) · 동작별 자리 안 생김 · Rifle_Idle 만 자리는 그대로" % [raw2a * 100.0, raw2 * 100.0])
+	page._playing = true
+
+
 ## [11] 화면 정리(10-21)
 func _ui_checks(page: DREquipPage) -> void:
 	print("[11] 화면 정리 — 적용 범위 한 곳 · 손에 맞추기(범위대로) · 표지 잠금 · 타임라인 · 상태 줄")
@@ -700,7 +854,7 @@ func _ui_checks(page: DREquipPage) -> void:
 	# 표지 잠금(이 동작만) — 표지는 모든 동작 공통
 	var mk := DRCharacter3D.find_hand_marker(w, 0)
 	var mx := mk.transform
-	var all_locked := page._marker_btns.size() >= 5 and page._marker_btns.all(func(b: Button) -> bool: return b.disabled)
+	var all_locked := page._marker_btns.size() >= 3 and page._marker_btns.all(func(b: Button) -> bool: return b.disabled)
 	var made := page.make_hand_marker(0)
 	page._select_node(page._root.get_path_to(mk))
 	var hand_giz := page._gizmo_target() != null and page._pos[0].editable and page._xf_title.text.contains("만")
@@ -1508,6 +1662,8 @@ func _run() -> void:
 	await _motion_grip_checks(page)
 	await _cam_checks(page)
 	await _hand_tree_checks(page)
+	await _sync_audit(page)
+	await _hand_snap_checks(page)
 
 	# 치우기
 	page._drop_root()
