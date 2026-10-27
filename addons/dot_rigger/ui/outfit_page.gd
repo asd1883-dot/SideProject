@@ -470,7 +470,7 @@ func _build_section_source(col: Control) -> void:
 	_outfit_ob.item_selected.connect(func(i): _on_outfit_picked(i))
 	row.add_child(_outfit_ob)
 	var rb := Button.new()
-	rb.text = "↻"
+	rb.text = "찾기"
 	rb.tooltip_text = "복장 · 옷 모델 목록을 다시 찾는다"
 	rb.pressed.connect(_on_rescan)
 	row.add_child(rb)
@@ -834,7 +834,7 @@ func _build_preview(parent: Control) -> void:
 	_motion_ob.item_selected.connect(func(i): play_motion(_motion_ob.get_item_text(i)))
 	bar2.add_child(_motion_ob)
 	_play_btn = Button.new()
-	_play_btn.text = "⏸ 멈춤"
+	_play_btn.text = "멈춤"
 	_play_btn.tooltip_text = "재생 / 멈춤 — 멈추면 옆 막대로 그 동작의 한 순간을 고른다(같은 순간을 차림만 바꿔 비교)"
 	_play_btn.pressed.connect(func(): _set_playing(not _playing))
 	bar2.add_child(_play_btn)
@@ -1031,7 +1031,7 @@ func _scan_outfits(want: String) -> void:
 	_filling = false
 
 
-## source3d/characters 아래 glb(기본 몸 빼고). want 를 고른다(목록에 없으면 ⚠ 로 덧붙임)
+## source3d/characters 아래 glb(기본 몸 빼고). want 를 고른다(목록에 없으면 주의: 로 덧붙임)
 func _scan_models(want: String) -> void:
 	if _model_ob == null:
 		return
@@ -1050,7 +1050,7 @@ func _scan_models(want: String) -> void:
 		if p == want:
 			sel = _model_ob.item_count - 1
 	if want != "" and sel < 0:
-		_model_ob.add_item("⚠ " + _short(want))
+		_model_ob.add_item("주의: " + _short(want))
 		_model_ob.set_item_metadata(_model_ob.item_count - 1, want)
 		_model_ob.set_item_tooltip(_model_ob.item_count - 1, want + "\n(source3d/characters 밖이거나 가져오기 전)")
 		sel = _model_ob.item_count - 1
@@ -1157,8 +1157,8 @@ func _on_load() -> void:
 
 
 func _fail(msg: String) -> bool:
-	_load_status.text = "⚠ " + msg
-	_say("⚠ " + msg)
+	_load_status.text = "주의: " + msg
+	_say("주의: " + msg)
 	_busy = false
 	_loaded = false
 	_save_btn.disabled = true
@@ -1392,7 +1392,7 @@ func _refresh_joint_labels() -> void:
 		if cut.is_empty():
 			_joint_opt.set_item_text(i, lab)
 		else:
-			_joint_opt.set_item_text(i, "✓ %s  (%+.1f cm, %+.0f°)" % [lab, float(cut.get("offset", 0.0)) * 100.0, float(cut.get("tilt", 0.0))])
+			_joint_opt.set_item_text(i, "%s — 정함  (%+.1f cm, %+.0f°)" % [lab, float(cut.get("offset", 0.0)) * 100.0, float(cut.get("tilt", 0.0))])
 
 
 func _joint_cut(t: PaintTarget, key: String) -> Dictionary:
@@ -2273,21 +2273,21 @@ func _update_slot_warn() -> void:
 	for pn in ALL_PARTS:
 		if DRSlotMesh.slot_of(pn, _slots) != DRSlotMesh.slot_of(pn, DRSlotMesh.DEFAULT_SLOTS):
 			diff.append(pn)
-	_slot_warn.text = "" if diff.is_empty() else "⚠ 기본 표와 다름: %s — 기본 몸은 기본 표로 나뉘어, 상의만 / 하의만 차림에서 이 파트가 겹치거나 빈다(미리보기로 확인)" % ", ".join(diff)
+	_slot_warn.text = "" if diff.is_empty() else "주의: 기본 표와 다름: %s — 기본 몸은 기본 표로 나뉘어, 상의만 / 하의만 차림에서 이 파트가 겹치거나 빈다(미리보기로 확인)" % ", ".join(diff)
 
 
 ## [저장] — outfit.json(id · model · slots · version). 파일에 있던 다른 키(2D 시험장의 sets · sets_json 등)는 그대로 둔다.
 ## parts.json 은 고칠 때마다 이미 저장됐다(관절을 끄는 중이면 그것부터 마무리). 돌려주는 값 = 성공
 func save_outfit() -> bool:
 	if not _loaded:
-		_say("⚠ 먼저 불러오세요")
+		_say("주의: 먼저 불러오세요")
 		return false
 	_joint_commit()
 	if _painting:
 		end_stroke()
 	var id := _clean_id(_id_edit.text) if _id_edit.text.strip_edges() != "" else _json_path.get_base_dir().get_file()
 	if id == "":
-		_say("⚠ 복장 이름을 적어 주세요")
+		_say("주의: 복장 이름을 적어 주세요")
 		return false
 	if not FileAccess.file_exists(_json_path) and _picked_json_existing() == "":
 		_json_path = OUTFITS_DIR.path_join(id).path_join("outfit.json")
@@ -2302,7 +2302,7 @@ func save_outfit() -> bool:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_json_path.get_base_dir()))
 	var f := FileAccess.open(_json_path, FileAccess.WRITE)
 	if f == null:
-		_say("⚠ 저장 실패: %s" % _json_path)
+		_say("주의: 저장 실패: %s" % _json_path)
 		return false
 	# JSON 은 숫자를 모두 실수로 읽는다 — 다른 키의 정수(2D 조각 crop 등)가 "104.0" 으로 바뀌지 않게 되돌려 쓴다
 	f.store_string(JSON.stringify(_int_back(doc), "\t"))
@@ -2365,7 +2365,7 @@ func _build_preview_char() -> bool:
 	_dots.world.add_child(ch)
 	if not ch.setup(_body_path):
 		ch.queue_free()
-		_pv_info.text = "⚠ 미리보기 몸을 세울 수 없습니다: %s" % _body_path
+		_pv_info.text = "주의: 미리보기 몸을 세울 수 없습니다: %s" % _body_path
 		return false
 	ch.height_m = PREVIEW_HEIGHT                 # 게임과 같은 키
 	if ResourceLoader.exists(MOTIONS_LIB):
@@ -2490,7 +2490,7 @@ func _update_pv_info() -> void:
 				sl.append("%s 정점 %d · 삼각형 %d(뚜껑 %d)" % [SLOT_NAMES[s], int(r.vert_counts.get(s, 0)), int(r.tri_counts.get(s, 0)), int(r.cap_tris.get(s, 0))])
 		parts.append("옷 " + " · ".join(sl) + " · 나누기 %.0f ms" % r.ms)
 		if r.cap_open > 0:
-			parts.append("⚠ 못 막은 경계 %d" % r.cap_open)
+			parts.append("주의: 못 막은 경계 %d" % r.cap_open)
 	_pv_info.text = "   ".join(parts)
 
 
@@ -2507,7 +2507,7 @@ func _fill_motions() -> void:
 		if n == want:
 			_motion_ob.select(_motion_ob.item_count - 1)
 	if want == "":
-		_pv_info.text = "⚠ 3D 동작 묶음이 없습니다(%s) — ① 유닛 탭 동작 표에서 [3D 동작 내보내기]" % MOTIONS_LIB
+		_pv_info.text = "주의: 3D 동작 묶음이 없습니다(%s) — ① 유닛 탭 동작 표에서 [3D 동작 내보내기]" % MOTIONS_LIB
 		return
 	play_motion(want)
 
@@ -2540,7 +2540,7 @@ func pose_at(motion: String, frac: float) -> void:
 
 func _set_playing(on: bool) -> void:
 	_playing = on
-	_play_btn.text = "⏸ 멈춤" if on else "▶ 재생"
+	_play_btn.text = "멈춤" if on else "재생"
 	_acc = 0.0
 
 
@@ -2687,15 +2687,15 @@ func _on_bind() -> void:
 		return
 	var raw := _raw_edit.text.strip_edges()
 	if raw == "" or not FileAccess.file_exists(raw if raw.is_absolute_path() and not raw.begins_with("res://") else ProjectSettings.globalize_path(raw)):
-		_bind_status.text = "⚠ AI 원본 파일이 없습니다: %s" % raw
+		_bind_status.text = "주의: AI 원본 파일이 없습니다: %s" % raw
 		return
 	var id := _clean_id(_id_edit.text)
 	if id == "":
-		_bind_status.text = "⚠ 1번의 복장 이름을 먼저 적어 주세요(결과 폴더 이름)"
+		_bind_status.text = "주의: 1번의 복장 이름을 먼저 적어 주세요(결과 폴더 이름)"
 		return
 	var blender := _blender_edit.text.strip_edges()
 	if not FileAccess.file_exists(blender):
-		_bind_status.text = "⚠ Blender 를 찾을 수 없습니다: %s" % blender
+		_bind_status.text = "주의: Blender 를 찾을 수 없습니다: %s" % blender
 		return
 	var out_res := "res://source3d/characters/%s/%s.glb" % [id, id]
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(out_res.get_base_dir()))
@@ -2749,7 +2749,7 @@ func _on_bind_done(code: int, log_text: String, out_res: String) -> void:
 	var v: Variant = JSON.parse_string(line) if line != "" else null
 	if not (v is Dictionary) or not bool((v as Dictionary).get("ok", false)):
 		var tail := log_text.substr(maxi(0, log_text.length() - 600))
-		_bind_status.text = "⚠ 붙이기 실패(코드 %d)\n%s" % [code, tail]
+		_bind_status.text = "주의: 붙이기 실패(코드 %d)\n%s" % [code, tail]
 		return
 	var r: Dictionary = v
 	_bind_status.text = "붙임 → %s\n방향 %s° · 키 배율 %.3f · 웨이트 없는 정점 %d · 엄지 %s · 관절 경계 %s%s" % [out_res, str(r.get("turned_deg", 0)),

@@ -6,10 +6,10 @@ class_name DRUnitPage
 ## 유닛 = 유닛 프리팹(루트가 DRCharacter3D 인 씬). 기본형 군인(game/units/soldier_base.tscn)을 부모로, 다른 유닛은 그것을 상속한 자식 씬 —
 ## 자식은 바꾼 칸만 따로 갖고 나머지는 부모를 따라간다(유니티 프리팹 변형). 이 탭과 인스펙터는 **같은 것**(열린 유닛 씬의 루트)을 고친다.
 ##
-##   왼쪽: 유닛 목록(부모 → 자식 나무) · [+ 자식 유닛] · [씬 열기] · [저장] · 모습 칸(몸 · 상의 · 하의 · 동작 표 · 키 — 자식은 "부모 값 / 바꿈" + ↺)
+##   왼쪽: 유닛 목록(부모 → 자식 나무) · [+ 자식 유닛] · [씬 열기] · [저장] · 모습 칸(몸 · 상의 · 하의 · 동작 표 · 키 — 자식은 "부모 값 / 바꿈" + )
 ##         · 장비 요약(뼈 소켓 → 무기 · 헬멧 — 고치기는 ② 장비 탭 · 씬 독 · 기즈모. 예전 "무기" 칸(weapon_asset)은 10-16 소켓 방식으로 갈음)
 ##   가운데: 3D 도트 미리보기(게임과 같은 DRDotView3D · 초당 12번) — 세트 · 상태를 고르면 동작 표대로 비중을 뽑아 튼다 · 다시 고르기 · 좌우 · 도트 크기
-##         · 피격 반응(10-21): 피격 동작 확률 · 최대 초 · IK 피격(세기 · 길이) — 유닛 루트 칸 · [🎯 맞혀 보기] 를 켜고 몸을 누르면 그 부위에 앞에서 맞은 것처럼
+##         · 피격 반응(10-21): 피격 동작 확률 · 최대 초 · IK 피격(세기 · 길이) — 유닛 루트 칸 · [맞혀 보기] 를 켜고 몸을 누르면 그 부위에 앞에서 맞은 것처럼
 ##   오른쪽: 그 유닛의 동작 표(DRMotionTableEditor — 인스펙터와 같은 화면: 세트 → 상태 → 동작 · % · 상하체 합성 · 3D 동작 내보내기)
 ##
 ## 에디터에서는 유닛을 고르면 그 씬을 에디터에 열고, 칸을 바꾸면 되돌리기(Ctrl+Z)에 남긴다 → 씬에 * 표시, [저장] = 씬 저장.
@@ -32,7 +32,7 @@ var _units: Dictionary = {}          # 경로 -> {name, parent}
 var _sel_path := ""
 var _root: DRCharacter3D = null      # 고치는 유닛의 루트(에디터 = 열린 씬의 루트, 밖 = 인스턴스)
 var _owns_root := false              # 밖에서 만든 인스턴스면 바꿀 때 지운다
-var _parent_vals: Dictionary = {}    # 부모 유닛의 칸 값(자식이면) — 바꿈 표시 · ↺
+var _parent_vals: Dictionary = {}    # 부모 유닛의 칸 값(자식이면) — 바꿈 표시 · 
 var _fields: Dictionary = {}         # 칸 -> {ctl, mark, revert}
 var _child_name: LineEdit
 var _status: Label
@@ -68,7 +68,7 @@ const HIT_FIELDS := [
 	["길이", "hit_ik_sec", 0.1, 1.5, 0.05, 1.0, "초", "IK 피격 — 젖혀졌다 돌아오는 시간"],
 ]
 const HIT_HELP := "맞으면 ① 확률대로 자세별 피격 동작(최대 초까지) ② IK 피격 — 총알이 맞은 부위(머리 · 가슴 · 배 · 팔 · 다리)가 총알 방향으로 젖혀졌다 돌아온다(동작 위에 덧씌움 — 피격 동작과 같이도).\n" + \
-	"[🎯 맞혀 보기] 를 켜고 미리보기 속 몸을 누르면 그 부위에 앞(보는 쪽의 적)에서 맞은 것처럼. 게임은 시뮬 총알이 맞은 자리로 같게"
+	"[맞혀 보기] 를 켜고 미리보기 속 몸을 누르면 그 부위에 앞(보는 쪽의 적)에서 맞은 것처럼. 게임은 시뮬 총알이 맞은 자리로 같게"
 var _hit_btn: Button
 var _hit_ik_chk: CheckBox
 var _hit_sp: Dictionary = {}         # 칸 -> SpinBox
@@ -229,18 +229,18 @@ func _build_ui() -> void:
 	again.pressed.connect(func() -> void: play_state(_pv_state))
 	ctl.add_child(again)
 	_play_btn = Button.new()
-	_play_btn.text = "⏸ 멈춤"
+	_play_btn.text = "멈춤"
 	_play_btn.pressed.connect(func() -> void:
 		_playing = not _playing
-		_play_btn.text = "⏸ 멈춤" if _playing else "▶ 재생")
+		_play_btn.text = "멈춤" if _playing else "재생")
 	ctl.add_child(_play_btn)
 	var lf := Button.new()
-	lf.text = "◀"
+	lf.text = "<"
 	lf.tooltip_text = "왼쪽 보기"
 	lf.pressed.connect(func() -> void: _set_facing(-1))
 	ctl.add_child(lf)
 	var rf := Button.new()
-	rf.text = "▶"
+	rf.text = ">"
 	rf.tooltip_text = "오른쪽 보기"
 	rf.pressed.connect(func() -> void: _set_facing(1))
 	ctl.add_child(rf)
@@ -297,14 +297,14 @@ func _build_hit_panel(parent: Control) -> void:
 	t.mouse_filter = Control.MOUSE_FILTER_PASS
 	head.add_child(t)
 	_hit_btn = Button.new()
-	_hit_btn.text = "🎯 맞혀 보기"
+	_hit_btn.text = "맞혀 보기"
 	_hit_btn.toggle_mode = true
 	_hit_btn.focus_mode = Control.FOCUS_NONE
 	_hit_btn.tooltip_text = "켜고 미리보기 속 몸을 누르면 그 부위에 앞(보는 쪽의 적)에서 총알이 맞은 것처럼 — IK 피격 + 확률대로 자세별 피격 동작. 다시 누르면 끔"
 	_hit_btn.toggled.connect(func(on: bool) -> void:
 		_hit_btn.self_modulate = Color(1.0, 0.45, 0.4) if on else Color.WHITE
 		if on:
-			_now.text = "🎯 맞혀 보기 — 미리보기 속 몸(머리 · 가슴 · 배 · 팔 · 다리)을 누르세요")
+			_now.text = "맞혀 보기 — 미리보기 속 몸(머리 · 가슴 · 배 · 팔 · 다리)을 누르세요")
 	head.add_child(_hit_btn)
 	_hit_ik_chk = CheckBox.new()
 	_hit_ik_chk.text = "IK 피격"
@@ -414,7 +414,7 @@ func hit_test(pos: Vector2) -> Dictionary:
 			var k := 0.0 if ca.distance_to(cb) < 0.001 else ca.distance_to(cp) / ca.distance_to(cb)
 			best_p = pa.lerp(pb, clampf(k, 0.0, 1.0))
 	if best_p == Vector3.INF:
-		_now.text = "🎯 몸에 안 맞음 — 미리보기 속 몸(머리 · 가슴 · 배 · 팔 · 다리)을 누르세요"
+		_now.text = "몸에 안 맞음 — 미리보기 속 몸(머리 · 가슴 · 배 · 팔 · 다리)을 누르세요"
 		return {}
 	var dir := Vector3(-float(_facing), 0.0, 0.0)          # 보는 쪽(적)에서 몸 쪽으로
 	var part := _prev_ch.hit_react(best_p, dir)
@@ -424,7 +424,7 @@ func hit_test(pos: Vector2) -> Dictionary:
 		anim = _play_hit_motion()
 	if not _playing:
 		_playing = true
-		_play_btn.text = "⏸ 멈춤"
+		_play_btn.text = "멈춤"
 	_hit_mark = {"pos": pos, "t": 0.0, "part": part}
 	_hit_marks.queue_redraw()
 	var anim_txt := "안 틂(하던 동작 그대로)"
@@ -432,7 +432,7 @@ func hit_test(pos: Vector2) -> Dictionary:
 		anim_txt = "%s 틂(최대 %.2f 초)" % [anim, _prev_ch.hit_anim_max_sec]
 	elif rolled:
 		anim_txt = "— 이 자세의 피격 동작이 동작 표에 없음"
-	_now.text = "🎯 맞음: %s — IK 피격 %s · 피격 동작 %s (확률 %d %%)" % [part if part != "" else "?",
+	_now.text = "맞음: %s — IK 피격 %s · 피격 동작 %s (확률 %d %%)" % [part if part != "" else "?",
 		("%.0f°" % _prev_ch.hit_ik_deg) if _prev_ch.hit_ik_enabled else "꺼짐", anim_txt, roundi(_prev_ch.hit_anim_chance * 100.0)]
 	return {"part": part, "point": best_p, "anim": anim, "rolled": rolled}
 
@@ -612,7 +612,7 @@ func _add_field(grid: GridContainer, prop: String, label: String, tip: String) -
 	mark.add_theme_font_size_override("font_size", 11)
 	hb.add_child(mark)
 	var rv := Button.new()
-	rv.text = "↺"
+	rv.text = ""
 	rv.flat = true
 	rv.tooltip_text = "부모 값으로 되돌리기"
 	rv.pressed.connect(func() -> void: _set_prop(prop, _parent_vals.get(prop)))
@@ -726,7 +726,7 @@ func select_unit(path: String) -> void:
 		_owns_root = root != null
 	_root = root
 	if _root == null:
-		_status.text = "⚠ 유닛 루트가 DRCharacter3D 가 아닙니다: " + path
+		_status.text = "주의: 유닛 루트가 DRCharacter3D 가 아닙니다: " + path
 		return
 	_parent_vals = _values_of_parent(path)
 	_sig = ""
@@ -883,7 +883,7 @@ func _fill_option(prop: String, paths: PackedStringArray, empty_label: String) -
 		ob.set_item_metadata(ob.item_count - 1, p)
 		ob.set_item_tooltip(ob.item_count - 1, p)
 	if cur != "" and not paths.has(cur):
-		ob.add_item("⚠ " + _short(cur))
+		ob.add_item("주의: " + _short(cur))
 		ob.set_item_metadata(ob.item_count - 1, cur)
 	for i in ob.item_count:
 		if String(ob.get_item_metadata(i)) == cur:
@@ -914,7 +914,7 @@ func _fill_tables() -> void:
 			if cur != null and cur.resource_path == p:
 				sel = ob.item_count - 1
 	if cur != null and sel == 0:
-		ob.add_item("⚠ " + (cur.resource_path.get_file() if cur.resource_path != "" else "(내장 표)"))
+		ob.add_item("주의: " + (cur.resource_path.get_file() if cur.resource_path != "" else "(내장 표)"))
 		ob.set_item_metadata(ob.item_count - 1, cur.resource_path)
 		sel = ob.item_count - 1
 	ob.select(sel)
@@ -1115,7 +1115,7 @@ func _rebuild_preview() -> void:
 		return
 	var ps := PackedScene.new()
 	if ps.pack(_root) != OK:
-		_now.text = "⚠ 유닛을 묶지 못함(pack)"
+		_now.text = "주의: 유닛을 묶지 못함(pack)"
 		return
 	var ch := ps.instantiate() as DRCharacter3D
 	if ch == null:
@@ -1124,7 +1124,7 @@ func _rebuild_preview() -> void:
 	ch.preview_motion = ""
 	_dots.world.add_child(ch)                      # 여기서 조립된다(auto_build)
 	if ch.get_skeleton() == null:
-		_now.text = "⚠ 조립 실패(몸 모델을 확인)"
+		_now.text = "주의: 조립 실패(몸 모델을 확인)"
 		ch.queue_free()
 		return
 	var ap := ch.get_animation_player()
@@ -1183,7 +1183,7 @@ func play_state(st: String) -> void:
 	var m := t.pick_state(st, avail)
 	_pv_reroll = t.variant_count(st, avail) > 1
 	if m == "":
-		_now.text = "⚠ %s — 3D 동작 묶음에 이 상태의 동작이 없음(오른쪽 [3D 동작 내보내기])" % st
+		_now.text = "주의: %s — 3D 동작 묶음에 이 상태의 동작이 없음(오른쪽 [3D 동작 내보내기])" % st
 		return
 	_prev_ch.play_motion(m, 0.15)
 	var w := 0.0

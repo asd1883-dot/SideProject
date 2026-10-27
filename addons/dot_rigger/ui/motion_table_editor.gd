@@ -182,7 +182,7 @@ func _update_lib_note() -> void:
 		_lib_note.add_theme_color_override("font_color", COL_DIM)
 		return
 	if not ResourceLoader.exists(path):
-		_lib_note.text = "⚠ 3D 동작 묶음이 아직 없음: %s — [3D 동작 내보내기]" % path
+		_lib_note.text = "주의: 3D 동작 묶음이 아직 없음: %s — [3D 동작 내보내기]" % path
 		_lib_note.add_theme_color_override("font_color", COL_WARN)
 		return
 	var lib := load(path) as AnimationLibrary
@@ -198,7 +198,7 @@ func _update_lib_note() -> void:
 		_lib_note.text = "3D 동작 묶음 %s — 표의 동작이 다 들어 있음(동작 %d개)" % [path.get_file(), have.size()]
 		_lib_note.add_theme_color_override("font_color", COL_DIM)
 	else:
-		_lib_note.text = "⚠ 3D 동작 묶음에 아직 없는 동작 %d개: %s — [3D 동작 내보내기] 를 누르세요" % [miss.size(), ", ".join(miss)]
+		_lib_note.text = "주의: 3D 동작 묶음에 아직 없는 동작 %d개: %s — [3D 동작 내보내기] 를 누르세요" % [miss.size(), ", ".join(miss)]
 		_lib_note.add_theme_color_override("font_color", COL_WARN)
 
 
@@ -243,7 +243,7 @@ func _set_block(set_name: String, states: PackedStringArray, names: Dictionary, 
 			_new_set.text = "")
 		head.add_child(ren)
 		var del := Button.new()
-		del.text = "✕"
+		del.text = "빼기"
 		del.flat = true
 		del.tooltip_text = "세트 지우기 — 안의 상태 · 줄은 그대로(세트 없음으로)"
 		del.pressed.connect(_delete_set.bind(set_name))
@@ -330,7 +330,7 @@ func _state_block(st: String, cl: Array[DRMotionClip], names: Dictionary, all_na
 	if bad:
 		sum.add_theme_color_override("font_color", COL_WARN)
 	if not _state_known(st):
-		sum.text = "⚠ 게임이 아직 모르는 상태 · " + sum.text
+		sum.text = "주의: 게임이 아직 모르는 상태 · " + sum.text
 		sum.add_theme_color_override("font_color", COL_WARN)
 	head.add_child(sum)
 	if not open:
@@ -430,14 +430,14 @@ func _clip_row(st: String, c: DRMotionClip, n: int, names: Dictionary, all_names
 	sp.value_changed.connect(func(v: float) -> void: _set_weight(st, idx, v))
 	top.add_child(sp)
 	var del := Button.new()
-	del.text = "✕"
+	del.text = "빼기"
 	del.flat = true
 	del.tooltip_text = "이 줄 지우기(나머지 줄이 비율대로 늘어남)"
 	del.pressed.connect(_remove_clip.bind(idx))
 	top.add_child(del)
 	if not _clip_ok(c, all_names):
 		var w := Label.new()
-		w.text = "⚠ 고를 수 있는 동작 목록에 없음(오타 · 아직 가져오기 안 됨) — 내보내기에서 빠진다"
+		w.text = "주의: 고를 수 있는 동작 목록에 없음(오타 · 아직 가져오기 안 됨) — 내보내기에서 빠진다"
 		w.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		w.add_theme_font_size_override("font_size", 12)
 		w.add_theme_color_override("font_color", COL_WARN)
@@ -506,7 +506,7 @@ func _composite_rows(idx: int, c: DRMotionClip, names: Dictionary, all_names: Pa
 	return m
 
 
-## 동작 고르기 목록 — 추가 동작(Mixamo) 먼저, 모델 자체 동작(UAL) 다음. 목록에 없는 지금 값은 ⚠ 를 붙여 맨 위에 둔다(값을 잃지 않게)
+## 동작 고르기 목록 — 추가 동작(Mixamo) 먼저, 모델 자체 동작(UAL) 다음. 목록에 없는 지금 값은 주의: 를 붙여 맨 위에 둔다(값을 잃지 않게)
 func _anim_picker(cur: String, names: Dictionary, all_names: PackedStringArray) -> OptionButton:
 	var ob := OptionButton.new()
 	ob.fit_to_longest_item = false
@@ -517,7 +517,7 @@ func _anim_picker(cur: String, names: Dictionary, all_names: PackedStringArray) 
 		ob.set_item_metadata(ob.item_count - 1, "")
 		sel = 0
 	elif not all_names.has(cur):
-		ob.add_item("⚠ " + cur)
+		ob.add_item("주의: " + cur)
 		ob.set_item_metadata(ob.item_count - 1, cur)
 		sel = 0
 	for group in [["extra", "추가 동작(Mixamo 등)"], ["model", "모델 동작(UAL)"]]:
@@ -752,9 +752,9 @@ func _on_export() -> void:
 	else:
 		lines.append("내보내기 실패")
 	for m in ex.missing:
-		lines.append("✗ 없는 동작: " + m)
+		lines.append("없는 동작: " + m)
 	for w in ex.warnings:
-		lines.append("⚠ " + w)
+		lines.append("주의: " + w)
 	ex.cleanup()
 	print("[Dot Rigger] 3D 동작 내보내기(동작 표)\n" + "\n".join(lines))
 	if Engine.is_editor_hint():

@@ -41,7 +41,7 @@ var _base_paths: Dictionary = {}          # 부모 유닛 씬에서 온 노드(�
 var _tree: Tree
 var _sel := NodePath()                    # 고른 노드(루트 기준)
 var _sel_ref: WeakRef = null              # 고른 노드 자체 — 이름이 바뀌거나 되돌리기로 경로가 바뀌어도 다시 찾는다(10-27)
-var _sel_hand := -1                       # 고른 ✋ 손 줄(0 = 왼손 · 1 = 오른손) — [✋ 이 프레임 손 그대로 쥐기](표지가 없는 손도)
+var _sel_hand := -1                       # 고른 손 줄(0 = 왼손 · 1 = 오른손) — [이 프레임 손 그대로 쥐기](표지가 없는 손도)
 var _hand_snap_btn: Button
 var _sock_name: LineEdit
 var _bone_ob: OptionButton
@@ -92,7 +92,7 @@ var _acc := 0.0
 var _info: Label
 var _live: Array = []                     # 미리보기 뼈대가 갱신될 때 잰 손마다(IK 뒤) [왼손, 오른손] — support_now
 var _grip_btns: Array[Button] = []        # 잡기: 오른손 · 왼손 · 양손 · 고정(이 동작만이면 그 동작의 잡기 — 고정은 잠김)
-var _grip_reset_btn: Button               # [↺ 이 동작 기본 잡기로](이 동작만일 때)
+var _grip_reset_btn: Button               # [이 동작 기본 잡기로](이 동작만일 때)
 var _blend_sl: HSlider
 var _blend_lbl: Label
 var _grip_info: Label
@@ -200,7 +200,7 @@ func _build_ui() -> void:
 	_unit_ob.tooltip_text = "소켓 · 장비를 고칠 유닛 프리팹(game/units — ① 유닛 탭과 같은 목록)"
 	_unit_ob.item_selected.connect(func(i: int) -> void: select_unit(String(_unit_ob.get_item_metadata(i))))
 	urow.add_child(_unit_ob)
-	_btn(urow, "↻", "game/units 의 유닛 씬을 다시 찾는다", scan_units)
+	_btn(urow, "찾기", "game/units 의 유닛 씬을 다시 찾는다", scan_units)
 	_btn(urow, "씬 열기", "에디터에 이 유닛 씬을 연다", func() -> void:
 		if _sel_path != "" and Engine.is_editor_hint():
 			EditorInterface.open_scene_from_path(_sel_path))
@@ -218,7 +218,7 @@ func _build_ui() -> void:
 	var pg := ButtonGroup.new()
 	for m in [[false, "모든 동작", "기본 — 2 잡기 = 기본 잡기(따로 정하지 않은 동작 모두) · 3 무기 자리 = 기본 자리.\n" +
 				"지금 동작에 따로 자리가 있으면 보이는 자리 = 기본 자리 + 그 차이(옮기면 기본 자리가 바뀌고 차이는 그대로)"],
-			[true, "✎ 이 동작만", "지금 동작(오른쪽 표에서 고른 것)만 — 2 잡기(어느 손이 총에 붙나) · 3 무기 자리(위치 · 회전). 기본 · 다른 동작은 그대로.\n" +
+			[true, "이 동작만", "지금 동작(오른쪽 표에서 고른 것)만 — 2 잡기(어느 손이 총에 붙나) · 3 무기 자리(위치 · 회전). 기본 · 다른 동작은 그대로.\n" +
 				"오른쪽 표에서 행을 두 번 눌러도 된다. 무기 · 소켓 · 받침대 · 보간 · 손 표지 · 조준 칸은 모든 동작 공통이라 이때는 잠긴다"]]:
 		var b := Button.new()
 		b.text = String(m[1])
@@ -235,7 +235,7 @@ func _build_ui() -> void:
 
 	# 1 무기 · 소켓
 	_section(left, "1", "무기 · 손", "손 기준 — 장비는 지금 동작에서 쥔 손 아래에 보인다. 장비를 끌어 다른 손에 놓으면 잡기(맨 위 범위대로) · " +
-		"✋ 손을 고르면 기즈모로 그 손이 쥐는 자리만 옮김(총은 그대로)")
+		"손을 고르면 기즈모로 그 손이 쥐는 자리만 옮김(총은 그대로)")
 	_tree = Tree.new()
 	_tree.hide_root = true
 	_tree.allow_search = false              # 글자를 치면 찾기로 먹어 버려 W · E · R 단축키가 안 간다
@@ -244,8 +244,8 @@ func _build_ui() -> void:
 	_tree.drop_mode_flags = Tree.DROP_MODE_ON_ITEM
 	_tree.set_drag_forwarding(_tree_drag, _tree_can_drop, _tree_drop)   # 장비를 끌어 손에 놓으면 잡기(10-27)
 	left.add_child(_tree)
-	# ✋ 손을 골랐을 때만 — 지금 프레임의 동작 손을 그대로 쥐는 자리로(10-27 사용자 "왼손 표지 ← 지금 손 … 이런 게 이해가 안 가" → 손 줄 단추 하나 · 범위대로)
-	_hand_snap_btn = _btn(left, "✋ 이 프레임 손 그대로 쥐기", "", func() -> void: snap_hand(_sel_hand))
+	# 손을 골랐을 때만 — 지금 프레임의 동작 손을 그대로 쥐는 자리로(10-27 사용자 "왼손 표지 ← 지금 손 … 이런 게 이해가 안 가" → 손 줄 단추 하나 · 범위대로)
+	_hand_snap_btn = _btn(left, "이 프레임 손 그대로 쥐기", "", func() -> void: snap_hand(_sel_hand))
 	_hand_snap_btn.visible = false
 	var mrow := HBoxContainer.new()
 	left.add_child(mrow)
@@ -297,7 +297,7 @@ func _build_ui() -> void:
 		_grip_btns.append(b)
 	var grrow := HBoxContainer.new()
 	left.add_child(grrow)
-	_grip_reset_btn = _btn(grrow, "↺ 이 동작 기본 잡기로", "이 동작의 잡기를 지운다 — 기본 잡기(모든 동작)대로(되돌리기 한 칸)", func() -> void: set_motion_grip(current_motion(), -1))
+	_grip_reset_btn = _btn(grrow, "이 동작 기본 잡기로", "이 동작의 잡기를 지운다 — 기본 잡기(모든 동작)대로(되돌리기 한 칸)", func() -> void: set_motion_grip(current_motion(), -1))
 	_grip_reset_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var brow2 := HBoxContainer.new()
 	left.add_child(brow2)
@@ -320,10 +320,10 @@ func _build_ui() -> void:
 	_section(left, "3", "무기 자리", "몸(소켓 · 두 손) 기준 총 위치 · 회전 — 맨 위 적용 범위대로(기즈모 · 숫자 칸 · [총을 손에 맞추기])")
 	var fitrow := HBoxContainer.new()
 	left.add_child(fitrow)
-	_pm_fit_btn = _btn(fitrow, "🔫 총을 손에 맞추기", "", fit_to_hands)
+	_pm_fit_btn = _btn(fitrow, "총을 손에 맞추기", "", fit_to_hands)
 	_pm_fit_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pm_fit_btn.clip_text = true
-	_pm_reset_btn = _btn(fitrow, "↺ 이 동작 기본으로", "이 동작의 따로 자리를 지운다(기본 자리로) — 되돌리기 한 칸", func() -> void: reset_motion_offset(current_motion()))
+	_pm_reset_btn = _btn(fitrow, "이 동작 기본으로", "이 동작의 따로 자리를 지운다(기본 자리로) — 되돌리기 한 칸", func() -> void: reset_motion_offset(current_motion()))
 	_xf_title = Label.new()
 	_xf_title.text = "고른 노드 —"
 	_xf_title.clip_text = true
@@ -536,7 +536,7 @@ func _build_ui() -> void:
 	var tl := HBoxContainer.new()
 	mid.add_child(tl)
 	_play_btn = Button.new()
-	_play_btn.text = "⏸"
+	_play_btn.text = "멈춤"
 	_play_btn.focus_mode = Control.FOCUS_NONE
 	_play_btn.custom_minimum_size = Vector2(34, 0)
 	_play_btn.tooltip_text = "재생 · 멈춤(Space)"
@@ -691,11 +691,11 @@ func _build_gizmo_bar(parent: Control) -> void:
 	var bar := HFlowContainer.new()
 	parent.add_child(bar)
 	var group := ButtonGroup.new()
-	for t in [[TransformGizmo.Tool.VIEW, "✋ Q", "Q — 보기: 손잡이 없음. 왼쪽 끌기 = 화면 옮기기"],
-			[TransformGizmo.Tool.MOVE, "✥ W 이동", "W — 이동: 축 화살표 · 평면 네모 · 가운데 네모(화면 평면)"],
-			[TransformGizmo.Tool.ROTATE, "⟳ E 회전", "E — 회전: 축 고리(고리를 따라 끈다) · 바깥 고리(화면 축) · 안쪽(자유)"],
-			[TransformGizmo.Tool.SCALE, "⤢ R 크기", "R — 크기: 축 끝 네모(로컬 축) · 가운데(전체 — 오른쪽 · 위로 끌면 커짐). 손 표지 · 소켓은 크기 없음"],
-			[TransformGizmo.Tool.TRANSFORM, "▣ Y 변환", "Y — 변환: 이동 화살표 · 평면 + 회전 고리 + 가운데(전체 크기)"]]:
+	for t in [[TransformGizmo.Tool.VIEW, "Q 보기", "Q — 보기: 손잡이 없음. 왼쪽 끌기 = 화면 옮기기"],
+			[TransformGizmo.Tool.MOVE, "W 이동", "W — 이동: 축 화살표 · 평면 네모 · 가운데 네모(화면 평면)"],
+			[TransformGizmo.Tool.ROTATE, "E 회전", "E — 회전: 축 고리(고리를 따라 끈다) · 바깥 고리(화면 축) · 안쪽(자유)"],
+			[TransformGizmo.Tool.SCALE, "R 크기", "R — 크기: 축 끝 네모(로컬 축) · 가운데(전체 — 오른쪽 · 위로 끌면 커짐). 손 표지 · 소켓은 크기 없음"],
+			[TransformGizmo.Tool.TRANSFORM, "Y 변환", "Y — 변환: 이동 화살표 · 평면 + 회전 고리 + 가운데(전체 크기)"]]:
 		var b := Button.new()
 		b.text = String(t[1])
 		b.toggle_mode = true
@@ -853,7 +853,7 @@ func _on_view_click(pos: Vector2) -> void:
 
 ## 화면 점 아래의 미리보기 노드 — 표지 십자를 바로 누름(6 px 안) → 장비 메시(광선 ↔ 메시마다 로컬 경계 상자, 가장 가까운 것) → 표지 근처(14 px 안) → 받침(10 px 안).
 ## 10-27 사용자 "(무기를 옮기는 게) 가끔 안 될 때가 있어" — 손은 총 위에 있어 손잡이 근처 총 몸통을 누르면 14 px 안의 손 표지가 먼저 골라졌다(손만 옮겨짐).
-## 이제 총 몸통에 맞으면 총, 손 · 총구 · 견착은 십자를 바로 누를 때만(손은 나무의 ✋ 줄로도 고른다)
+## 이제 총 몸통에 맞으면 총, 손 · 총구 · 견착은 십자를 바로 누를 때만(손은 나무의 줄로도 고른다)
 func pick_in_preview(pos: Vector2) -> Node3D:
 	if _prev == null:
 		return null
@@ -1067,7 +1067,7 @@ func select_unit(path: String) -> void:
 		if String(_unit_ob.get_item_metadata(i)) == path:
 			_unit_ob.select(i)
 	if _root == null:
-		_set_status("⚠ 유닛 루트가 DRCharacter3D 가 아닙니다: " + path)
+		_set_status("주의: 유닛 루트가 DRCharacter3D 가 아닙니다: " + path)
 		return
 	_base_paths = _collect_base_paths(path)
 	_refresh_all()
@@ -1248,11 +1248,11 @@ func _refresh_all() -> void:
 
 
 ## 손 기준 나무(10-27) — 사용자: "왼손 잡기인데 오른손에 붙어 있고 … 이 무기 소켓 하이어라키에서 드래그해서 자식으로 지정해 놓는 행위를 하면 2. 잡기도
-## 그거에 반영돼서 동기화" · "오른손 왼손도 기즈모로 움직여서 살짝 조정". 맨 위 = 몸의 손 · 뼈(✋ 오른손 · ✋ 왼손 · 🤝 양손 · 📌 땅 · 🦴 그 밖의 뼈 소켓)로
+## 그거에 반영돼서 동기화" · "오른손 왼손도 기즈모로 움직여서 살짝 조정". 맨 위 = 몸의 손 · 뼈(오른손 · 왼손 · 양손 · 땅 · 그 밖의 뼈 소켓)로
 ## 고정하고, 장비는 **지금 보는 동작에서 쥔 곳** 아래에 보인다(이 동작만 따로 = 주황) — 부모는 하나뿐이라 애니메이션마다 부모를 바꾸는 것은 하이어라키로
 ## 못 한다(유니티도 Parent Constraint 비중으로) → 나무가 지금 동작의 진실을 보여 준다. 장비를 끌어 다른 손에 놓으면 잡기(적용 범위대로 — 2 잡기 단추 · 표 잡기 칸과
 ## 같은 데이터). 손 줄을 고르면 그 손 표지(총의 어디를 쥐나)를 고른다 — 기즈모로 그 손만 옮김(총은 그대로). 받침 노드(DRGripMount3D · 손 뼈 소켓)는 씬 독에만 보인다
-const TREE_GRIPS := [[0, "✋ 오른손"], [1, "✋ 왼손"], [2, "🤝 양손 (두 손 사이)"], [3, "📌 땅 (고정)"]]
+const TREE_GRIPS := [[0, "오른손"], [1, "왼손"], [2, "양손 (두 손 사이)"], [3, "땅 (고정)"]]
 
 
 func _fill_tree() -> void:
@@ -1281,7 +1281,7 @@ func _fill_tree() -> void:
 		var srow: TreeItem = null
 		if bs != null and not hand_sock:          # 머리 · 등 … 손이 아닌 뼈 소켓
 			srow = _tree.create_item(top)
-			srow.set_text(0, "🦴 %s  (뼈 %s)" % [a.name, bs.bone_name])
+			srow.set_text(0, "%s  (뼈 %s)" % [a.name, bs.bone_name])
 			srow.set_tooltip_text(0, "소켓(BoneAttachment3D) — 뼈 %s 를 따라간다%s" % [bs.bone_name, " · 부모 유닛에서 옴" if _is_inherited(a) else ""])
 			srow.set_metadata(0, _root.get_path_to(a))
 		for c in a.get_children():
@@ -1296,7 +1296,7 @@ func _fill_tree() -> void:
 					g2 = motion_grip(e, "")
 				parent_row = rows.get(g2, rows[0])
 				if gk == 3 and parent_row.get_metadata(0) == NodePath():
-					parent_row.set_metadata(0, _root.get_path_to(a))     # 땅 줄 = 고정 받침대(기즈모로 옮김). 🤝 양손 줄은 그 아래 무기로 넘긴다(받침대는 두 손이 자리를 정함)
+					parent_row.set_metadata(0, _root.get_path_to(a))     # 땅 줄 = 고정 받침대(기즈모로 옮김). 양손 줄은 그 아래 무기로 넘긴다(받침대는 두 손이 자리를 정함)
 			_fill_equip_row(parent_row, e, mo)
 	for it in _all_items(top):
 		if (it.get_metadata(0) as NodePath) == _sel and _sel != NodePath():
@@ -1310,13 +1310,13 @@ func _fill_hand_row(gi: TreeItem, side: int, w: Node3D, mo: String) -> void:
 	if w == null:
 		return
 	if mk == null:
-		gi.set_text(0, "✋ %s  — 표지 없음" % nm)
-		gi.set_tooltip_text(0, gi.get_tooltip_text(0) + "\n%s 표지(총의 어디를 쥐나)가 없다 — 이 줄을 고르고 [✋ %s: 이 프레임 손 그대로 쥐기]" % [nm, nm])
+		gi.set_text(0, "%s  — 표지 없음" % nm)
+		gi.set_tooltip_text(0, gi.get_tooltip_text(0) + "\n%s 표지(총의 어디를 쥐나)가 없다 — 이 줄을 고르고 [%s: 이 프레임 손 그대로 쥐기]" % [nm, nm])
 		return
 	gi.set_metadata(0, _root.get_path_to(mk))
 	var on := socket_hand(w) == side or DRCharacter3D.hand_weight_for(w, side, mo) > 0.001
 	var po := DRCharacter3D.motion_offsets(mk).size()
-	gi.set_text(0, "✋ %s  — %s%s" % [nm, "쥠" if on else "놓음(이 동작)", "  · 동작별 자리 %d" % po if po > 0 else ""])
+	gi.set_text(0, "%s  — %s%s" % [nm, "쥠" if on else "놓음(이 동작)", "  · 동작별 자리 %d" % po if po > 0 else ""])
 	gi.set_tooltip_text(0, ("%s — 누르면 이 손이 총을 쥐는 자리(%s 표지)를 고른다: 기즈모로 이동 · 회전하면 손만 움직이고 총은 그대로.\n" +
 		"적용 범위가 모든 동작이면 기본 자리, 이 동작만이면 그 동작만(동작별 자리). 장비를 여기로 끌어 놓으면 %s 잡기") % [nm, nm, nm])
 	if not on:
@@ -1330,10 +1330,10 @@ func _fill_equip_row(parent_row: TreeItem, e: Node3D, mo: String) -> void:
 	var src := e.scene_file_path.get_file() if e.scene_file_path != "" else e.get_class()
 	var po := DRCharacter3D.motion_offsets(e).size()
 	var own := motion_grip_own(e, mo)
-	ei.set_text(0, "%s%s  (%s)%s%s" % ["⊘ " if not e.visible else "", e.name, src, "  · 동작별 자리 %d" % po if po > 0 else "",
+	ei.set_text(0, "%s%s  (%s)%s%s" % ["(숨김) " if not e.visible else "", e.name, src, "  · 동작별 자리 %d" % po if po > 0 else "",
 		"  ● %s 만 (기본 = %s)" % [mo, _grip_name(motion_grip(e, ""))] if own else ""])
 	ei.set_metadata(0, _root.get_path_to(e))
-	ei.set_tooltip_text(0, "장비 — 끌어서 ✋ 오른손 · ✋ 왼손 · 🤝 양손 · 📌 땅 에 놓으면 잡기(적용 범위대로)%s%s%s" % [" · 숨김(게임에서는 지운다)" if not e.visible else "",
+	ei.set_tooltip_text(0, "장비 — 끌어서 오른손 · 왼손 · 양손 · 땅 에 놓으면 잡기(적용 범위대로)%s%s%s" % [" · 숨김(게임에서는 지운다)" if not e.visible else "",
 		" · 부모 유닛에서 옴" if _is_inherited(e) else "", "\n동작별 자리: " + ", ".join(PackedStringArray(DRCharacter3D.motion_offsets(e).keys())) if po > 0 else ""])
 	if not e.visible:
 		ei.set_custom_color(0, Color(0.55, 0.57, 0.6))
@@ -1345,7 +1345,7 @@ func _fill_equip_row(parent_row: TreeItem, e: Node3D, mo: String) -> void:
 			continue
 		var ai := _tree.create_item(ei)
 		var muzzle: bool = an == DRCharacter3D.MUZZLE_NAME
-		ai.set_text(0, "%s %s  (%s)" % ["🎯" if muzzle else "📍", am.name, "총구 표지 — 레이가 나가는 곳 · 파란 축 = 방향" if muzzle else "견착 표지 — 팔 몫 조준의 축(개머리판 끝)"])
+		ai.set_text(0, "%s  (%s)" % [am.name, "총구 표지 — 레이가 나가는 곳 · 파란 축 = 방향" if muzzle else "견착 표지 — 팔 몫 조준의 축(개머리판 끝)"])
 		ai.set_metadata(0, _root.get_path_to(am))
 		ai.set_tooltip_text(0, ("총구 표지: 원점 = 총구 선(레이)이 나가는 자리, +Z(파란 축) = 방향. 기즈모 W 이동 · E 회전" if muzzle
 			else "견착 표지: 조준할 때 팔이 총을 드는 축 — 개머리판을 어깨에 대는 점. 기즈모 W 이동") + "\n지우면(빼기 · [자동으로]) 무기 메시에서 다시 잰다")
@@ -1357,12 +1357,12 @@ func _tree_drag(at: Vector2) -> Variant:
 	if it == null or not it.has_meta(&"equip"):
 		return null
 	var l := Label.new()
-	l.text = "✋ " + it.get_text(0).get_slice("  ", 0) + " — 손에 놓기"
+	l.text = "" + it.get_text(0).get_slice("  ", 0) + " — 손에 놓기"
 	_tree.set_drag_preview(l)
 	return {"dr_equip": it.get_metadata(0)}
 
 
-## 끌어 놓을 잡기 줄 — 놓은 줄에서 위로 올라가 맨 위 잡기 줄(✋ 오른손 · ✋ 왼손 · 🤝 양손 · 📌 땅). 없으면 -1
+## 끌어 놓을 잡기 줄 — 놓은 줄에서 위로 올라가 맨 위 잡기 줄(오른손 · 왼손 · 양손 · 땅). 없으면 -1
 func _drop_grip(it: TreeItem) -> int:
 	while it != null:
 		if it.has_meta(&"grip"):
@@ -1415,7 +1415,7 @@ func _on_tree_selected() -> void:
 		return
 	var p := it.get_metadata(0) as NodePath
 	var grip := int(it.get_meta(&"grip")) if it.has_meta(&"grip") else -1
-	if p == NodePath() and grip == 2:                 # 🤝 양손 줄 — 그 아래 무기를 고른다(받침대는 두 손이 자리를 정해 기즈모가 없다, 10-27)
+	if p == NodePath() and grip == 2:                 # 양손 줄 — 그 아래 무기를 고른다(받침대는 두 손이 자리를 정해 기즈모가 없다, 10-27)
 		var c := it.get_first_child()
 		while c != null and not c.has_meta(&"equip"):
 			c = c.get_next()
@@ -1481,7 +1481,7 @@ func _fill_models() -> void:
 	_model_ob.clear()
 	for p in DREquipHold.list_models():
 		var hold := not DREquipHold.read_hold(DREquipHold.asset_for_model(p)).is_empty()
-		_model_ob.add_item("%s%s" % [p.trim_prefix("res://source3d/"), "  ★기본 자리" if hold else ""])
+		_model_ob.add_item("%s%s" % [p.trim_prefix("res://source3d/"), "  (기본 자리 있음)" if hold else ""])
 		_model_ob.set_item_metadata(_model_ob.item_count - 1, p)
 		_model_ob.set_item_tooltip(_model_ob.item_count - 1, p + ("\n무기 기본 자리(asset.json socket_hold) 있음" if hold else ""))
 	_model_ob.add_item(DREquipHold.PLACEHOLDER_HELMET)
@@ -1544,7 +1544,7 @@ func _update_grip_ui() -> void:
 		b.tooltip_text = String(b.get_meta(&"tip", "")) + ("\n— 잠김: " + why if why != "" else "")
 	_grip_reset_btn.get_parent().visible = _per_motion
 	_grip_reset_btn.disabled = not own
-	_grip_reset_btn.text = "↺ %s 기본 잡기로(%s)" % [mo, _grip_name(motion_grip(e, ""))] if per else "↺ 이 동작 기본 잡기로"
+	_grip_reset_btn.text = "%s 기본 잡기로(%s)" % [mo, _grip_name(motion_grip(e, ""))] if per else "이 동작 기본 잡기로"
 	var gm := e.get_parent() as DRGripMount3D if e != null else null
 	var both := kind == 2
 	_blend_sl.get_parent().visible = both
@@ -1563,7 +1563,7 @@ func _update_grip_ui() -> void:
 		elif on:
 			hand_txt.append("%s = 총에 붙음(총을 옮기면 따라옴)" % nm)
 		elif DRCharacter3D.find_hand_marker(e, side) == null and (hand_grips(e, side) or per):
-			hand_txt.append("%s = 표지 없음 — 동작 그대로(나무의 ✋ %s 줄 → [이 프레임 손 그대로 쥐기])" % [nm, nm])
+			hand_txt.append("%s = 표지 없음 — 동작 그대로(나무의 %s 줄 → [이 프레임 손 그대로 쥐기])" % [nm, nm])
 		else:
 			hand_txt.append("%s = 총에 안 붙음 — 동작 그대로" % nm)
 	if per:
@@ -1790,7 +1790,7 @@ func set_grip(kind: int) -> void:
 				pmk.global_basis.orthonormalized().get_rotation_quaternion()))
 			if d > 0.01 or deg > 5.0:
 				var nm := String(DRCharacter3D.SIDE_NAMES[side])
-				jumps.append("%s이 %s 표지로 %.1f cm · %.0f° 옮겨감(지금 손 자리로 쥐려면 나무의 ✋ %s → [이 프레임 손 그대로 쥐기])" % [nm, nm, d * 100.0, deg, nm])
+				jumps.append("%s이 %s 표지로 %.1f cm · %.0f° 옮겨감(지금 손 자리로 쥐려면 나무의 %s → [이 프레임 손 그대로 쥐기])" % [nm, nm, d * 100.0, deg, nm])
 	var hold_v: int = [DRGripMount3D.Hold.RIGHT, DRGripMount3D.Hold.LEFT, DRGripMount3D.Hold.BOTH, DRGripMount3D.Hold.BOTH][kind]
 	var mo := current_motion()
 	var mem: Dictionary = (e.get_meta(GRIP_MEMORY_META) as Dictionary).duplicate() if e.has_meta(GRIP_MEMORY_META) and e.get_meta(GRIP_MEMORY_META) is Dictionary else {}
@@ -1857,7 +1857,7 @@ func set_grip(kind: int) -> void:
 		for side in follow:
 			var mk := DRCharacter3D.find_hand_marker(e, side)
 			if mk is DRHandTarget3D and (mk as DRHandTarget3D).motion_weights.has(mo) and float((mk as DRHandTarget3D).motion_weights[mo]) <= 0.001:
-				warn = " — ⚠ 지금 동작 %s 은 %s 이 총을 놓는 동작(이 동작 잡기에서 뺌): 붙을 손이 총에 있는 동작에서 다시 바꾸세요(Ctrl+Z)" % [mo, DRCharacter3D.SIDE_NAMES[side]]
+				warn = " — 주의: 지금 동작 %s 은 %s 이 총을 놓는 동작(이 동작 잡기에서 뺌): 붙을 손이 총에 있는 동작에서 다시 바꾸세요(Ctrl+Z)" % [mo, DRCharacter3D.SIDE_NAMES[side]]
 	var keep: Array = [anchor]
 	if e.get_parent() is DRGripMount3D:
 		keep.append(e.get_parent())                        # 떠나는 받침대는 다시 올 수 있어 남긴다(잡기 기억)
@@ -2277,20 +2277,20 @@ func make_hand_marker(side: int) -> Node3D:
 	return cur
 
 
-## ✋ 손: 이 프레임 손 그대로 쥐기(10-27 — 사용자 "왼손 표지 ← 지금 손, 오른손 표지 ← 지금 손 이런 게 이해가 안 가" → 나무의 ✋ 손 줄을 골랐을 때만 · 맨 위 범위대로).
+## 손: 이 프레임 손 그대로 쥐기(10-27 — 사용자 "왼손 표지 ← 지금 손, 오른손 표지 ← 지금 손 이런 게 이해가 안 가" → 나무의 손 줄을 골랐을 때만 · 맨 위 범위대로).
 ## 지금 멈춘 프레임에서 동작의 그 손(IK 전) 자리 · 회전을 총의 그 손 쥐는 자리로 — 그 프레임에서 손이 동작 그대로 있게.
 ## 모든 동작 = 손 표지(기본) · 이 동작만 = 그 동작의 손 자리(손 표지 dr_motion_offsets). 표지가 없으면 지금 손으로 만든다(기본 — 그 뒤 이 동작만이면 차이 0)
 func snap_hand(side: int) -> void:
 	var e := _weapon_equip()
 	if side < 0 or e == null or _prev == null:
-		_set_status("나무에서 ✋ 오른손 · ✋ 왼손 줄을 고르세요")
+		_set_status("나무에서 오른손 · 왼손 줄을 고르세요")
 		return
 	var nm := String(DRCharacter3D.SIDE_NAMES[side])
 	var mk := DRCharacter3D.find_hand_marker(e, side)
 	if not _per_motion or mk == null:
 		var made := make_hand_marker_base(side, e)
 		if made != null:
-			_set_status("✋ %s — %s %d%% 프레임의 손 그대로를 총의 %s 쥐는 자리로(모든 동작)%s" % [nm, current_motion(), int(_time_sl.value * 100.0), nm,
+			_set_status("%s — %s %d%% 프레임의 손 그대로를 총의 %s 쥐는 자리로(모든 동작)%s" % [nm, current_motion(), int(_time_sl.value * 100.0), nm,
 				"" if hand_grips(e, side) else " — 지금 잡기에서는 %s이 총에 안 붙음(잡기를 바꾸면 씀)" % nm])
 		return
 	var mo := current_motion()
@@ -2301,7 +2301,7 @@ func snap_hand(side: int) -> void:
 	var want := _in_parent_of(mk, e, m)
 	set_motion_offset(mk, mo, mk.transform.affine_inverse() * want, "손: %s %s 자리 = 지금 손(이 동작만)" % [nm, mo])
 	_select_node(_root.get_path_to(mk))
-	_set_status("✋ %s — %s 만: %d%% 프레임의 손 그대로를 쥐는 자리로(%s · 기본 손 자리 · 다른 동작 그대로)" % [nm, mo, int(_time_sl.value * 100.0), _offset_text(mk, mo)])
+	_set_status("%s — %s 만: %d%% 프레임의 손 그대로를 쥐는 자리로(%s · 기본 손 자리 · 다른 동작 그대로)" % [nm, mo, int(_time_sl.value * 100.0), _offset_text(mk, mo)])
 
 
 ## 손 표지(기본 — 모든 동작)를 지금 프레임의 동작 손으로(없으면 만든다). 그 동작의 손 자리가 있으면 그 차이를 뺀 기본으로(보이는 손 = 지금 손)
@@ -2452,7 +2452,7 @@ func save_unit() -> void:
 	if ps.pack(_root) == OK and ResourceSaver.save(ps, _sel_path) == OK:
 		_set_status("씬 저장: " + _sel_path.get_file())
 	else:
-		_set_status("⚠ 저장 실패: " + _sel_path)
+		_set_status("주의: 저장 실패: " + _sel_path)
 
 
 ## 고른 장비의 자리 · 왼손 표지 · 동작별 비중 · 동작별 자리를 모델 옆 asset.json(socket_hold)에
@@ -2485,7 +2485,7 @@ func save_hold_default() -> void:
 	if ok and Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().update_file(asset)
 	_fill_models()
-	_set_status("무기 기본 자리 %s → %s" % ["저장" if ok else "⚠ 저장 실패", asset])
+	_set_status("무기 기본 자리 %s → %s" % ["저장" if ok else "주의: 저장 실패", asset])
 
 
 func _on_edit_in_editor() -> void:
@@ -2667,11 +2667,11 @@ func _update_aim_label() -> void:
 	var warn := ""
 	if _aim_preview and _prev != null:
 		if _prev.get_weapon_node() == null:
-			warn = "⚠ 무기 없음"
+			warn = "주의: 무기 없음"
 		elif not _prev.aim_enabled:
-			warn = "⚠ 조준 꺼짐(왼쪽 [조준])"
+			warn = "주의: 조준 꺼짐(왼쪽 [조준])"
 		elif _prev.aim_weight_for(current_motion()) <= 0.0:
-			warn = "⚠ 이 동작은 조준 0 % — 오른쪽 표 \"조준\" 칸"
+			warn = "주의: 이 동작은 조준 0 % — 오른쪽 표 \"조준\" 칸"
 	_aim_lbl.text = t + ("   " + warn if warn != "" else "")
 	_aim_lbl.add_theme_color_override("font_color", Color(1.0, 0.62, 0.25) if warn != "" else Color(0.92, 0.94, 0.96))
 	_aim_lbl.modulate = Color.WHITE if _aim_preview else Color(1, 1, 1, 0.45)
@@ -2739,7 +2739,7 @@ func _rebuild_preview() -> void:
 		return
 	var ps := PackedScene.new()
 	if ps.pack(_root) != OK:
-		_info.text = "⚠ 유닛을 묶지 못함(pack)"
+		_info.text = "주의: 유닛을 묶지 못함(pack)"
 		return
 	var ch := ps.instantiate() as DRCharacter3D
 	if ch == null:
@@ -2748,7 +2748,7 @@ func _rebuild_preview() -> void:
 	ch.preview_motion = ""
 	(_dots.world if _dot_mode else _world3d).add_child(ch)
 	if ch.get_skeleton() == null:
-		_info.text = "⚠ 조립 실패(몸 모델을 확인)"
+		_info.text = "주의: 조립 실패(몸 모델을 확인)"
 		ch.queue_free()
 		return
 	ch.get_animation_player().callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
@@ -2852,7 +2852,7 @@ func _on_time(v: float) -> void:
 ## 재생 ↔ 멈춤(타임라인 단추 · Space)
 func toggle_play() -> void:
 	_playing = not _playing
-	_play_btn.text = "⏸" if _playing else "▶"
+	_play_btn.text = "멈춤" if _playing else "재생"
 
 
 ## 타임라인 초 = 지금 / 동작 길이
@@ -3007,7 +3007,7 @@ func _process(delta: float) -> void:
 			if ap.current_animation != "":
 				_time_sl.set_value_no_signal(ap.current_animation_position / maxf(ap.get_animation(ap.current_animation).length, 0.001))
 				_update_time_lbl()
-	var pt := "⏸" if _playing else "▶"
+	var pt := "멈춤" if _playing else "재생"
 	if _play_btn.text != pt:                    # 검사 · 다른 길이 _playing 을 바로 바꿔도 단추가 따라오게
 		_play_btn.text = pt
 	if not _dot_mode:
@@ -3113,7 +3113,7 @@ func _update_info() -> void:
 			parts.append("%s: 총에 안 붙음 — 동작 그대로(이 동작 잡기 = %s)" % [nm, _grip_name(motion_grip(_offset_equip(), current_motion()))])
 			continue
 		if _prev.get_hand_marker(side) == null:
-			parts.append("%s: 표지 없음 — 동작 그대로%s" % [nm, " · 나무의 ✋ %s → [이 프레임 손 그대로 쥐기]" % nm if kind >= 0 else ""])
+			parts.append("%s: 표지 없음 — 동작 그대로%s" % [nm, " · 나무의 %s → [이 프레임 손 그대로 쥐기]" % nm if kind >= 0 else ""])
 			continue
 		var live: Dictionary = _live[side] if _live is Array and (_live as Array).size() > side else {}
 		var raw := _prev.support_now(side)         # 갱신 밖 = 동작 그대로
@@ -3434,21 +3434,21 @@ func _update_pm_ui() -> void:
 	if _per_motion:
 		var now := ""
 		if on == null:
-			_pm_label.text = "✎ 이 동작만 — 무기(장비)를 고르세요"
+			_pm_label.text = "이 동작만 — 무기(장비)를 고르세요"
 		elif mo == "":
-			_pm_label.text = "✎ 이 동작만 — 오른쪽 표에서 동작을 고르세요"
+			_pm_label.text = "이 동작만 — 오른쪽 표에서 동작을 고르세요"
 		else:
 			now = _offset_text(on, mo) if key == mo else ("아직 따로 없음 — " + _offset_text(on, mo)) if key != "" else "아직 기본 자리와 같음"
-			_pm_label.text = "✎ 이 동작만 — %s · %s%s" % [mo, "%s 자리 " % on.name if hand else "", now]
+			_pm_label.text = "이 동작만 — %s · %s%s" % [mo, "%s 자리 " % on.name if hand else "", now]
 		_scope_note.text = "%s 만 — 2 잡기(지금 %s%s) · 3 %s 자리(%s). 기본 · 다른 동작은 그대로 · 모든 동작 공통(무기 · 소켓 · 받침 · 보간 · 조준 칸 · 조준 표지)은 잠김" % [
 			mo if mo != "" else "고른 동작", _grip_name(motion_grip(e, mo)) if e != null and mo != "" else "-",
 			"(따로)" if motion_grip_own(e, mo) else "(기본대로)", on.name if hand else "무기", now if now != "" else "-"]
-		_pm_fit_btn.text = "🔫 총을 손에 맞추기 — %s 만" % mo if mo != "" else "🔫 총을 손에 맞추기 — 이 동작만"
+		_pm_fit_btn.text = "총을 손에 맞추기 — %s 만" % mo if mo != "" else "총을 손에 맞추기 — 이 동작만"
 		fit_tip = "지금 프레임에서 손이 총의 손 표지에 닿게 이 동작(%s)의 무기 자리를 자동으로 잡는다 — 이 동작에만 저장(되돌리기 한 칸)." % mo
 	else:
-		_scope_note.text = "모든 동작 — 2 잡기 = 기본 잡기(받침) · 3 무기 자리 = 기본 자리%s. 동작마다 따로 하려면 [✎ 이 동작만](오른쪽 표 행 두 번 누름)" % (
+		_scope_note.text = "모든 동작 — 2 잡기 = 기본 잡기(받침) · 3 무기 자리 = 기본 자리%s. 동작마다 따로 하려면 [이 동작만](오른쪽 표 행 두 번 누름)" % (
 			"" if own.is_empty() else " — 따로 자리를 둔 동작 %d개(%s)는 그 차이를 그대로 얹음" % [own.size(), ", ".join(PackedStringArray(own.slice(0, 3))) + (" …" if own.size() > 3 else "")])
-		_pm_fit_btn.text = "🔫 총을 손에 맞추기 — 모든 동작"
+		_pm_fit_btn.text = "총을 손에 맞추기 — 모든 동작"
 		fit_tip = "지금 프레임(%s)에서 손이 총의 손 표지에 닿게 기본 자리(모든 동작)를 자동으로 잡는다(되돌리기 한 칸)." % (mo if mo != "" else "동작 없음")
 	_pm_fit_btn.tooltip_text = fit_tip + "\n손에 든 무기 = 든 손을 축으로 돌려 다른 손이 표지에 닿게(쥔 손에서 안 미끄러짐) · 양손 = 두 표지의 가운데 · 방향을 두 손바닥에." + \
 		"\n두 손이 총에 있는 프레임에서 누르세요(타임라인을 멈추고 끌어 고름). 잘 안 맞으면 기즈모로 다듬기" + \
@@ -3460,11 +3460,11 @@ func _update_pm_ui() -> void:
 		_hand_snap_btn.visible = _sel_hand >= 0 and _weapon_equip() != null
 		if _sel_hand >= 0:
 			var hn := String(DRCharacter3D.SIDE_NAMES[_sel_hand])
-			_hand_snap_btn.text = "✋ %s: 이 프레임 손 그대로 쥐기 — %s" % [hn, ("%s 만" % mo) if _per_motion and mo != "" else "모든 동작"]
+			_hand_snap_btn.text = "%s: 이 프레임 손 그대로 쥐기 — %s" % [hn, ("%s 만" % mo) if _per_motion and mo != "" else "모든 동작"]
 			_hand_snap_btn.tooltip_text = ("지금 멈춘 프레임(타임라인)에서 동작의 %s(IK 전)이 있는 자리 · 회전을 총의 %s 쥐는 자리로 — 그 프레임에서 %s이 동작 그대로 있게.
 " +
 				"모든 동작 = 기본 %s 자리(손 표지) · 이 동작만 = 그 동작만 %s 자리. 손으로 조금씩 고치려면 이 줄을 고른 채 기즈모 W · E") % [hn, hn, hn, hn, hn]
-	_pm_reset_btn.text = "↺ %s 이 동작 기본으로" % on.name if hand else "↺ 이 동작 기본으로"
+	_pm_reset_btn.text = "%s 이 동작 기본으로" % on.name if hand else "이 동작 기본으로"
 	for b in _marker_btns:
 		b.disabled = _per_motion
 		b.tooltip_text = String(b.get_meta(&"tip", "")) + ("\n— 잠김: 적용 범위가 \"이 동작만\". 표지는 모든 동작 공통이라 [모든 동작]에서 고친다" if _per_motion else "")
@@ -3483,7 +3483,7 @@ func _update_pm_ui() -> void:
 		elif key != "":
 			note = "지금 동작(%s)은 따로 %s가 있어 미리보기 = 기본 + %s. 기즈모로 옮기면 기본이 바뀌고 이 차이는 그대로" % [mo, what, _offset_text(on, mo)]
 		if hand and e != null and DRCharacter3D.hand_weight_for(e, _marker_side(on), mo) <= 0.001:
-			note += "%s⚠ %s 에서 %s은 총을 놓음(잡기) — 옮겨도 손은 그대로. 2 잡기에서 %s을 붙이면 보인다" % ["
+			note += "%s주의: %s 에서 %s은 총을 놓음(잡기) — 옮겨도 손은 그대로. 2 잡기에서 %s을 붙이면 보인다" % ["
 " if note != "" else "", mo, on.name, on.name]
 	_xf_note.text = note
 	_xf_note.visible = note != ""

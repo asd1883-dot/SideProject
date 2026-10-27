@@ -18,7 +18,7 @@ class_name DRHubWindow
 ## - 탭 줄 아래: 미리보기 배경(세 탭 미리보기에 같이). 예전 "공통 설정"(캐릭터 프리셋 · 세트 목록 — 2D 굽기용)은 10-16 뺐다 —
 ##   3D 탭은 유닛 프리팹(game/units) · 옷(outfits) · 장비(소켓)를 직접 고른다.
 
-## 애드온 코드(.gd · 셰이더)가 이 창을 만든 뒤 바뀌었다 — 위 줄의 [⟳ 고친 코드 적용]. 플러그인이 창을 새로 만든다(에디터가 아직 옛 코드면 다시 켜기 안내, 10-27)
+## 애드온 코드(.gd · 셰이더)가 이 창을 만든 뒤 바뀌었다 — 위 줄의 [고친 코드 적용]. 플러그인이 창을 새로 만든다(에디터가 아직 옛 코드면 다시 켜기 안내, 10-27)
 signal reload_requested
 
 const META_SECTION := "dot_rigger_hub"
@@ -36,7 +36,7 @@ var _current := ""
 var _bg_pick: ColorPickerButton
 var _preview_bg := Color(0, 0, 0, 0)   # a == 0 = 기본(탭마다 원래 색)
 var _bg_restored := false
-var _made_at := 0.0               # 이 창을 만든 때(유닉스 초) — 그 뒤에 바뀐 애드온 파일이 있으면 [⟳ 고친 코드 적용]
+var _made_at := 0.0               # 이 창을 만든 때(유닉스 초) — 그 뒤에 바뀐 애드온 파일이 있으면 [고친 코드 적용]
 var _reload_btn: Button
 var _code_files := PackedStringArray()
 
@@ -56,7 +56,7 @@ func _init() -> void:
 	_build_ui()
 
 
-## 2 초마다(창이 보일 때) — 이 창을 만든 뒤 바뀐 애드온 파일이 있으면 [⟳ 고친 코드 적용]을 보인다
+## 2 초마다(창이 보일 때) — 이 창을 만든 뒤 바뀐 애드온 파일이 있으면 [고친 코드 적용]을 보인다
 func _watch_code() -> void:
 	if not visible or _reload_btn == null:
 		return
@@ -193,7 +193,7 @@ func _build_ui() -> void:
 	bar.add_child(spacer)
 	# 고친 코드 적용(10-27 사용자 "기능도 좀 체크해줘 적용이 안 되었는데" — 열어 둔 창은 옛 코드 그대로라 새 화면이 안 보였다)
 	_reload_btn = Button.new()
-	_reload_btn.text = "⟳ 고친 코드 적용"
+	_reload_btn.text = "고친 코드 적용"
 	_reload_btn.visible = false
 	_reload_btn.focus_mode = Control.FOCUS_NONE
 	_reload_btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.4))
