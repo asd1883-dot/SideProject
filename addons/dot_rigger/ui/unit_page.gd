@@ -801,11 +801,11 @@ func _equip_walk(xform: bool) -> String:
 				if n.get_parent() is BoneAttachment3D or n.get_parent() is DRGripMount3D:
 					parts.append(str(DRCharacter3D.motion_offsets(n)))      # 장비의 동작별 자리(② 탭, 10-19)
 				if gm != null:
-					parts.append("%s|%s|%s" % [str(gm.blend), str(gm.right_offset), str(gm.left_offset)])
+					parts.append("%s|%s|%s|%s" % [str(gm.blend), str(gm.hold), str(gm.right_offset), str(gm.left_offset)])
 				if n is DRHandTarget3D:
 					parts.append(str((n as DRHandTarget3D).motion_weights) + str((n as DRHandTarget3D).weight))
 			else:
-				parts.append("%s|%s|%s|%s|%s" % [_root.get_path_to(n), (n as BoneAttachment3D).bone_name if n is BoneAttachment3D else ("mount%d" % int(gm.mode) if gm != null else ""),
+				parts.append("%s|%s|%s|%s|%s" % [_root.get_path_to(n), (n as BoneAttachment3D).bone_name if n is BoneAttachment3D else ("mount%d.%d" % [int(gm.mode), int(gm.hold)] if gm != null else ""),
 					n.scene_file_path, str((n as Node3D).visible) if n is Node3D else "", str((n as DRHandTarget3D).side) if n is DRHandTarget3D else ""])
 			stack.append_array(n.get_children())
 	return ";".join(parts)
@@ -826,8 +826,7 @@ func _equip_summary() -> String:
 						marks.append(String(DRCharacter3D.SIDE_NAMES[side]))
 				var po := DRCharacter3D.motion_offsets(c).size()
 				items.append(String(c.name) + (" · %s 표지" % " · ".join(marks) if not marks.is_empty() else "") + (" · 동작별 자리 %d" % po if po > 0 else ""))
-		var where := (s as BoneAttachment3D).bone_name if s is BoneAttachment3D else \
-			("두 손 사이" if (s as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS else "땅 고정")
+		var where := (s as BoneAttachment3D).bone_name if s is BoneAttachment3D else DREquipPage._mount_text(s as DRGripMount3D)
 		lines.append("%s(%s) → %s" % [s.name, where, ", ".join(items) if not items.is_empty() else "(비어 있음)"])
 	return "\n".join(lines) if not lines.is_empty() else "(없음 — 맨손)"
 

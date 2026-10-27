@@ -1136,8 +1136,8 @@ func refresh_equipment() -> void:
 				if mk == null:
 					continue
 				marked = true
-				if abone != String(HAND_BONES[side]) and found[side] == null:
-					found[side] = [mk, a]      # 받침이 그 손이면(무기가 그 손을 따라감) IK 안 함
+				if anchor_grips(a, side) and found[side] == null:
+					found[side] = [mk, a]      # 받침이 그 손 소켓(무기가 그 손을 따라감) · 다른 손만 붙는 한 손 받침대면 IK 안 함
 			if _sock_weapon == null and marked:
 				_sock_weapon = e
 			if hand_equip == null and abone == WEAPON_BONE:
@@ -1286,7 +1286,7 @@ func sync_from(src: DRCharacter3D) -> void:
 				(pn as DRHandTarget3D).motion_weights = (n as DRHandTarget3D).motion_weights.duplicate()
 				(pn as DRHandTarget3D).weight = (n as DRHandTarget3D).weight
 			if pn is DRGripMount3D and n is DRGripMount3D:
-				for k in ["blend", "right_offset", "left_offset"]:
+				for k in ["blend", "hold", "right_offset", "left_offset"]:
 					pn.set(k, n.get(k))
 	for k in AIM_PROPS + HIT_PROPS:            # 조준 · 피격 칸(유닛 루트)
 		set(k, src.get(k))
@@ -1767,9 +1767,10 @@ func _anchor_at(anim: Animation, tracks: Dictionary, t: float, anchor: Node, mot
 	var l := _fk(anim, tracks, bl, t, memo) * m.left_offset
 	var hl: HandIK = _hands[0]
 	var hr: HandIK = _hands[1]
-	var wl := m.blend * (_hand_weight(0, motion) if hl != null and hl.anchor == m else 0.0)
-	var wr := (1.0 - m.blend) * (_hand_weight(1, motion) if hr != null and hr.anchor == m else 0.0)
-	return r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else m.blend)
+	var bw := m.eff_blend()
+	var wl := bw * (_hand_weight(0, motion) if hl != null and hl.anchor == m else 0.0)
+	var wr := (1.0 - bw) * (_hand_weight(1, motion) if hr != null and hr.anchor == m else 0.0)
+	return r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else bw)
 
 
 ## 동작 파일에서 바로 그 시점의 뼈 자세(뼈대 공간). 트랙이 없는 뼈 · 성분은 레스트 — memo = 이번 시점에 계산한 뼈
@@ -2064,6 +2065,16 @@ static func find_hand_marker(e: Node, side: int) -> Node3D:
 	return by_name
 
 
+## 받침 a 아래 장비를 그 손(0 = 왼손 · 1 = 오른손)이 표지(IK)로 잡나 — 손 뼈 소켓이면 그 손은 장비를 들고(장비가 그 손을 따라가므로 IK 안 함),
+## 한 손 받침대(10-27)는 그 손만, 두 손 사이 · 고정 받침대 · 손이 아닌 뼈 소켓은 두 손
+static func anchor_grips(a: Node, side: int) -> bool:
+	if a is BoneAttachment3D:
+		return (a as BoneAttachment3D).bone_name != String(HAND_BONES[side])
+	if a is DRGripMount3D:
+		return (a as DRGripMount3D).grips(side)
+	return true
+
+
 ## 왼손 표지(예전 이름 — find_hand_marker(e, 0))
 static func find_support(e: Node) -> Node3D:
 	return find_hand_marker(e, 0)
@@ -2210,9 +2221,10 @@ func _solve_mounts(sk: Skeleton3D) -> void:
 			continue
 		var r := sg * sk.get_bone_global_pose(br) * m.right_offset
 		var l := sg * sk.get_bone_global_pose(bl) * m.left_offset
-		var wr := (1.0 - m.blend) * _holding(1, m)
-		var wl := m.blend * _holding(0, m)
-		var mt := r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else m.blend)
+		var bw := m.eff_blend()
+		var wr := (1.0 - bw) * _holding(1, m)
+		var wl := bw * _holding(0, m)
+		var mt := r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else bw)
 		if _aim_arm_on and _sock_weapon != null and _sock_weapon.get_parent() == m and _muzzle.size() > 2:
 			# 조준 팔 몫(10-21) — 견착점 축으로 받침대를 돌린다(두 손은 무기 표지 IK 로 따라감)
 			var sb := sg.basis.orthonormalized()
@@ -2307,7 +2319,8 @@ func _editor_follow(delta: float) -> void:
 func _socket_sig() -> String:
 	var parts := PackedStringArray()
 	for a in find_anchors(self, _model):
-		parts.append("%s>%s" % [a.name, (a as BoneAttachment3D).bone_name if a is BoneAttachment3D else "mount%d" % int((a as DRGripMount3D).mode)])
+		parts.append("%s>%s" % [a.name, (a as BoneAttachment3D).bone_name if a is BoneAttachment3D else
+			"mount%d.%d" % [int((a as DRGripMount3D).mode), int((a as DRGripMount3D).hold)]])
 		for c in a.get_children():
 			if c is Node3D:
 				var ml := find_hand_marker(c, 0)

@@ -236,23 +236,23 @@ func _build_ui() -> void:
 	_btn(srow, "+ 소켓", "고른 뼈에 소켓(BoneAttachment3D)을 더한다 — 유닛 씬에 노드로 들어간다", func() -> void:
 		add_socket(_sock_name.text, String(_bone_ob.get_item_metadata(_bone_ob.selected)) if _bone_ob.selected >= 0 else ""))
 
-	# 2 잡기 — 고정할 곳(10-16 사용자: "오른손 · 왼손 · 양손 — 조인트 느낌, 어느 부분(소켓)을 고정할지")
-	_section(left, "2", "잡기", "무기를 어디에 붙이나 — 나머지 손은 총의 손 표지를 따라감(IK). 다른 잡기에 갔다 와도 그때 자리 그대로")
+	# 2 잡기 — 총에 붙을 손(10-16 사용자: "오른손 · 왼손 · 양손 — 조인트 느낌" · 10-27 "오른손이면 총기를 움직일 때 오른손이 붙여져 있는 상태로")
+	_section(left, "2", "잡기", "총에 붙을 손 — 고른 손은 총의 손 표지를 쥐고(IK) 총을 옮기면 같이 따라옴, 안 고른 손은 동작 그대로. 다른 잡기에 갔다 와도 그때 자리 그대로")
 	var grow := HBoxContainer.new()
 	left.add_child(grow)
 	var gg := ButtonGroup.new()
-	for g in [[0, "오른손", "무기가 오른손을 따라가고 왼손이 무기를 따라감(IK) — 소총 · kar98k(지금 기본형 군인)"],
-			[1, "왼손", "무기가 왼손을 따라가고 오른손이 무기를 따라감(IK)"],
-			[2, "양손", "무기가 두 손 사이(아래 보간)를 따라가고 두 손이 무기 표지를 따라감(IK) — mp40 처럼 두 손으로 드는 무기"],
-			[3, "고정", "무기가 유닛(땅)에 고정되고 두 손이 무기 표지를 따라감(IK) — 라페테(삼각대) 위 MG42 · 거치 무기"]]:
+	for g in [[0, "오른손", "오른손만 총에 붙음 — 총이 오른손 동작을 따라가고, 총을 옮기면 오른손이 같이 따라옴(IK). 왼손은 동작 그대로 — 권총처럼 한 손으로 드는 장비"],
+			[1, "왼손", "왼손만 총에 붙음 — 총이 왼손 동작을 따라가고, 총을 옮기면 왼손이 같이 따라옴(IK). 오른손은 동작 그대로"],
+			[2, "양손", "두 손이 다 총에 붙음 — 총이 두 손 사이(아래 보간)를 따라가고, 총을 옮기면 두 손이 같이 따라옴(IK) — 소총 · mp40 처럼 두 손으로 드는 무기"],
+			[3, "고정", "총이 유닛(땅)에 고정 — 두 손이 총 표지를 쥠(IK). 받침대를 옮기면 총과 두 손이 같이 — 라페테(삼각대) 위 MG42 · 거치 무기"]]:
 		var b := Button.new()
 		b.text = String(g[1])
 		b.toggle_mode = true
 		b.button_group = gg
 		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.tooltip_text = String(g[2]) + "\n전에 쓰던 잡기로 돌아가면 그때 자리 그대로. 처음 가는 잡기는 지금 보이는 자리 그대로 받침만 바꾸고(두 손이 총에 있는 프레임에서 고르세요), " + \
-			"따라갈 손의 표지가 없으면 그 손의 지금 자리로 만든다(되돌리기 한 칸)"
+		b.tooltip_text = String(g[2]) + "\n전에 쓰던 잡기로 돌아가면 그때 자리 그대로. 처음 가는 잡기는 지금 보이는 자리 그대로 받침만 바꾸고(붙을 손이 총에 있는 프레임에서 고르세요), " + \
+			"붙을 손의 표지가 없으면 그 손의 지금 자리로 만든다(되돌리기 한 칸)"
 		var kv: int = g[0]
 		b.pressed.connect(func() -> void: set_grip(kv))
 		grow.add_child(b)
@@ -278,7 +278,7 @@ func _build_ui() -> void:
 	_marker_btn(frow, "왼손 표지 ← 지금 손", "지금 프레임의 왼손(동작 그대로) 자리 · 회전을 고른 장비의 왼손 표지로(없으면 만든다) — 모든 동작에 쓰인다.\n" +
 		"두 손이 총에 있는 프레임(예: Rifle_Aiming_Idle)에서 누르세요", func() -> void: make_hand_marker(0))
 	_marker_btn(frow, "오른손 표지 ← 지금 손", "지금 프레임의 오른손(동작 그대로) 자리 · 회전을 고른 장비의 오른손 표지로(없으면 만든다) — 모든 동작에 쓰인다.\n" +
-		"무기가 왼손 · 양손 · 고정일 때 오른손이 이 표지를 따라간다", func() -> void: make_hand_marker(1))
+		"잡기가 오른손 · 양손 · 고정일 때 오른손이 이 표지를 쥔다", func() -> void: make_hand_marker(1))
 
 	# 3 무기 자리 — 적용 범위 하나가 기즈모 · 숫자 칸 · 손에 맞추기 모두를 정한다(10-21 사용자 "전체 동작 · 이 동작만 — 버튼이 단일화")
 	_section(left, "3", "무기 자리", "몸(소켓 · 두 손) 기준 총 위치 · 회전. 적용 범위가 기즈모 · 숫자 칸 · [손에 맞추기] 모두에 걸린다")
@@ -1148,15 +1148,39 @@ func _equip_from(n: Node) -> Node3D:
 	return null
 
 
-## 장비의 잡는 방식 — 0 = 오른손(무기가 오른손을 따라감) · 1 = 왼손 · 2 = 양손(두 손 사이 받침대) · 3 = 고정(땅 받침대) · 4 = 그 밖의 뼈(머리 · 가슴 …) · -1 = 없음
+## 장비의 잡는 방식(= 장비에 붙는 손 — 총을 옮기면 같이 따라옴, 10-27) — 0 = 오른손(한 손 받침대 · 오른손만 붙음) · 1 = 왼손 · 2 = 양손(두 손 사이 받침대) ·
+## 3 = 고정(땅 받침대) · 4 = 뼈 소켓(장비가 그 뼈에 고정 — 손 뼈면 그 손은 장비를 들고 다른 손만 표지를 따라감 · 머리 · 가슴 …) · -1 = 없음
 static func grip_kind(e: Node) -> int:
 	var a := e.get_parent() if e != null else null
 	if a is DRGripMount3D:
-		return 2 if (a as DRGripMount3D).mode == DRGripMount3D.Mode.HANDS else 3
+		return grip_kind_of_mount(a as DRGripMount3D)
 	if a is BoneAttachment3D:
-		var b := (a as BoneAttachment3D).bone_name
-		return 0 if b == DRCharacter3D.HAND_BONES[1] else (1 if b == DRCharacter3D.HAND_BONES[0] else 4)
+		return 4
 	return -1
+
+
+## 받침대의 잡는 방식(0 = 오른손 · 1 = 왼손 · 2 = 양손 · 3 = 고정)
+static func grip_kind_of_mount(gm: DRGripMount3D) -> int:
+	if gm.mode == DRGripMount3D.Mode.FIXED:
+		return 3
+	return [2, 0, 1][int(gm.hold)]
+
+
+## 손 뼈 소켓 쪽(0 = 왼손 · 1 = 오른손) — 장비가 그 손 뼈에 고정(그 손은 장비를 듦). 아니면 -1
+static func socket_hand(e: Node) -> int:
+	var a := e.get_parent() as BoneAttachment3D if e != null else null
+	return DRCharacter3D.HAND_BONES.find(String(a.bone_name)) if a != null else -1
+
+
+## 장비에 그 손이 붙나(표지 IK — 총을 옮기면 따라옴)
+static func hand_grips(e: Node, side: int) -> bool:
+	return e != null and e.get_parent() != null and DRCharacter3D.anchor_grips(e.get_parent(), side)
+
+
+## 손에 맞추기를 할 수 있는 받침 — 한 손 · 양손 받침대 · 손 뼈 소켓(고정 받침대 · 손이 아닌 뼈 소켓은 기즈모로)
+static func can_fit_hands(e: Node) -> bool:
+	var k := grip_kind(e)
+	return (k >= 0 and k <= 2) or socket_hand(e) >= 0
 
 
 # ───────────── 나무 · 칸 ─────────────
@@ -1178,11 +1202,8 @@ func _fill_tree() -> void:
 	for s in _anchors():
 		var si := _tree.create_item(top)
 		if s is DRGripMount3D:
-			var gm := s as DRGripMount3D
-			var hands := gm.mode == DRGripMount3D.Mode.HANDS
-			si.set_text(0, "⚓ %s  (%s)" % [s.name, ("양손 — 두 손 사이 %d%%" % int(round(gm.blend * 100.0))) if hands else "고정 — 유닛(땅) 기준"])
-			si.set_tooltip_text(0, ("받침대(DRGripMount3D) — 두 손 사이(오른손 ↔ 왼손 %d%%)에 고정, 두 손이 표지에 IK" % int(round(gm.blend * 100.0)) if hands
-				else "받침대(DRGripMount3D) — 유닛(땅)에 고정(라페테 MG42 등), 두 손이 표지에 IK") + (" · 부모 유닛에서 옴" if _is_inherited(s) else ""))
+			si.set_text(0, "⚓ %s  (%s)" % [s.name, _mount_text(s as DRGripMount3D)])
+			si.set_tooltip_text(0, "받침대(DRGripMount3D) — %s%s" % [_mount_tip(s as DRGripMount3D), " · 부모 유닛에서 옴" if _is_inherited(s) else ""])
 		else:
 			var bs := s as BoneAttachment3D
 			si.set_text(0, "🦴 %s  (뼈 %s)" % [s.name, bs.bone_name])
@@ -1201,17 +1222,16 @@ func _fill_tree() -> void:
 				"\n동작별 자리: " + ", ".join(PackedStringArray(DRCharacter3D.motion_offsets(e).keys())) if po > 0 else ""])
 			if not e.visible:
 				ei.set_custom_color(0, Color(0.55, 0.57, 0.6))
-			var kind := grip_kind(e)
 			for side in 2:
 				var m := DRCharacter3D.find_hand_marker(e, side)
 				if m == null:
 					continue
 				var side_name := String(DRCharacter3D.SIDE_NAMES[side])
-				var idle := kind == (1 if side == 0 else 0)            # 받침이 그 손 — 무기가 그 손을 따라가므로 이 표지는 안 쓴다
+				var idle := not hand_grips(e, side)                    # 이 손은 장비에 안 붙음(한 손 잡기의 다른 손 · 손 뼈 소켓의 그 손) — 이 표지는 안 쓴다
 				var mi := _tree.create_item(ei)
-				mi.set_text(0, "✋ %s  (%s 표지%s%s)" % [m.name, side_name, "" if m is DRHandTarget3D else " — 비중 없는 Marker3D", " — 쉼: 받침이 " + side_name if idle else ""])
+				mi.set_text(0, "✋ %s  (%s 표지%s%s)" % [m.name, side_name, "" if m is DRHandTarget3D else " — 비중 없는 Marker3D", " — 쉼: " + _rest_why(e, side) if idle else ""])
 				mi.set_metadata(0, _root.get_path_to(m))
-				mi.set_tooltip_text(0, "%s IK 목표: 원점 = 손바닥 자리, 회전 = 그 손 뼈 회전%s" % [side_name, "\n무기가 이 손 소켓에 있어 이 손은 IK 안 함(무기가 따라감)" if idle else ""])
+				mi.set_tooltip_text(0, "%s IK 목표: 원점 = 손바닥 자리, 회전 = 그 손 뼈 회전%s" % [side_name, "\n쉼 — %s(잡기를 바꾸면 씀)" % _rest_why(e, side) if idle else ""])
 				if idle:
 					mi.set_custom_color(0, Color(0.55, 0.57, 0.6))
 			for an in [DRCharacter3D.MUZZLE_NAME, DRCharacter3D.SHOULDER_NAME]:   # 조준 표지(10-21)
@@ -1321,9 +1341,9 @@ func _update_grip_ui() -> void:
 		_grip_btns[i].set_pressed_no_signal(i == kind)
 		_grip_btns[i].disabled = e == null
 	var gm := e.get_parent() as DRGripMount3D if e != null else null
-	var hands := gm != null and gm.mode == DRGripMount3D.Mode.HANDS
-	_blend_sl.get_parent().visible = hands
-	if hands:
+	var both := kind == 2
+	_blend_sl.get_parent().visible = both
+	if both:
 		_blend_sl.set_value_no_signal(gm.blend)
 		_blend_lbl.text = "보간 오른손 %d%% · 왼손 %d%%" % [int(round((1.0 - gm.blend) * 100.0)), int(round(gm.blend * 100.0))]
 	if e == null:
@@ -1332,23 +1352,56 @@ func _update_grip_ui() -> void:
 	var hand_txt := PackedStringArray()
 	for side in 2:
 		var nm := String(DRCharacter3D.SIDE_NAMES[side])
-		if kind == (1 if side == 0 else 0):
-			hand_txt.append("%s = 무기를 듦(받침)" % nm)
-		elif DRCharacter3D.find_hand_marker(e, side) != null:
-			hand_txt.append("%s = 표지를 따라감(IK)" % nm)
+		if hand_grips(e, side) and DRCharacter3D.find_hand_marker(e, side) != null:
+			hand_txt.append("%s = 총에 붙음(총을 옮기면 따라옴)" % nm)
+		elif hand_grips(e, side):
+			hand_txt.append("%s = 표지 없음 — 동작 그대로(아래 [%s 표지 ← 지금 손])" % [nm, nm])
 		else:
-			hand_txt.append("%s = 동작 그대로(표지 없음)" % nm)
+			hand_txt.append("%s = %s" % [nm, _rest_why(e, side)])
 	var where := ""
 	match kind:
 		0, 1:
-			where = "%s 소켓" % GRIP_NAMES[kind]
+			where = "%s 잡기 — 총이 %s 동작을 따라감(%s)" % [GRIP_NAMES[kind], GRIP_NAMES[kind], e.get_parent().name]
 		2:
-			where = "두 손 사이 받침대(%s)" % e.get_parent().name
+			where = "양손 잡기 — 두 손 사이 받침대(%s)" % e.get_parent().name
 		3:
-			where = "유닛(땅) 고정 받침대(%s)" % e.get_parent().name
+			where = "고정 — 유닛(땅) 받침대(%s)" % e.get_parent().name
 		_:
-			where = "뼈 %s 소켓" % ((e.get_parent() as BoneAttachment3D).bone_name if e.get_parent() is BoneAttachment3D else "-")
+			var sh := socket_hand(e)
+			where = ("%s 뼈 소켓(%s) — 옛 방식: 총이 %s 뼈에 고정 · 위 [%s]을 누르면 %s이 총에 붙는 방식으로" % [DRCharacter3D.SIDE_NAMES[sh], e.get_parent().name,
+				DRCharacter3D.SIDE_NAMES[sh], GRIP_NAMES[1 - sh], GRIP_NAMES[1 - sh]]) if sh >= 0 else \
+				"뼈 %s 소켓" % ((e.get_parent() as BoneAttachment3D).bone_name if e.get_parent() is BoneAttachment3D else "-")
 	_grip_info.text = "%s — %s · %s" % [e.name, where, " · ".join(hand_txt)]
+
+
+## 그 손이 장비에 안 붙는 까닭 — 손 뼈 소켓이면 "총을 듦(소켓)", 한 손 잡기의 다른 손이면 "동작 그대로"
+func _rest_why(e: Node, side: int) -> String:
+	if socket_hand(e) == side:
+		return "총이 이 손 뼈에 고정(총을 옮기면 손 안에서 움직임)"
+	return "총에 안 붙음 — 동작 그대로(%s 잡기)" % GRIP_NAMES[grip_kind(e)] if grip_kind(e) >= 0 and grip_kind(e) <= 1 else "총에 안 붙음 — 동작 그대로"
+
+
+## 받침대 한 줄 — "오른손 — 오른손만 붙음" · "양손 — 두 손 사이 50%" · "고정 — 유닛(땅) 기준"
+static func _mount_text(gm: DRGripMount3D) -> String:
+	if gm.mode == DRGripMount3D.Mode.FIXED:
+		return "고정 — 유닛(땅) 기준"
+	match gm.hold:
+		DRGripMount3D.Hold.RIGHT:
+			return "오른손 — 오른손만 붙음"
+		DRGripMount3D.Hold.LEFT:
+			return "왼손 — 왼손만 붙음"
+	return "양손 — 두 손 사이 %d%%" % int(round(gm.blend * 100.0))
+
+
+static func _mount_tip(gm: DRGripMount3D) -> String:
+	if gm.mode == DRGripMount3D.Mode.FIXED:
+		return "유닛(땅)에 고정(라페테 MG42 등), 두 손이 표지에 IK"
+	match gm.hold:
+		DRGripMount3D.Hold.RIGHT:
+			return "오른손 동작을 따라가고 오른손이 표지에 IK(총을 옮기면 오른손이 따라옴) · 왼손은 동작 그대로"
+		DRGripMount3D.Hold.LEFT:
+			return "왼손 동작을 따라가고 왼손이 표지에 IK(총을 옮기면 왼손이 따라옴) · 오른손은 동작 그대로"
+	return "두 손 사이(오른손 ↔ 왼손 %d%%)를 따라가고 두 손이 표지에 IK" % int(round(gm.blend * 100.0))
 
 
 ## 양손 받침대의 보간(0 = 오른손 쪽 · 1 = 왼손 쪽) — 슬라이더
@@ -1357,12 +1410,15 @@ func set_blend(v: float) -> void:
 	if e == null:
 		e = _weapon_equip()
 	var gm := e.get_parent() as DRGripMount3D if e != null else null
-	if gm == null or gm.mode != DRGripMount3D.Mode.HANDS:
+	if gm == null or grip_kind_of_mount(gm) != 2:
 		return
 	_set_props_merged("장비: 양손 보간", [[gm, "blend", clampf(v, 0.0, 1.0)]])
 
 
-## 고른 장비를 어디에 고정할지(조인트 느낌 — 사용자 10-16) — 0 = 오른손 · 1 = 왼손 · 2 = 양손(두 손 사이 받침대) · 3 = 고정(땅 받침대).
+## 고른 장비에 붙을 손(조인트 느낌 — 사용자 10-16) — 0 = 오른손 · 1 = 왼손(한 손 받침대: 총이 그 손 동작을 따라가고 그 손만 표지에 IK —
+## 총을 옮기면 그 손이 따라옴, 다른 손은 동작 그대로) · 2 = 양손(두 손 사이 받침대 · 두 손 IK) · 3 = 고정(땅 받침대 · 두 손 IK).
+## 10-27 사용자: "오른손이면 총기를 움직일 때 오른손이 붙여져 있는 상태로 움직이고 왼손이면 왼손 기준으로 붙여진다는 기획 의도" —
+## 10-16 에는 오른손 = 오른손 뼈 소켓(총이 오른손에 고정 · 왼손이 따라감)으로 반대로 만들었다(02 U49). 손 뼈 소켓은 ① 무기 · 소켓의 옛 방식으로 남는다.
 ## 전에 쓰던 받침으로 돌아가면 그때 자리 그대로(GRIP_MEMORY_META — 받침대 값도 안 덮음). 처음 가는 받침이면 지금 미리보기 자세에서 장비의
 ## 기본 자리(동작별 자리 · 조준 미리보기 뺌)가 보이는 곳 그대로 받침만 바꾸고(유니티 "자리 유지하며 부모 바꾸기"), 따라갈 손의 표지가 없으면
 ## 그 손의 지금 자리로 만든다(손이 튀지 않게). 받침이 없으면 만든다(같은 방식의 빈 받침대는 다시 씀). 되돌리기 한 칸
@@ -1381,46 +1437,42 @@ func set_grip(kind: int) -> void:
 		_set_status("부모 유닛에서 온 장비는 받침을 바꿀 수 없습니다 — 이 유닛에 장비를 넣고(부모 것은 숨김) 바꾸세요")
 		_update_grip_ui()
 		return
-	var follow: Array = [[0], [1], [0, 1], [0, 1]][kind]
+	var follow: Array = [[1], [0], [0, 1], [0, 1]][kind]
 	if _aim_preview:
 		_prev.clear_aim_target(true)                       # 조준으로 돌린 자세를 기본 자리에 굳히지 않게(끝에 다시 켬)
-	var new_marks := {}                                    # 따라갈 손인데 표지가 없으면 — 지금 그 손 자리(장비 기준, 받침을 바꿔도 같다)
+	var new_marks := {}                                    # 붙을 손인데 표지가 없으면 — 지금 그 손 자리(장비 기준, 받침을 바꿔도 같다)
+	var jumps := PackedStringArray()                       # 붙을 손의 표지가 지금 손에서 떨어져 있으면 — 손이 표지로 옮겨 간다(표지는 안 덮음 — 사용자가 정한 쥐는 곳)
 	for side in follow:
-		if DRCharacter3D.find_hand_marker(e, side) == null:
-			var hx: Variant = _hand_xform_on(e, side)
+		var hx: Variant = _hand_xform_on(e, side)
+		var mk := DRCharacter3D.find_hand_marker(e, side)
+		if mk == null:
 			if hx != null:
 				new_marks[side] = hx
+		elif hx != null and not hand_grips(e, side) and _prev_node(mk) is Node3D:
+			var pmk := _prev_node(mk) as Node3D
+			var d := (pe.global_transform * (hx as Transform3D).origin).distance_to(pmk.global_position)
+			var deg := rad_to_deg((pe.global_transform.basis * (hx as Transform3D).basis).orthonormalized().get_rotation_quaternion().angle_to(
+				pmk.global_basis.orthonormalized().get_rotation_quaternion()))
+			if d > 0.01 or deg > 5.0:
+				var nm := String(DRCharacter3D.SIDE_NAMES[side])
+				jumps.append("%s이 %s 표지로 %.1f cm · %.0f° 옮겨감(지금 손 자리로 쥐려면 [%s 표지 ← 지금 손])" % [nm, nm, d * 100.0, deg, nm])
 	_force_pose()
 	var sk := _prev.get_skeleton()
 	var root_inv := _prev.global_transform.affine_inverse()
 	var e_unit := root_inv * pe.global_transform * _prev.get_equip_offset(pe).affine_inverse()   # 기본 자리가 지금 보이는 곳(유닛 기준 — 동작별 자리 뺌)
 	var anchor: Node3D = null
 	var make := false
-	if kind <= 1:
-		var bone := String(DRCharacter3D.HAND_BONES[1 if kind == 0 else 0])
-		for s in _sockets():
-			if s.bone_name == bone:
-				anchor = s
-				break
-		if anchor == null:
-			var s := BoneAttachment3D.new()
-			s.name = _unique_name("오른손" if kind == 0 else "왼손소켓")
-			s.bone_name = bone
-			s.use_external_skeleton = true
-			anchor = s
-			make = true
-	else:
-		var mode := DRGripMount3D.Mode.HANDS if kind == 2 else DRGripMount3D.Mode.FIXED
-		for a in _anchors():
-			if a is DRGripMount3D and (a as DRGripMount3D).mode == mode and _equip_of(a) == null:
-				anchor = a                                 # 비어 있는 같은 방식 받침대는 다시 쓴다
-				break
-		if anchor == null:
-			var m := DRGripMount3D.new()
-			m.name = _unique_name("양손" if kind == 2 else "고정")
-			m.mode = mode
-			anchor = m
-			make = true
+	for a in _anchors():
+		if a is DRGripMount3D and grip_kind_of_mount(a as DRGripMount3D) == kind and _equip_of(a) == null:
+			anchor = a                                     # 비어 있는 같은 방식 받침대는 다시 쓴다
+			break
+	if anchor == null:
+		var m := DRGripMount3D.new()
+		m.name = _unique_name(["오른손잡기", "왼손잡기", "양손", "고정"][kind])
+		m.mode = DRGripMount3D.Mode.FIXED if kind == 3 else DRGripMount3D.Mode.HANDS
+		m.hold = [DRGripMount3D.Hold.RIGHT, DRGripMount3D.Hold.LEFT, DRGripMount3D.Hold.BOTH, DRGripMount3D.Hold.BOTH][kind]
+		anchor = m
+		make = true
 	var mem: Dictionary = (e.get_meta(GRIP_MEMORY_META) as Dictionary).duplicate() if e.has_meta(GRIP_MEMORY_META) and e.get_meta(GRIP_MEMORY_META) is Dictionary else {}
 	var mem_old: Variant = e.get_meta(GRIP_MEMORY_META) if e.has_meta(GRIP_MEMORY_META) else null
 	mem[String(_root.get_path_to(e.get_parent()))] = e.transform           # 떠나는 받침의 자리
@@ -1429,23 +1481,21 @@ func set_grip(kind: int) -> void:
 	var props := {}
 	if back is Transform3D:
 		pass                                               # 전에 쓰던 받침 — 받침 값 · 장비 자리 그대로
-	elif anchor is BoneAttachment3D:
-		a_unit = root_inv * sk.global_transform * sk.get_bone_global_pose(sk.find_bone((anchor as BoneAttachment3D).bone_name))
 	else:
 		a_unit = Transform3D(e_unit.basis.orthonormalized(), e_unit.origin)     # 받침대 = 장비가 지금 있는 자리(배율 뺌) — 장비 로컬엔 배율만
 		props["transform"] = a_unit
-		if kind == 2:                                       # 맞춘 자세: 두 손 쪽 자리가 지금 받침대 자리와 같게
+		if kind <= 2:                                       # 맞춘 자세: 손 쪽 자리가 지금 받침대 자리와 같게(한 손이면 그 손 쪽만 쓴다)
 			var g := _prev.global_transform * a_unit
 			props["right_offset"] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(String(DRCharacter3D.HAND_BONES[1])))).affine_inverse() * g
 			props["left_offset"] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(String(DRCharacter3D.HAND_BONES[0])))).affine_inverse() * g
 	var e_local: Transform3D = back if back is Transform3D else a_unit.affine_inverse() * e_unit
-	var warn := ""                                         # 처음 가는 양손 · 고정을 두 손이 총에 없는 자세에서 맞추면 다른 동작이 다 어긋난다
+	var warn := ""                                         # 처음 가는 받침대를 붙을 손이 총에 없는 자세에서 맞추면 다른 동작이 다 어긋난다
 	var mo := current_motion()
-	if not (back is Transform3D) and kind >= 2 and mo != "":
-		for side in 2:
+	if not (back is Transform3D) and mo != "":
+		for side in follow:
 			var mk := DRCharacter3D.find_hand_marker(e, side)
 			if mk is DRHandTarget3D and (mk as DRHandTarget3D).weight_for(mo) <= 0.001:
-				warn = " — ⚠ 지금 동작 %s 은 %s IK 비중 0(총을 놓는 동작): 두 손이 총에 있는 동작에서 다시 바꾸세요(Ctrl+Z)" % [mo, DRCharacter3D.SIDE_NAMES[side]]
+				warn = " — ⚠ 지금 동작 %s 은 %s IK 비중 0(총을 놓는 동작): 붙을 손이 총에 있는 동작에서 다시 바꾸세요(Ctrl+Z)" % [mo, DRCharacter3D.SIDE_NAMES[side]]
 	_begin("장비: %s 잡기 = %s" % [e.name, GRIP_NAMES[kind]])
 	if make:
 		for k in props.keys():
@@ -1475,9 +1525,10 @@ func set_grip(kind: int) -> void:
 	_select_node(_root.get_path_to(e))
 	if _aim_preview:
 		_apply_aim_preview()
-	_set_status("%s 잡기 = %s%s%s%s%s" % [e.name, GRIP_NAMES[kind], " · 새 받침 %s" % anchor.name if make else "",
+	_set_status("%s 잡기 = %s%s%s%s%s%s" % [e.name, GRIP_NAMES[kind], " · 새 받침 %s" % anchor.name if make else "",
 		" · 전에 쓰던 자리로" if back is Transform3D else " · 지금 자세(%s %d%%)에서 맞춤" % [mo, int(_time_sl.value * 100.0)],
-		" · 새 표지 %s" % ", ".join(new_marks.keys().map(func(s): return String(DRCharacter3D.SIDE_NAMES[s]))) if not new_marks.is_empty() else "", warn])
+		" · 새 표지 %s" % ", ".join(new_marks.keys().map(func(s): return String(DRCharacter3D.SIDE_NAMES[s]))) if not new_marks.is_empty() else "",
+		" · " + " · ".join(jumps) if not jumps.is_empty() else "", warn])
 
 
 ## 루트 아래에서 안 겹치는 이름
@@ -1793,7 +1844,7 @@ func make_hand_marker(side: int) -> Node3D:
 	_end(added)
 	_select_node(_root.get_path_to(cur))
 	_set_status("%s 표지 = %s %d%% 의 %s(동작 그대로)%s" % [nm, current_motion(), int(_time_sl.value * 100.0), nm,
-		" — 지금은 무기가 %s 을 따라가 쉬는 표지(잡기를 바꾸면 씀)" % nm if grip_kind(e) == (1 if side == 0 else 0) else ""])
+		" — 지금은 쉬는 표지: %s(잡기를 바꾸면 씀)" % _rest_why(e, side) if not hand_grips(e, side) else ""])
 	return cur
 
 
@@ -1931,8 +1982,14 @@ func save_hold_default() -> void:
 	if e == null or asset == "":
 		_set_status("모델 옆에 asset.json 이 있는 장비를 고르세요")
 		return
-	if sock == null:
-		_set_status("무기 기본 자리는 소켓(손 · 뼈)에 든 무기만 — 받침대(양손 · 고정) 자리는 유닛 씬에 저장된다")
+	var bone := String(sock.bone_name) if sock != null else ""
+	var local := e.transform
+	var gm := e.get_parent() as DRGripMount3D
+	if sock == null and gm != null and grip_kind(e) <= 1:      # 한 손 잡기(10-27) — 그 손 뼈 기준 자리로(다른 유닛 손 소켓에 넣어도 같은 자리)
+		bone = String(DRCharacter3D.HAND_BONES[1 if grip_kind(e) == 0 else 0])
+		local = (gm.right_offset if grip_kind(e) == 0 else gm.left_offset) * e.transform
+	if bone == "":
+		_set_status("무기 기본 자리는 소켓(손 · 뼈) · 한 손 잡기의 무기만 — 받침대(양손 · 고정) 자리는 유닛 씬에 저장된다")
 		return
 	var mk := DRCharacter3D.find_support(e)
 	var aims := {}                                # 조준 표지(무기 기준 — 10-21)
@@ -1940,7 +1997,7 @@ func save_hold_default() -> void:
 		var am := DRCharacter3D.find_aim_marker(e, an)
 		if am != null:
 			aims[an] = DRCharacter3D.rel_xform(e, am)
-	var ok := DREquipHold.write_hold(asset, sock.bone_name, e.scene_file_path, e.transform, mk.transform if mk != null else null,
+	var ok := DREquipHold.write_hold(asset, bone, e.scene_file_path, local, mk.transform if mk != null else null,
 		(mk as DRHandTarget3D).motion_weights if mk is DRHandTarget3D else {}, DRCharacter3D.motion_offsets(e), aims)
 	if ok and Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().update_file(asset)
@@ -2503,7 +2560,8 @@ func _make_struct_sig() -> String:
 		return ""
 	var parts := PackedStringArray([_root.body_model, _root.outfit_top, _root.outfit_bottom, str(_root.motions.get_instance_id()) if _root.motions != null else "-"])
 	for s in _anchors():
-		parts.append("S%s>%s" % [_root.get_path_to(s), (s as BoneAttachment3D).bone_name if s is BoneAttachment3D else "mount%d" % int((s as DRGripMount3D).mode)])
+		parts.append("S%s>%s" % [_root.get_path_to(s), (s as BoneAttachment3D).bone_name if s is BoneAttachment3D else
+			"mount%d.%d" % [int((s as DRGripMount3D).mode), int((s as DRGripMount3D).hold)]])
 		var stack: Array[Node] = []
 		stack.append_array(s.get_children())
 		while not stack.is_empty():
@@ -2552,11 +2610,11 @@ func _update_info() -> void:
 	var parts := PackedStringArray([current_motion()])
 	for side in 2:
 		var nm := String(DRCharacter3D.SIDE_NAMES[side])
-		if kind == (1 if side == 0 else 0):
-			parts.append("%s: 무기를 듦(받침)" % nm)
+		if w != null and not hand_grips(w, side):
+			parts.append("%s: %s" % [nm, _rest_why(w, side)])
 			continue
 		if _prev.get_hand_marker(side) == null:
-			parts.append("%s: 표지 없음 — 동작 그대로%s" % [nm, " · [지금 자세로 %s 표지]" % nm if kind >= 0 else ""])
+			parts.append("%s: 표지 없음 — 동작 그대로%s" % [nm, " · [%s 표지 ← 지금 손]" % nm if kind >= 0 else ""])
 			continue
 		var live: Dictionary = _live[side] if _live is Array and (_live as Array).size() > side else {}
 		var raw := _prev.support_now(side)         # 갱신 밖 = 동작 그대로
@@ -2816,8 +2874,7 @@ func _update_pm_ui() -> void:
 	var mo := current_motion()
 	var key := DRCharacter3D.offset_key(e, mo) if e != null else ""
 	var own: Array = DRCharacter3D.motion_offsets(e).keys() if e != null else []
-	var kind := grip_kind(e) if e != null else -1
-	var can_fit := e != null and mo != "" and kind >= 0 and kind < 3
+	var can_fit := e != null and mo != "" and can_fit_hands(e)
 	_pm_banner.visible = _per_motion
 	_pm_frame.visible = _per_motion
 	var fit_tip := ""
@@ -2841,7 +2898,7 @@ func _update_pm_ui() -> void:
 		fit_tip = "지금 프레임(%s)에서 손이 총의 손 표지에 닿게 기본 자리(모든 동작)를 자동으로 잡는다(되돌리기 한 칸)." % (mo if mo != "" else "동작 없음")
 	_pm_fit_btn.tooltip_text = fit_tip + "\n손에 든 무기 = 든 손을 축으로 돌려 다른 손이 표지에 닿게(쥔 손에서 안 미끄러짐) · 양손 = 두 표지의 가운데 · 방향을 두 손바닥에." + \
 		"\n두 손이 총에 있는 프레임에서 누르세요(타임라인을 멈추고 끌어 고름). 잘 안 맞으면 기즈모로 다듬기" + \
-		("\n— 고정(땅) 받침대 · 손 아닌 뼈 소켓의 장비는 자동이 없음(기즈모로)" if e != null and not can_fit and kind >= 3 else "")
+		("\n— 고정(땅) 받침대 · 손 아닌 뼈 소켓의 장비는 자동이 없음(기즈모로)" if e != null and not can_fit and not can_fit_hands(e) else "")
 	_pm_fit_btn.disabled = not can_fit
 	_pm_reset_btn.visible = _per_motion
 	_pm_reset_btn.disabled = e == null or key != mo
@@ -2933,11 +2990,10 @@ func fit_motion_offset(to_base := false) -> Dictionary:
 	if e == null or pe == null or _prev == null or mo == "":
 		_set_status("무기와 동작을 고르세요")
 		return {}
-	var kind := grip_kind(e)
-	if kind < 0 or kind >= 3:
+	if not can_fit_hands(e):
 		_set_status("%s — 고정(땅) 받침대 · 손이 아닌 뼈 소켓의 장비는 자동 맞추기가 없습니다(기즈모로)" % e.name)
 		return {}
-	var hold := 1 if kind == 0 else (0 if kind == 1 else -1)          # 무기를 든 손(받침인 손) — 양손이면 없음
+	var hold := socket_hand(e)                                      # 무기를 든 손(손 뼈 소켓 — 옛 방식) — 받침대면 없음
 	var t := _time_sl.value
 	_force_pose()
 	var sk := _prev.get_skeleton()
@@ -2950,7 +3006,7 @@ func fit_motion_offset(to_base := false) -> Dictionary:
 	var follow: Array[int] = []
 	var marks: Array[Vector3] = []
 	for side in 2:
-		if side == hold or palms[side] == null:
+		if side == hold or palms[side] == null or not hand_grips(e, side):
 			continue
 		var mk := DRCharacter3D.find_hand_marker(pe, side)
 		if mk == null:
@@ -3066,7 +3122,7 @@ func _on_mt_mouse(_pos: Vector2, button: int) -> void:
 	_mt_menu.clear()
 	_mt_menu.add_item("이 동작만 고치기", 0)
 	_mt_menu.add_item("손에 맞추기 — 이 동작만", 1)
-	_mt_menu.set_item_disabled(1, grip_kind(e) < 0 or grip_kind(e) >= 3)
+	_mt_menu.set_item_disabled(1, not can_fit_hands(e))
 	_mt_menu.add_separator()
 	_mt_menu.add_item("무기 자리 복사", 2)
 	_mt_menu.add_item("무기 자리 붙여넣기", 3)
