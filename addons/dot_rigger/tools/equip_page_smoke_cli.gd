@@ -18,6 +18,8 @@ extends SceneTree
 ##     동작 표 조준 칸(기본 · 따로 · 합성 = 상체) · 비중 절반 · 기본으로 · 끔(잠김) · 미리보기 끔
 ## [11] 화면 정리(10-21 사용자 "직관적인 UI/UX — 전체 동작 · 이 동작만 버튼 단일화 · 맞추기는 뭘 맞추나 · 멈춤 재생 · 스크롤바는 왜"): 적용 범위 스위치는 한 곳 ·
 ##     [손에 맞추기] = 범위대로(모든 동작 = 기본 자리 · 이 동작만 = 그 동작 자리) · 표지 잠금(이 동작만) · 타임라인(동작 이름 · 초 · 끌면 멈춤 · Space) · 상태 줄은 가운데
+## [12] 동작마다 잡기(10-27): 적용 범위 스위치 = 맨 위 · 이 동작만이면 2 잡기 = 그 동작의 잡기(받침 그대로) · 그 동작 오른손만 IK · 기즈모로 그 손만 따라옴 ·
+##     공통 칸(고정 · 무기 · 소켓 · 보간 · 조준) 잠금 · 표 잡기 칸 · 게임 길(동작마다 받침대가 붙은 손 쪽 · 섞기 튐 없음) · 기본으로 · 기본 잡기 따라감 · 옛 소켓
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -242,7 +244,7 @@ func _long_axis(giz: Control) -> int:
 func _hands_ik(ch: DRCharacter3D) -> float:
 	var worst := 0.0
 	for side in 2:
-		if ch.get_arm_ik(side) != null:
+		if ch.get_arm_ik(side) != null and ch.get_ik_weight(side) > 0.001:     # 총에 붙은 손만(한 손 받침대의 다른 손은 비중 0 IK, 10-27)
 			worst = maxf(worst, float(ch.support_report(side).get("ik", 1.0)))
 	return worst
 
@@ -292,6 +294,150 @@ func _buttons_in(n: Node) -> Array[Button]:
 	for c in n.find_children("*", "Button", true, false):
 		out.append(c as Button)
 	return out
+
+
+## [12] 동작마다 잡기(10-27) — 사용자: "각 동작마다 어느 손이 기준 잡기 기준인가 이런 것도 조작하고 싶은데 전역으로 설정됨. 이 동작만 버튼 눌러도 …
+## ux 적으로 일관적이지 않은 건가". 적용 범위 스위치 = 맨 위 하나 · 이 동작만이면 2 잡기 = 그 동작의 잡기 · 표 잡기 칸 · 공통 칸 잠금 · 게임 길 · 옛 소켓
+func _motion_grip_checks(page: DREquipPage) -> void:
+	print("[12] 동작마다 잡기 — 맨 위 적용 범위 · 이 동작만 잡기 · 표 잡기 칸 · 공통 칸 잠금 · 게임 길")
+	page.select_unit(BASE)
+	await _frames(3)
+	page._playing = false
+	page.set_per_motion(false)
+	var w := page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	var scope_row := page._pm_btns[0].get_parent()
+	_check(scope_row.get_parent() == page._tree.get_parent() and scope_row.get_index() < page._tree.get_index(),
+		"적용 범위 스위치 = 왼쪽 맨 위(1 무기 · 소켓보다 위 — 2 잡기 · 3 무기 자리 둘 다에 걸림)")
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	page.set_grip(2)                                   # 기본 잡기 = 양손
+	await _frames(1)
+	w = page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.play_motion("Firing_Rifle")
+	page._seek(0.4)
+	page.set_per_motion(true)
+	await _frames(1)
+	page._grip_btns[0].pressed.emit()                  # 이 동작만 → [오른손]
+	await _frames(2)
+	_check(DREquipPage.grip_kind(w) == 2 and DREquipPage.motion_grip(w, "Firing_Rifle") == 0 and DREquipPage.motion_grip_own(w, "Firing_Rifle")
+		and DREquipPage.motion_grip(w, "Rifle_Aiming_Idle") == 2 and not DREquipPage.motion_grip_own(w, "Rifle_Aiming_Idle")
+		and page._grip_btns[0].button_pressed and page._grip_reset_btn.get_parent().visible and not page._grip_reset_btn.disabled,
+		"이 동작만 + [오른손] → Firing_Rifle 만 오른손 잡기 · 받침 = 양손 그대로 · Rifle_Aiming_Idle = 기본(양손) · 단추 눌림 · [기본 잡기로] 켜짐「%s」" % page._grip_info.text.left(50))
+	page.play_motion("Firing_Rifle")
+	page._seek(0.4)
+	await _frames(1)
+	_check(page._prev.get_ik_weight(1) > 0.99 and page._prev.get_ik_weight(0) <= 0.001,
+		"미리보기 Firing_Rifle: 오른손 비중 %.2f · 왼손 %.2f(동작 그대로)" % [page._prev.get_ik_weight(1), page._prev.get_ik_weight(0)])
+	page.set_tool(Giz.Tool.MOVE)
+	page._select_node(page._root.get_path_to(w))
+	await _frames(2)
+	var hp0 := _hand_pos(page._prev)
+	var gp0 := (page._prev_node(w) as Node3D).global_position
+	_drag_long(page._giz, 25.0)
+	await _frames(1)
+	var hp1 := _hand_pos(page._prev)
+	var gmv := (page._prev_node(w) as Node3D).global_position.distance_to(gp0)
+	_check(gmv > 0.01 and absf(hp1[1].distance_to(hp0[1]) - gmv) < 0.003 and hp1[0].distance_to(hp0[0]) < 0.001 and DRCharacter3D.offset_key(w, "Firing_Rifle") == "Firing_Rifle",
+		"Firing_Rifle 만: 기즈모로 총 %.1f cm → 오른손 %.1f cm 따라옴 · 왼손 %.2f mm · 그 동작 자리로 저장" % [gmv * 100.0, hp1[1].distance_to(hp0[1]) * 100.0, hp1[0].distance_to(hp0[0]) * 1000.0])
+	page.reset_motion_offset("Firing_Rifle")
+	var locked: bool = page._grip_btns[3].disabled and page._aim_chk.disabled and page._common_ctrls.size() >= 4 \
+		and page._common_ctrls.all(func(c: Control) -> bool: return (c as BaseButton).disabled if c is BaseButton else not (c as Slider).editable)
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	await _frames(1)
+	_check(page._prev.get_ik_weight(0) > 0.99 and page._prev.get_ik_weight(1) > 0.99 and page._grip_btns[2].button_pressed and not page._grip_btns[2].self_modulate.is_equal_approx(Color(1.0, 0.68, 0.32)),
+		"다른 동작 Rifle_Aiming_Idle = 기본(양손): 두 손 비중 1 · [양손] 눌림(흰 — 따로 안 정함)")
+	page.set_per_motion(false)
+	await _frames(1)
+	var unlocked: bool = not page._grip_btns[3].disabled and not page._aim_chk.disabled \
+		and page._common_ctrls.all(func(c: Control) -> bool: return not (c as BaseButton).disabled if c is BaseButton else (c as Slider).editable)
+	_check(locked and unlocked and page._grip_btns[2].button_pressed, "이 동작만이면 [고정] · 무기 넣기 · 빼기 · + 소켓 · 보간 · 조준 켜기 잠김(%d칸) → 모든 동작이면 풀림 · 단추 = 기본 잡기" % page._common_ctrls.size())
+	# 표 잡기 칸
+	page._fill_motion_table()
+	var row := _mt_row(page, "Firing_Rifle")
+	var row2 := _mt_row(page, "Rifle_Aiming_Idle")
+	_check(row != null and row.get_cell_mode(2) == TreeItem.CELL_MODE_RANGE and int(row.get_range(2)) == 1 and row.get_text(2).begins_with("기본(양손)")
+		and row2 != null and int(row2.get_range(2)) == 0, "동작 표 잡기 칸: Firing_Rifle = 오른손(따로) · Rifle_Aiming_Idle = 기본(양손)「%s」" % (row.get_text(2) if row != null else "-"))
+	page.set_motion_grip("Walk_With_Rifle", 1)          # 표 칸 고치기 신호와 같은 길
+	await _frames(1)
+	var row3 := _mt_row(page, "Walk_With_Rifle")
+	_check(DREquipPage.motion_grip(w, "Walk_With_Rifle") == 1 and row3 != null and int(row3.get_range(2)) == 2, "표 잡기 칸 → Walk_With_Rifle 왼손(칸 = 왼손)")
+	# 게임 길 — 동작마다 다른 손을 따라감
+	var pk := PackedScene.new()
+	pk.pack(page._root)
+	var g := pk.instantiate() as DRCharacter3D
+	root.add_child(g)
+	await _frames(2)
+	g.get_animation_player().callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	g.play_motion("Firing_Rifle", 0.0)
+	for i in 4:
+		g.step_motion(1.0 / 12.0)
+		await process_frame
+	var gm := g.get_weapon_mount() as DRGripMount3D
+	var sk := g.get_skeleton()
+	g.support_report(1)
+	var rpos := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightHand")) * gm.right_offset).origin
+	var ok_r := g.get_ik_weight(1) > 0.99 and g.get_ik_weight(0) <= 0.001 and gm.global_position.distance_to(rpos) < 0.001
+	g.play_motion("Walk_With_Rifle", 0.2)
+	var jump := 0.0
+	var p_start := gm.global_position
+	var last := p_start
+	for i in 15:                                   # 0.2 초 섞기를 1/60 초씩(조금 넘게) — 한 프레임에 섞는 길 전체를 건너뛰면 튐
+		g.step_motion(1.0 / 60.0)
+		await process_frame
+		jump = maxf(jump, gm.global_position.distance_to(last))
+		last = gm.global_position
+	var travel := gm.global_position.distance_to(p_start)
+	g.support_report(0)
+	var lpos := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("LeftHand")) * gm.left_offset).origin
+	_check(ok_r and g.get_ik_weight(0) > 0.99 and g.get_ik_weight(1) <= 0.001 and gm.global_position.distance_to(lpos) < 0.001 and jump < travel * 0.35,
+		"게임 길: Firing_Rifle = 오른손만 · 받침대 오른손 쪽 → Walk_With_Rifle 0.2 초 섞기 → 왼손만 · 받침대 왼손 쪽(%.2f mm) · 섞는 동안 한 프레임 최대 %.1f cm(전체 %.1f cm — 튐 없음)" % [
+			gm.global_position.distance_to(lpos) * 1000.0, jump * 100.0, travel * 100.0])
+	g.queue_free()
+	# 기본으로 되돌리기 · 기본 잡기를 바꾸면 따로 안 정한 동작은 따라감
+	page.set_per_motion(true)
+	page.play_motion("Firing_Rifle")
+	await _frames(1)
+	page._grip_reset_btn.pressed.emit()
+	await _frames(1)
+	_check(DREquipPage.motion_grip(w, "Firing_Rifle") == 2 and not DREquipPage.motion_grip_own(w, "Firing_Rifle"), "[↺ 기본 잡기로] → Firing_Rifle = 기본(양손) · 따로 정한 것 지움")
+	page.set_per_motion(false)
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	page.set_grip(0)
+	await _frames(1)
+	w = page._weapon_equip()
+	_check(DREquipPage.motion_grip(w, "Firing_Rifle") == 0 and DREquipPage.motion_grip(w, "Walk_With_Rifle") == 1,
+		"기본 잡기 → 오른손: 따로 안 정한 Firing_Rifle 도 오른손 · 따로 정한 Walk_With_Rifle 은 왼손 그대로")
+	page._select_node(page._root.get_path_to(w))
+	page.set_per_motion(true)
+	page.play_motion("Firing_Rifle")
+	page._seek(0.4)
+	await _frames(1)
+	page._grip_btns[2].pressed.emit()
+	await _frames(2)
+	_check(DREquipPage.motion_grip(w, "Firing_Rifle") == 2 and page._prev.get_ik_weight(0) > 0.99 and page._prev.get_ik_weight(1) > 0.99,
+		"기본 오른손(한 손 받침대)에서 Firing_Rifle 만 [양손] → 두 손 다 붙음")
+	page.set_per_motion(false)
+	# 옛 오른손 뼈 소켓 — 오른손은 늘 총을 듦
+	page.select_unit(BASE)
+	await _frames(3)
+	w = page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.set_per_motion(true)
+	page.play_motion("Firing_Rifle")
+	await _frames(1)
+	var left_dis := page._grip_btns[1].disabled
+	page.set_motion_grip("Firing_Rifle", 1)
+	var rejected := DREquipPage.motion_grip(w, "Firing_Rifle") == 2 and String(page._status.text).contains("옛 방식")
+	page._grip_btns[0].pressed.emit()
+	await _frames(2)
+	_check(left_dis and rejected and DREquipPage.motion_grip(w, "Firing_Rifle") == 0 and page._prev.get_ik_weight(0) <= 0.001,
+		"옛 오른손 뼈 소켓: 이 동작만 [왼손] 잠김(고르면 안내) · [오른손] = 그 동작에서 왼손 놓음")
+	page.set_per_motion(false)
+	page._playing = true
 
 
 ## [11] 화면 정리(10-21)
@@ -437,16 +583,17 @@ func _grip_memory_checks(page: DREquipPage) -> void:
 	_check(v0.origin.distance_to(v2.origin) < 0.002 and rad_to_deg(v0.basis.get_rotation_quaternion().angle_to(v2.basis.get_rotation_quaternion())) < 0.5
 		and (DRCharacter3D.motion_offsets(w).get("Rifle_Aiming_Idle") as Transform3D).is_equal_approx(off),
 		"이어서 처음 가는 오른손(한 손 받침대)도 보이는 자리 그대로(%.1f mm) · 동작별 자리 그대로" % (v0.origin.distance_to(v2.origin) * 1000.0))
-	# 총을 놓는 동작(왼손 IK 비중 0)에서 처음 양손 → 경고
-	page._mt_side = 0
-	page.set_motion_weight("Idle_Hit", 0.0)
+	# 총을 놓는 동작(Idle_Hit 왼손 비중 0 — 처음 씬은 왼손이 기본으로 붙는 소켓이라 0 이 따로 적힘)에서 처음 양손 → 경고
+	page.select_unit(BASE)
+	await _frames(3)
+	w = page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.set_motion_weight("Idle_Hit", 0.0, 0)
 	page.play_motion("Idle_Hit")
 	page._seek(0.5)
 	page.set_grip(2)
 	await _frames(1)
-	_check(String(page._status.text).contains("IK 비중 0"), "총 놓는 동작(Idle_Hit 왼손 비중 0)에서 처음 양손 → 경고: %s" % page._status.text.right(70))
-	page.set_grip(0)
-	await _frames(1)
+	_check(String(page._status.text).contains("총을 놓는 동작"), "총 놓는 동작(Idle_Hit 왼손 비중 0)에서 처음 양손 → 경고: %s" % page._status.text.right(70))
 
 
 ## [8] 잡기(10-16 확장 · 10-27 뜻 바로잡음) — 총에 붙을 손: 오른손 · 왼손(한 손 받침대) · 양손(두 손 사이 받침대) · 고정(땅 받침대). 사용자: "오른손 · 왼손 · 양손 —
@@ -482,7 +629,7 @@ func _grip_checks(page: DREquipPage) -> void:
 		var ok_ik := true
 		var iks := PackedStringArray()
 		for side in 2:
-			var has := pv.get_arm_ik(side) != null
+			var has := pv.get_arm_ik(side) != null and pv.get_ik_weight(side) > 0.001
 			if has != follow.has(side):
 				ok_ik = false
 			if has:
@@ -608,9 +755,9 @@ func _grip_checks(page: DREquipPage) -> void:
 		rworst = maxf(rworst, float(g.support_report(1).get("ik", 1.0)))
 		mp3.append(gm3.global_position)
 	var ar := g.aim_report()
-	_check(gm3 is DRGripMount3D and DREquipPage.grip_kind(g.get_weapon_node()) == 0 and g.get_arm_ik(1) != null and g.get_arm_ik(0) == null and rworst < 0.01
+	_check(gm3 is DRGripMount3D and DREquipPage.grip_kind(g.get_weapon_node()) == 0 and g.get_arm_ik(1) != null and g.get_ik_weight(1) > 0.99 and g.get_ik_weight(0) <= 0.001 and rworst < 0.01
 		and mp3[0].distance_to(mp3[5]) > 0.002 and not ar.is_empty(),
-		"게임 길(오른손): 받침대가 오른손 동작을 따라 움직이고(%.1f cm) 오른손 IK 뒤 최대 %.2f cm · 왼손 IK 없음 · 조준 %s" % [mp3[0].distance_to(mp3[5]) * 100.0, rworst * 100.0,
+		"게임 길(오른손): 받침대가 오른손 동작을 따라 움직이고(%.1f cm) 오른손 IK 뒤 최대 %.2f cm · 왼손 비중 0(동작 그대로) · 조준 %s" % [mp3[0].distance_to(mp3[5]) * 100.0, rworst * 100.0,
 		"%+.0f°" % float(ar.get("pitch", 0.0)) if not ar.is_empty() else "없음"])
 	g.queue_free()
 	page._playing = true
@@ -1133,6 +1280,7 @@ func _run() -> void:
 	await _offset_checks(page)
 	await _aim_checks(page)
 	await _ui_checks(page)
+	await _motion_grip_checks(page)
 
 	# 치우기
 	page._drop_root()

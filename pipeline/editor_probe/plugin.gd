@@ -220,7 +220,7 @@ func _go() -> void:
 		eqp._seek(0.2)
 		eqp.set_grip(0)
 		await _frames(30)
-		var one: bool = DREquipPage.grip_kind(ew) == 0 and ew.get_parent().owner == er and er.get_arm_ik(1) != null and er.get_arm_ik(0) == null
+		var one: bool = DREquipPage.grip_kind(ew) == 0 and ew.get_parent().owner == er and er.get_arm_ik(1) != null 			and eqp._prev.get_ik_weight(1) > 0.99 and eqp._prev.get_ik_weight(0) <= 0.001
 		eqp.play_motion("Rifle_Idle")
 		eqp._seek(0.5)
 		eqp.set_grip(2)
@@ -232,6 +232,22 @@ func _go() -> void:
 		var mem1: Variant = ew.get_meta(DREquipPage.GRIP_MEMORY_META) if ew.has_meta(DREquipPage.GRIP_MEMORY_META) else null
 		_expect(one and kept and ew.get_parent() == parent0 and ew.transform.is_equal_approx(x_sock) and str(mem1) == str(mem0),
 			"② 잡기 기억 · 한 손: 양손 → 오른손(한 손 받침대 · 오른손만 IK %s) → 양손 = 처음 양손 자리 그대로(%s) · Ctrl+Z 세 번 = 처음 소켓 · 메타도 처음대로" % [one, kept])
+		# 동작마다 잡기(10-27): 이 동작만 → [오른손] → 열린 씬 왼손 표지 motion_weights(그 동작만 0) · 미리보기 왼손 놓음 → 탭 창 Ctrl+Z → 처음대로
+		eqp._select_node(er.get_path_to(ew))
+		eqp.play_motion("Firing_Rifle")
+		eqp._seek(0.4)
+		eqp.set_per_motion(true)
+		var lmk := DRCharacter3D.find_hand_marker(ew, 0) as DRHandTarget3D
+		var lw0: Dictionary = lmk.motion_weights.duplicate() if lmk != null else {}
+		eqp._grip_btns[0].pressed.emit()
+		await _frames(20)
+		var mg_set: bool = lmk != null and float(lmk.motion_weights.get("Firing_Rifle", -1.0)) == 0.0 and eqp._prev.get_ik_weight(0) <= 0.001 \
+			and DREquipPage.motion_grip(ew, "Firing_Rifle") == 0 and DREquipPage.motion_grip(ew, "Rifle_Aiming_Idle") == 2
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(20)
+		var mg_undo: bool = lmk != null and str(lmk.motion_weights) == str(lw0) and DREquipPage.motion_grip(ew, "Firing_Rifle") == 2
+		eqp.set_per_motion(false)
+		_expect(mg_set and mg_undo, "② 동작마다 잡기: 이 동작만 → [오른손] → 열린 씬 왼손 표지 Firing_Rifle 0 · 미리보기 왼손 놓음 · 다른 동작 그대로 → Ctrl+Z 처음대로 (%s %s)" % [mg_set, mg_undo])
 		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
 		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
 		eqp._select_node(er.get_path_to(ew))
