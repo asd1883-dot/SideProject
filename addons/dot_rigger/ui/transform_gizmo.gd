@@ -558,7 +558,13 @@ func cancel_drag() -> void:
 # ---------------------------------------------------------------- 입력
 
 func _gui_input(ev: InputEvent) -> void:
+	var me := ev as InputEventMouse
 	var mb := ev as InputEventMouseButton
+	# 끄는 중인데 왼쪽이 안 눌려 있다 = 뗌을 못 받았다(창 밖 · 다른 창에서 뗌) — 끌기를 끝내고 이 입력은 보통대로.
+	# 10-27 사용자 "가끔 qwer 기즈모 작업을 하다가 프리뷰 카메라 조작이 안 돼" — 끄는 중으로 남으면 휠 · 가운데 · 오른쪽을 다 삼켰다
+	if _drag != H.NONE and me != null and ((me.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0 or (mb != null and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed)) \
+			and not (mb != null and mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed):
+		_finish()
 	if mb != null:
 		if mb.pressed:
 			grab_focus()                        # 단축키가 칸(숫자 입력)이 아니라 미리보기로 오게
@@ -567,6 +573,8 @@ func _gui_input(ev: InputEvent) -> void:
 				_finish()
 			elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 				cancel_drag()
+			elif not mb.pressed:
+				view_input.emit(ev)              # 끌기 전에 누른 오른쪽 · 가운데를 끄는 동안 뗌 — 카메라 끌기를 풀게(안 그러면 단추 없이도 돎)
 			accept_event()
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.alt_pressed and not mb.shift_pressed and tool_mode != Tool.VIEW:
@@ -606,6 +614,11 @@ func _gui_input(ev: InputEvent) -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT or what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
+		_view_drag = false                  # 창을 바꿈 · 숨김 — 뗌이 안 온다. 끈 것은 그 자리에서 끝낸다
+		if _drag != H.NONE:
+			_finish()
+		return
 	if what == NOTIFICATION_MOUSE_EXIT and _hot != H.NONE:
 		_hot = H.NONE
 		queue_redraw()

@@ -18,7 +18,11 @@ class_name DRHubWindow
 ## - 탭 줄 아래: 미리보기 배경(세 탭 미리보기에 같이). 예전 "공통 설정"(캐릭터 프리셋 · 세트 목록 — 2D 굽기용)은 10-16 뺐다 —
 ##   3D 탭은 유닛 프리팹(game/units) · 옷(outfits) · 장비(소켓)를 직접 고른다.
 
+## 애드온 코드(.gd · 셰이더)가 이 창을 만든 뒤 바뀌었다 — 위 줄의 [⟳ 고친 코드 적용]. 플러그인이 창을 새로 만든다(에디터가 아직 옛 코드면 다시 켜기 안내, 10-27)
+signal reload_requested
+
 const META_SECTION := "dot_rigger_hub"
+const ADDON_DIR := "res://addons/dot_rigger"
 const PAGES := [
 	{"key": "unit", "title": "① 유닛", "tip": "유닛 프리팹(3D) — 몸 · 복장 · 무기 · 세트별 동작 표 · 3D 도트 미리보기 · 새 자식 유닛(상속)"},
 	{"key": "equip", "title": "② 장비", "tip": "장비(3D) — 유닛의 뼈 소켓(BoneAttachment3D)에 무기 · 헬멧 모델 꽂기 · 자리 맞추기(기즈모) · 왼손 IK 표지 · 동작마다 왼손 비중"},
@@ -32,9 +36,13 @@ var _current := ""
 var _bg_pick: ColorPickerButton
 var _preview_bg := Color(0, 0, 0, 0)   # a == 0 = 기본(탭마다 원래 색)
 var _bg_restored := false
+var _made_at := 0.0               # 이 창을 만든 때(유닉스 초) — 그 뒤에 바뀐 애드온 파일이 있으면 [⟳ 고친 코드 적용]
+var _reload_btn: Button
+var _code_files := PackedStringArray()
 
 
 func _init() -> void:
+	_made_at = Time.get_unix_time_from_system()
 	title = "Dot Rigger"
 	auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	size = Vector2i(1400, 860)
@@ -46,6 +54,49 @@ func _init() -> void:
 	close_requested.connect(_on_close)
 	window_input.connect(_on_window_input)
 	_build_ui()
+
+
+## 2 초마다(창이 보일 때) — 이 창을 만든 뒤 바뀐 애드온 파일이 있으면 [⟳ 고친 코드 적용]을 보인다
+func _watch_code() -> void:
+	if not visible or _reload_btn == null:
+		return
+	if _code_files.is_empty():
+		_code_files = addon_files()
+	var changed := PackedStringArray()
+	for p in _code_files:
+		if float(FileAccess.get_modified_time(p)) > _made_at + 1.0:
+			changed.append(p.trim_prefix(ADDON_DIR + "/"))
+	_reload_btn.visible = not changed.is_empty()
+	if not changed.is_empty():
+		_reload_btn.tooltip_text = "이 창을 연 뒤 고친 애드온 코드 %d개(%s) — 누르면 창을 새 코드로 다시 연다(지금 탭 · 유닛은 다시 고름).\n에디터가 아직 옛 코드를 들고 있으면 에디터 다시 켜기를 묻는다" % [
+			changed.size(), ", ".join(changed.slice(0, 4)) + (" …" if changed.size() > 4 else "")]
+
+
+## 애드온의 코드 파일(.gd · .gdshader) — 고친 코드 감시 · 옛 코드 찾기
+static func addon_files() -> PackedStringArray:
+	var out := PackedStringArray()
+	var dirs := [ADDON_DIR]
+	while not dirs.is_empty():
+		var d: String = dirs.pop_back()
+		for sub in DirAccess.get_directories_at(d):
+			dirs.append(d.path_join(sub))
+		for f in DirAccess.get_files_at(d):
+			if f.ends_with(".gd") or f.ends_with(".gdshader"):
+				out.append(d.path_join(f))
+	return out
+
+
+## 에디터가 들고 있는 애드온 스크립트 중 디스크와 다른 것 — 고친 코드를 에디터가 아직 못 읽음(class_name · @tool 스크립트는 구조가 바뀌면
+## 다시 못 읽기도 한다 — 그때 창을 새로 만들어도 옛 코드로 뜬다, 10-27). 아직 안 읽은 파일은 쓸 때 새로 읽으니 빼고 본다
+static func stale_scripts() -> PackedStringArray:
+	var out := PackedStringArray()
+	for p in addon_files():
+		if not p.ends_with(".gd") or not ResourceLoader.has_cached(p):
+			continue
+		var s := load(p) as GDScript
+		if s != null and s.source_code != FileAccess.get_file_as_string(p):
+			out.append(p.trim_prefix(ADDON_DIR + "/"))
+	return out
 
 
 static func _make_page(key: String) -> DRPage:
@@ -140,6 +191,19 @@ func _build_ui() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
+	# 고친 코드 적용(10-27 사용자 "기능도 좀 체크해줘 적용이 안 되었는데" — 열어 둔 창은 옛 코드 그대로라 새 화면이 안 보였다)
+	_reload_btn = Button.new()
+	_reload_btn.text = "⟳ 고친 코드 적용"
+	_reload_btn.visible = false
+	_reload_btn.focus_mode = Control.FOCUS_NONE
+	_reload_btn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.4))
+	_reload_btn.pressed.connect(func() -> void: reload_requested.emit())
+	bar.add_child(_reload_btn)
+	var watch := Timer.new()
+	watch.wait_time = 2.0
+	watch.autostart = true
+	watch.timeout.connect(_watch_code)
+	add_child(watch)
 	var hint := Label.new()
 	hint.text = "Ctrl+1 · 2 · 3  탭 바꾸기"
 	hint.add_theme_font_size_override("font_size", 12)

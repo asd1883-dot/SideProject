@@ -68,12 +68,56 @@ func _free_window() -> void:
 func _open() -> void:
 	if not is_instance_valid(_hub):
 		_hub = DRHubWindow.new()
+		_hub.reload_requested.connect(_reload_and_open)
 		EditorInterface.get_base_control().add_child(_hub)
 	_hub.open()
 
 
 ## 개발 내용 갱신 — 열려 있던 Dot Rigger 창을 버린다. 다음에 메뉴로 열면 고친 코드로 새로 만들어진다.
-## 창은 띄우지 않는다(09-29 사용자 요청: 갱신만 하고 창이 뜨지 않게).
+## 창은 띄우지 않는다(09-29 사용자 요청: 갱신만 하고 창이 뜨지 않게). 에디터가 아직 옛 코드를 들고 있으면 다시 켜기를 묻는다(10-27)
 func _reopen() -> void:
 	_free_window()
+	if await _ask_restart_if_stale():
+		return
 	print("[Dot Rigger] 개발 내용 갱신 — 창을 다시 열면 새 코드로 뜹니다.")
+
+
+## 창 위 [⟳ 고친 코드 적용] — 창을 새 코드로 다시 연다(에디터가 아직 옛 코드면 다시 켜기를 묻는다).
+## 10-27 사용자 "기능도 좀 체크해줘 적용이 안 되었는데" — 열어 둔 창이 옛 코드라 새 화면이 안 보였다
+func _reload_and_open() -> void:
+	_free_window()
+	if await _ask_restart_if_stale():
+		return
+	_open()
+	print("[Dot Rigger] 고친 코드로 창을 다시 열었습니다.")
+
+
+## 에디터가 고친 애드온 코드를 아직 못 읽었으면(DRHubWindow.stale_scripts) 저장하고 다시 켜기를 묻는다 — 물었으면 true.
+## 파일 훑기가 끝나기를 잠깐 기다린다(에디터는 창이 초점을 받을 때 바뀐 파일을 훑어 다시 읽는다)
+func _ask_restart_if_stale() -> bool:
+	var fs := EditorInterface.get_resource_filesystem()
+	fs.scan_sources()
+	for i in 50:
+		if not fs.is_scanning():
+			break
+		await get_tree().create_timer(0.1).timeout
+	for i in 3:
+		await get_tree().process_frame
+	var stale := DRHubWindow.stale_scripts()
+	if stale.is_empty():
+		return false
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "Dot Rigger — 에디터 다시 켜기"
+	dlg.dialog_text = ("고친 애드온 코드 %d개를 에디터가 아직 읽지 못했습니다(%s).\n" +
+		"클래스 이름이 있는 @tool 스크립트는 구조가 바뀌면 에디터를 다시 켜야 새 코드가 돕니다 — 그대로 열면 옛 화면이 뜹니다.\n\n" +
+		"[저장하고 다시 켜기] = 열린 씬을 저장하고 에디터를 다시 켭니다.") % [stale.size(), ", ".join(stale.slice(0, 4)) + (" …" if stale.size() > 4 else "")]
+	dlg.ok_button_text = "저장하고 다시 켜기"
+	dlg.cancel_button_text = "나중에"
+	dlg.confirmed.connect(func() -> void: EditorInterface.restart_editor(true))
+	dlg.visibility_changed.connect(func() -> void:
+		if not dlg.visible:
+			dlg.queue_free())
+	EditorInterface.get_base_control().add_child(dlg)
+	dlg.popup_centered()
+	print("[Dot Rigger] 에디터가 아직 옛 코드를 들고 있음: ", ", ".join(stale))
+	return true

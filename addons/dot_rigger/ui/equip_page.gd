@@ -2645,6 +2645,9 @@ func _on_view_input(ev: InputEvent) -> void:
 		return
 	var mm := ev as InputEventMouseMotion
 	if mm != null and _drag != 0:
+		if mm.button_mask == 0:
+			_drag = 0                              # 뗌을 못 받았다(기즈모가 삼킴 · 창 밖) — 단추 없이 움직이는데 카메라가 돌지 않게(10-27)
+			return
 		if _drag == 1:
 			_yaw -= mm.relative.x * 0.4
 			_pitch = clampf(_pitch + mm.relative.y * 0.4, -85.0, 85.0)
@@ -2654,6 +2657,12 @@ func _on_view_input(ev: InputEvent) -> void:
 		else:
 			_dist = clampf(_dist * exp((mm.relative.y - mm.relative.x) * 0.006), 0.2, 10.0)
 		_update_cam()
+
+
+## 창을 바꾸면 카메라 끌기를 푼다(뗌이 안 온다 — 돌아왔을 때 단추 없이도 돌지 않게, 10-27)
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		_drag = 0
 
 
 func _process(delta: float) -> void:
