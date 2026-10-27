@@ -248,6 +248,44 @@ func _go() -> void:
 		var mg_undo: bool = lmk != null and str(lmk.motion_weights) == str(lw0) and DREquipPage.motion_grip(ew, "Firing_Rifle") == 2
 		eqp.set_per_motion(false)
 		_expect(mg_set and mg_undo, "② 동작마다 잡기: 이 동작만 → [오른손] → 열린 씬 왼손 표지 Firing_Rifle 0 · 미리보기 왼손 놓음 · 다른 동작 그대로 → Ctrl+Z 처음대로 (%s %s)" % [mg_set, mg_undo])
+		# 손 기준 나무(10-27): 무기를 ✋ 왼손에 끌어 놓기 → 왼손 잡기 · 옛 손 소켓 정리(열린 씬) → 탭 창 Ctrl+Z → 소켓 되살아남 · 주인 그대로 → Ctrl+Y → Ctrl+Z
+		var sock0: Node = ew.get_parent()
+		eqp.play_motion("Rifle_Aiming_Idle")
+		eqp._seek(0.3)
+		eqp.drop_equip_on_grip(er.get_path_to(ew), 1)
+		await _frames(30)
+		var dropped: bool = DREquipPage.grip_kind(ew) == 1 and not sock0.is_inside_tree() and ew.owner == er and ew.get_parent().owner == er
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var restored: bool = ew.get_parent() == sock0 and sock0.is_inside_tree() and sock0.owner == er and ew.owner == er \
+			and DRCharacter3D.find_hand_marker(ew, 0) != null and DRCharacter3D.find_hand_marker(ew, 0).owner == er
+		eqp._unhandled_key_input(_ctrl_key(KEY_Y))
+		await _frames(30)
+		var redone_drop: bool = DREquipPage.grip_kind(ew) == 1 and not sock0.is_inside_tree()
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		_expect(dropped and restored and redone_drop and ew.get_parent() == sock0,
+			"② 손 기준 나무: 무기를 ✋ 왼손에 끌어 놓기 → 왼손 잡기 · 옛 손 소켓 정리 → Ctrl+Z 소켓 되살아남(주인 그대로) → Ctrl+Y → Ctrl+Z (%s %s %s)" % [dropped, restored, redone_drop])
+		# 손 기즈모(10-27): 이 동작만 → ✋ 왼손(표지) 기즈모 끌기 → 열린 씬 왼손 표지 메타(그 동작만) · 표지 기본 그대로 → Ctrl+Z 메타 빠짐
+		var lm2 := DRCharacter3D.find_hand_marker(ew, 0)
+		eqp.play_motion("Rifle_Aiming_Idle")
+		eqp._seek(0.3)
+		eqp.set_per_motion(true)
+		eqp._select_node(er.get_path_to(lm2))
+		eqp.set_tool(1)
+		await _frames(10)
+		var lx0: Transform3D = lm2.transform
+		var lgp: Vector2 = giz.handle_point(1)
+		var lgd: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[0] * 0.1) - giz._p(giz.pivot_point())).normalized()
+		_giz_drag(giz, lgp, lgp + lgd * 30.0)
+		await _frames(10)
+		var hand_set: bool = giz.target == eqp._prev_node(lm2) and DRCharacter3D.offset_key(lm2, "Rifle_Aiming_Idle") == "Rifle_Aiming_Idle" and lm2.transform.is_equal_approx(lx0)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var hand_undo: bool = DRCharacter3D.motion_offsets(lm2).is_empty() and lm2.transform.is_equal_approx(lx0)
+		eqp.set_per_motion(false)
+		eqp._select_node(er.get_path_to(ew))
+		_expect(hand_set and hand_undo, "② 손 기즈모: 이 동작만 ✋ 왼손 끌기 → 열린 씬 왼손 표지에 그 동작 자리(기본 그대로) → Ctrl+Z 빠짐 (%s %s)" % [hand_set, hand_undo])
 		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
 		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
 		eqp._select_node(er.get_path_to(ew))

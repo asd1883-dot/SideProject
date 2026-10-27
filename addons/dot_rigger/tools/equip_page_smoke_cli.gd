@@ -22,6 +22,8 @@ extends SceneTree
 ##     공통 칸(고정 · 무기 · 소켓 · 보간 · 조준) 잠금 · 표 잡기 칸 · 게임 길(동작마다 받침대가 붙은 손 쪽 · 섞기 튐 없음) · 기본으로 · 기본 잡기 따라감 · 옛 소켓
 ## [13] 기즈모 · 카메라 끌기 상태(10-27): 왼쪽 뗌을 못 받은 끌기 → 다음 움직임에서 끝냄 · 휠 · 오른쪽 바로 됨 · 오른쪽 누른 채 손잡이 끌기 뒤 단추 없이 안 돎 ·
 ##     카메라 끌기 뗌을 못 받아도 풀림 · 끄는 중 오른쪽 = 취소 · 창을 바꾸면 풀림
+## [14] 손 기준 나무(10-27): 맨 위 = ✋ 오른손 · ✋ 왼손 · 🤝 양손 · 📌 땅 · 장비는 지금 동작에서 쥔 곳 아래 · 끌어 놓기 = 잡기(모든 동작 = 기본 · 이 동작만 = 그 동작, 땅은 모든 동작만) ·
+##     손 받침대 하나 · 빈 받침 · 옛 손 소켓 정리 · ✋ 손 기즈모(이 동작만 = 그 동작 손 자리 · 총 그대로 / 모든 동작 = 기본 손 자리) · 게임 길 손 자리 섞기
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -521,6 +523,143 @@ func _cam_checks(page: DREquipPage) -> void:
 	page._playing = true
 
 
+## 나무에서 그 노드 경로의 줄 — 장비 줄 먼저
+func _tree_row_of(page: DREquipPage, p: NodePath) -> TreeItem:
+	var found: TreeItem = null
+	for it in page._all_items(page._tree.get_root()):
+		if (it.get_metadata(0) as NodePath) == p:
+			if it.has_meta(&"equip"):
+				return it
+			if found == null:
+				found = it
+	return found
+
+
+## 줄의 맨 위 조상(나무 맨 위 줄)
+func _top_of(it: TreeItem) -> TreeItem:
+	while it != null and it.get_parent() != null and it.get_parent() != it.get_tree().get_root():
+		it = it.get_parent()
+	return it
+
+
+## [14] 손 기준 나무 · 끌어 놓기 · 받침 정리 · 손 기즈모(10-27) — 사용자: "왼손 잡기인데 오른손에 붙어 있고 … 이 무기 소켓 하이어라키에서 드래그해서 자식으로
+## 지정해 놓는 행위를 하면 2. 잡기도 그거에 반영돼서 동기화 · 혁신적인 개혁" · "오른손 왼손도 기즈모로 움직여서(이동 · 회전) 살짝 조정 수정 가능하게"
+func _hand_tree_checks(page: DREquipPage) -> void:
+	print("[14] 손 기준 나무 — 쥔 손 아래 장비 · 끌어 놓기 = 잡기(범위대로) · 빈 받침 정리 · 손 기즈모(모든 동작 / 이 동작만) · 게임 길")
+	page.select_unit(BASE)
+	await _frames(3)
+	page._playing = false
+	page.set_per_motion(false)
+	var w := page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	var junk := DRGripMount3D.new()                    # 쌓였던 빈 받침대 흉내(옛 이름)
+	junk.name = "양손"
+	page._root.add_child(junk)
+	junk.owner = page._root
+	page._fill_tree()
+	await _frames(1)
+	var tops := PackedStringArray()
+	for it in page._tree.get_root().get_children():
+		tops.append(it.get_text(0).get_slice("  ", 0))
+	var wrow := _tree_row_of(page, page._root.get_path_to(w))
+	_check(tops.slice(0, 4) == PackedStringArray(["✋ 오른손", "✋ 왼손", "🤝 양손 (두 손 사이)", "📌 땅 (고정)"]) and wrow != null and _top_of(wrow).get_text(0).begins_with("🤝"),
+		"나무 맨 위 = %s · 옛 오른손 소켓 무기(Rifle_Aiming_Idle 두 손) = 🤝 양손 아래 · 받침 노드는 안 보임" % ", ".join(tops))
+	# 끌어 놓기 — 모든 동작: 왼손에 놓기 = 왼손 잡기(손 받침대 하나 · 빈 받침 · 옛 손 소켓 정리)
+	page.drop_equip_on_grip(page._root.get_path_to(w), 1)
+	await _frames(2)
+	w = page._weapon_equip()
+	var mounts := page._anchors().filter(func(a) -> bool: return a is DRGripMount3D)
+	wrow = _tree_row_of(page, page._root.get_path_to(w))
+	_check(DREquipPage.grip_kind(w) == 1 and mounts.size() == 1 and String(mounts[0].name).begins_with("잡기") and page._root.get_node_or_null("오른손") == null
+		and (not is_instance_valid(junk) or not junk.is_inside_tree()) and wrow != null and _top_of(wrow).get_text(0).begins_with("✋ 왼손") and page._grip_btns[1].button_pressed,
+		"모든 동작: 무기를 ✋ 왼손에 끌어 놓기 = 기본 잡기 왼손(2 잡기 [왼손] 눌림) · 손 받침대 하나(%s) · 빈 받침 · 옛 손 소켓 정리 · 나무 = 왼손 아래" % (mounts[0].name if not mounts.is_empty() else "-"))
+	var n_anchor := page._anchors().size()
+	page.drop_equip_on_grip(page._root.get_path_to(w), 2)
+	await _frames(2)
+	w = page._weapon_equip()
+	_check(DREquipPage.grip_kind(w) == 2 and page._anchors().size() == n_anchor and w.get_parent() == mounts[0], "🤝 양손에 놓기 = 같은 받침대에서 붙는 손만(받침 그대로 · 새 받침 없음)")
+	# 이 동작만: Firing_Rifle 만 오른손 — 나무에서 무기가 ✋ 오른손 아래 · 주황 · 동작을 바꾸면 따라 옮김 · 땅은 안 받음
+	page.play_motion("Firing_Rifle")
+	page._seek(0.4)
+	page.set_per_motion(true)
+	page.drop_equip_on_grip(page._root.get_path_to(w), 0)
+	await _frames(2)
+	wrow = _tree_row_of(page, page._root.get_path_to(w))
+	var fire_ok := wrow != null and _top_of(wrow).get_text(0).begins_with("✋ 오른손") and wrow.get_text(0).contains("● Firing_Rifle 만") \
+		and DREquipPage.motion_grip(w, "Firing_Rifle") == 0 and DREquipPage.grip_kind(w) == 2
+	var ground := page._tree.get_root().get_child(3)
+	var ground_pos := page._tree.get_item_area_rect(ground).get_center()
+	var no_ground: bool = not page._tree_can_drop(ground_pos, {"dr_equip": page._root.get_path_to(w)})
+	page.drop_equip_on_grip(page._root.get_path_to(w), 3)
+	no_ground = no_ground and DREquipPage.grip_kind(w) == 2 and String(page._status.text).contains("모든 동작에서만")
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	await _frames(2)
+	wrow = _tree_row_of(page, page._root.get_path_to(w))
+	_check(fire_ok and no_ground and wrow != null and _top_of(wrow).get_text(0).begins_with("🤝"),
+		"이 동작만: ✋ 오른손에 놓기 = Firing_Rifle 만 오른손(받침 양손 그대로 · 나무 = 오른손 아래 · ● 꼬리표) · 📌 땅은 안 받음 · Rifle_Aiming_Idle 로 바꾸면 🤝 양손 아래로")
+	# 손 기즈모 — 이 동작만: ✋ 왼손을 옮기면 왼손만 움직이고 총은 그대로 · 그 동작만 왼손 자리(표지 기본 그대로) · 다른 동작은 기본
+	var lmk := DRCharacter3D.find_hand_marker(w, 0)
+	page._select_node(page._root.get_path_to(lmk))
+	page.set_tool(Giz.Tool.MOVE)
+	await _frames(2)
+	var base0 := lmk.transform
+	var g0 := (page._prev_node(w) as Node3D).global_position
+	var hp0 := _hand_pos(page._prev)
+	_drag_long(page._giz, 30.0)
+	await _frames(2)
+	var hp1 := _hand_pos(page._prev)
+	var gmove := (page._prev_node(w) as Node3D).global_position.distance_to(g0)
+	var off := DRCharacter3D.offset_for(lmk, "Rifle_Aiming_Idle")
+	_check(page._tree.get_root().get_child(1).get_metadata(0) == page._root.get_path_to(lmk) and DRCharacter3D.offset_key(lmk, "Rifle_Aiming_Idle") == "Rifle_Aiming_Idle" and lmk.transform.is_equal_approx(base0)
+		and hp1[0].distance_to(hp0[0]) > 0.005 and hp1[1].distance_to(hp0[1]) < 0.001 and gmove < 0.0005,
+		"이 동작만: ✋ 왼손 줄 = 왼손 표지 · 기즈모로 왼손 %.1f cm 옮김 · 오른손 · 총 그대로(%.2f mm) · Rifle_Aiming_Idle 만 왼손 자리(표지 기본 그대로)" % [hp1[0].distance_to(hp0[0]) * 100.0, gmove * 1000.0])
+	page.play_motion("Walk_With_Rifle")
+	await _frames(2)
+	var pl := page._prev_node(lmk) as Node3D
+	var at_base: bool = pl.transform.is_equal_approx(lmk.transform)
+	page.play_motion("Rifle_Aiming_Idle")
+	await _frames(2)
+	pl = page._prev_node(lmk) as Node3D
+	var at_off: bool = pl.transform.is_equal_approx(lmk.transform * off)
+	_check(at_base and at_off and page._pm_reset_btn.text.contains("왼손"), "다른 동작(Walk_With_Rifle) = 기본 왼손 자리 · Rifle_Aiming_Idle 로 오면 그 동작 자리 · [↺ 왼손 이 동작 기본으로]")
+	# 게임 길 — 그 동작의 손 자리를 얹고 섞어 옮김
+	var pk := PackedScene.new()
+	pk.pack(page._root)
+	var g := pk.instantiate() as DRCharacter3D
+	root.add_child(g)
+	await _frames(2)
+	g.get_animation_player().callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	g.play_motion("Rifle_Aiming_Idle", 0.0)
+	g.step_motion(1.0 / 12.0)
+	var gmk := DRCharacter3D.find_hand_marker(g.get_weapon_node(), 0)
+	var on_off: bool = gmk.transform.is_equal_approx(lmk.transform * off) and float(g.support_report(0).get("ik", 1.0)) < 0.01
+	g.play_motion("Walk_With_Rifle", 0.2)
+	for i in 4:
+		g.step_motion(0.1)
+		await process_frame
+	var on_base: bool = gmk.transform.is_equal_approx(lmk.transform) and float(g.support_report(0).get("ik", 1.0)) < 0.01
+	_check(on_off and on_base, "게임 길: Rifle_Aiming_Idle = 그 동작 왼손 자리 · Walk_With_Rifle 로 섞어 옮기면 기본 왼손 자리 · 왼손 IK 뒤 1 cm 안")
+	g.queue_free()
+	page._pm_reset_btn.pressed.emit()                 # 이 동작 기본으로(고른 손)
+	await _frames(1)
+	var reset_ok := DRCharacter3D.offset_key(lmk, "Rifle_Aiming_Idle") == ""
+	# 손 기즈모 — 모든 동작: 기본 왼손 자리가 바뀜(동작별 자리 안 생김)
+	page.set_per_motion(false)
+	page.play_motion("Walk_With_Rifle")
+	page._seek(0.3)
+	page._select_node(page._root.get_path_to(lmk))
+	await _frames(2)
+	var b1 := lmk.transform
+	_drag_long(page._giz, 20.0)
+	await _frames(2)
+	_check(reset_ok and not lmk.transform.is_equal_approx(b1) and DRCharacter3D.motion_offsets(lmk).is_empty(),
+		"[↺ 왼손 이 동작 기본으로] → 그 동작 자리 지움 · 모든 동작: ✋ 왼손 기즈모 = 기본 왼손 자리가 바뀜(동작별 자리 안 생김)")
+	page._playing = true
+
+
 ## [11] 화면 정리(10-21)
 func _ui_checks(page: DREquipPage) -> void:
 	print("[11] 화면 정리 — 적용 범위 한 곳 · 손에 맞추기(범위대로) · 표지 잠금 · 타임라인 · 상태 줄")
@@ -564,10 +703,9 @@ func _ui_checks(page: DREquipPage) -> void:
 	var all_locked := page._marker_btns.size() >= 5 and page._marker_btns.all(func(b: Button) -> bool: return b.disabled)
 	var made := page.make_hand_marker(0)
 	page._select_node(page._root.get_path_to(mk))
-	var giz_none := page._gizmo_target() == null
-	var fields_locked := not page._pos[0].editable and not page._rot[0].editable
-	_check(all_locked and made == null and mk.transform.is_equal_approx(mx) and giz_none and fields_locked and page._xf_title.text.contains("잠김"),
-		"이 동작만이면 표지 잠김: 단추 %d개 꺼짐 · [왼손 표지 ← 지금 손] 안 됨 · 기즈모 없음 · 숫자 칸 잠김 · 「%s」" % [page._marker_btns.size(), page._xf_title.text.left(30)])
+	var hand_giz := page._gizmo_target() != null and page._pos[0].editable and page._xf_title.text.contains("만")
+	_check(all_locked and made == null and mk.transform.is_equal_approx(mx) and hand_giz,
+		"이 동작만: 표지 단추 %d개 꺼짐 · [왼손 표지 ← 지금 손] 안 됨(모든 동작 공통) · 손을 고르면 그 동작 손 자리로 기즈모 · 숫자 칸(10-27) 「%s」" % [page._marker_btns.size(), page._xf_title.text.left(30)])
 	page.set_per_motion(false)
 	page._select_node(page._root.get_path_to(mk))
 	_check(page._marker_btns.all(func(b: Button) -> bool: return not b.disabled) and page._gizmo_target() != null and page._pos[0].editable, "모든 동작이면 표지 단추 · 기즈모 · 숫자 칸 다시 켜짐")
@@ -631,7 +769,8 @@ func _grip_memory_checks(page: DREquipPage) -> void:
 		same = same and (m[0] as Transform3D).is_equal_approx(mount_offs[0][0]) and (m[1] as Transform3D).is_equal_approx(mount_offs[0][1]) \
 			and (m[2] as Transform3D).is_equal_approx(mount_offs[0][2])
 	_check(mount_offs.size() == 8 and same, "양손으로 돌아올 때마다(%d 번 · 동작 다름) 받침대 두 손 자리 · 무기 자리 그대로" % mount_offs.size())
-	_check(String(page._status.text).contains("전에 쓰던 자리로"), "다시 온 잡기 = 상태 줄 「전에 쓰던 자리로」(%s)" % page._status.text.left(60))
+	_check(String(page._status.text).contains("받침 그대로") or String(page._status.text).contains("전에 쓰던 자리로"),
+		"다시 온 잡기 = 상태 줄 「받침 그대로(붙는 손만)」(손끼리 — 손 받침대는 무기마다 하나, 10-27)(%s)" % page._status.text.left(60))
 
 	# 동작별 자리를 기본 자리에 굳히지 않음: 처음 가는 받침(새 유닛 인스턴스)을 동작별 자리가 있는 동작에서 고른다
 	page.select_unit(BASE)
@@ -694,12 +833,15 @@ func _grip_checks(page: DREquipPage) -> void:
 	_check(DREquipPage.grip_kind(gw) == 4 and DREquipPage.socket_hand(gw) == 1 and page._prev.get_arm_ik(0) != null and page._prev.get_arm_ik(1) == null
 		and not page._grip_btns.any(func(b: Button) -> bool: return b.button_pressed) and page._grip_info.text.contains("옛 방식"),
 		"처음(기본형 군인): 오른손 뼈 소켓 = 옛 방식(잡기 단추 안 눌림 · 「%s」) · 왼손 IK · 오른손 IK 없음" % page._grip_info.text.left(50))
+	var t_hand := Transform3D.IDENTITY                 # 손 받침대 아래 자리(고정으로 떠나기 전) — 다시 오면 이 자리(잡기 기억, 손 받침대는 무기마다 하나 · 10-27)
 	for step in [[1, "왼손"], [2, "양손"], [3, "고정"], [0, "오른손"]]:
 		var kind: int = step[0]
 		page.play_motion("Rifle_Aiming_Idle")
 		page._seek(0.3)
 		page._force_pose()
 		var w0 := (page._prev_node(gw) as Node3D).global_transform
+		if kind == 3:
+			t_hand = gw.transform                       # 손 받침대를 떠나기 전 자리
 		page.set_grip(kind)
 		await _frames(2)
 		var pv := page._prev
@@ -718,10 +860,12 @@ func _grip_checks(page: DREquipPage) -> void:
 				iks.append("%s %.2f cm" % [DRCharacter3D.SIDE_NAMES[side], float(r.get("ik", 1.0)) * 100.0])
 				if r.is_empty() or float(r["ik"]) > 0.01:
 					ok_ik = false
-		# 처음 가는 받침 = 보이는 자리 그대로
-		var pos_ok := moved < 0.002 and turned < 0.5
+		# 처음 가는 받침 · 손끼리 바꾸기 = 보이는 자리 그대로 · 고정에서 손 받침대로 돌아오면 = 떠나기 전 자리(잡기 기억)
+		var back_hand: bool = kind == 0
+		var pos_ok: bool = gw.transform.is_equal_approx(t_hand) and String(page._status.text).contains("전에 쓰던 자리로") if back_hand else (moved < 0.002 and turned < 0.5)
 		_check(DREquipPage.grip_kind(gw) == kind and pos_ok and ok_ik and page._grip_btns[kind].button_pressed,
-			"%s: 받침 %s · 무기 자리 그대로(%.1f mm · %.2f°) · 붙는 손만 IK(%s) · 단추 눌림" % [step[1], gw.get_parent().name, moved * 1000.0, turned, ", ".join(iks)])
+			("%s: 받침 %s · 고정에서 돌아옴 = 전에 쓰던 손 받침대 자리(보이는 자리 %.1f mm · %.2f° — 그 사이 고정 받침대를 옮겼으므로) · 붙는 손만 IK(%s) · 단추 눌림" if back_hand
+			else "%s: 받침 %s · 무기 자리 그대로(%.1f mm · %.2f°) · 붙는 손만 IK(%s) · 단추 눌림") % [step[1], gw.get_parent().name, moved * 1000.0, turned, ", ".join(iks)])
 		if kind <= 1:                                  # 한 손 — 총을 옮기면 그 손만 따라옴(10-27)
 			var on := 1 if kind == 0 else 0
 			page.set_tool(Giz.Tool.MOVE)
@@ -1363,6 +1507,7 @@ func _run() -> void:
 	await _ui_checks(page)
 	await _motion_grip_checks(page)
 	await _cam_checks(page)
+	await _hand_tree_checks(page)
 
 	# 치우기
 	page._drop_root()
