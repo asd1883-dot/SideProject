@@ -295,6 +295,40 @@ func _go() -> void:
 		await _frames(40)
 		var sel_undo: bool = eqp._node(eqp._sel) == ew and giz.target == eqp._prev_node(ew)
 		_expect(sel_after and sel_undo, "② 고른 것 유지: 무기를 고른 채 잡기 바꿈 → Ctrl+Z(무기 경로가 돌아옴) → 여전히 무기 · 기즈모도 무기 (%s %s)" % [sel_after, sel_undo])
+		# 잡기 끄기 = 안 붙음(10-27): 왼손 잡기 → 눌린 [왼손] 다시 누름 → 열린 씬 왼손 표지 비중 0 → Ctrl+Z 비중 1 → Ctrl+Z 옛 소켓으로
+		eqp._select_node(er.get_path_to(ew))
+		eqp.set_grip(1)
+		await _frames(30)
+		var lm4 := DRCharacter3D.find_hand_marker(ew, 0) as DRHandTarget3D
+		eqp._grip_btns[1].set_pressed_no_signal(false)
+		eqp._grip_btns[1].pressed.emit()
+		await _frames(20)
+		var ug_set: bool = lm4 != null and lm4.weight == 0.0 and DREquipPage.motion_grip(ew, "") == -2 and eqp._prev.get_ik_weight(0) <= 0.001
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var ug_undo: bool = lm4 != null and lm4.weight == 1.0 and DREquipPage.motion_grip(ew, "") == 1
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(40)
+		_expect(ug_set and ug_undo and ew.get_parent() == sock0, "② 잡기 끄기: 눌린 [왼손] 다시 누름 → 열린 씬 왼손 표지 비중 0(안 붙음) → Ctrl+Z 비중 1 → Ctrl+Z 옛 소켓 (%s %s)" % [ug_set, ug_undo])
+		# 손은 그대로 두고 총만 옮기기(10-27): 켬 → 무기 끌기 → 열린 씬 무기 · 왼손 표지 둘 다 바뀜 → Ctrl+Z 한 번에 둘 다 처음대로
+		eqp.set_per_motion(false)
+		eqp._select_node(er.get_path_to(ew))
+		eqp._keep_hands_chk.button_pressed = true
+		eqp.set_tool(1)
+		await _frames(10)
+		var lm3 := DRCharacter3D.find_hand_marker(ew, 0)
+		var kw0: Transform3D = ew.transform
+		var kl0: Transform3D = lm3.transform
+		var kp: Vector2 = giz.handle_point(1)
+		var kd: Vector2 = (giz._p(giz.pivot_point() + giz._axes_now(false)[0] * 0.1) - giz._p(giz.pivot_point())).normalized()
+		_giz_drag(giz, kp, kp + kd * 30.0)
+		await _frames(10)
+		var keep_set: bool = giz.target == eqp._prev_node(ew) and not ew.transform.is_equal_approx(kw0) and not lm3.transform.is_equal_approx(kl0)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var keep_undo: bool = ew.transform.is_equal_approx(kw0) and lm3.transform.is_equal_approx(kl0)
+		eqp._keep_hands_chk.button_pressed = false
+		_expect(keep_set and keep_undo, "② 손은 그대로 두고 총만 옮기기: 무기 끌기 → 열린 씬 무기 · 왼손 표지 둘 다 바뀜 → Ctrl+Z 한 번에 둘 다 처음대로 (%s %s)" % [keep_set, keep_undo])
 		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
 		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
 		eqp._select_node(er.get_path_to(ew))
