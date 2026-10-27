@@ -14,7 +14,8 @@ class_name DRGripMount3D
 
 enum Mode { HANDS, FIXED }
 ## 장비에 붙는 손(10-27) — 사용자: "오른손이면 총기를 움직일 때 오른손이 붙여져 있는 상태로 움직이고 왼손이면 왼손 기준으로 붙여진다".
-## 한 손이면 받침대가 그 손 쪽 자리를 따라가고(보간 무시) 그 손만 표지에 IK — 다른 손은 동작 그대로
+## 한 손이면 받침대가 그 손 쪽 자리를 따라가고(보간 무시) 그 손만 표지에 IK — 다른 손은 동작 그대로. 이것은 **기본 잡기** —
+## 동작마다 다른 잡기는 손 표지의 동작별 비중(DRHandTarget3D.motion_weights — ② 탭 "이 동작만" · 동작 표 잡기 칸)이 정한다
 enum Hold { BOTH, RIGHT, LEFT }
 
 ## 받침 방식 — 손 기준(보간) · 고정(유닛 기준)
@@ -34,6 +35,6 @@ func eff_blend() -> float:
 	return 0.0 if hold == Hold.RIGHT else (1.0 if hold == Hold.LEFT else blend)
 
 
-## 그 손(0 = 왼손 · 1 = 오른손)이 표지(IK)로 장비에 붙나
+## 그 손(0 = 왼손 · 1 = 오른손)이 기본으로 표지(IK)로 장비에 붙나
 func grips(side: int) -> bool:
 	return hold == Hold.BOTH or mode == Mode.FIXED or (side == 1) == (hold == Hold.RIGHT)

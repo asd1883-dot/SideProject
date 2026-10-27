@@ -1136,8 +1136,8 @@ func refresh_equipment() -> void:
 				if mk == null:
 					continue
 				marked = true
-				if anchor_grips(a, side) and found[side] == null:
-					found[side] = [mk, a]      # 받침이 그 손 소켓(무기가 그 손을 따라감) · 다른 손만 붙는 한 손 받침대면 IK 안 함
+				if anchor_can_grip(a, side) and found[side] == null:
+					found[side] = [mk, a]      # 받침이 그 손 소켓이면(무기가 그 손을 따라감) IK 안 함 — 한 손 받침대의 다른 손은 비중 0 으로 만들어 둠
 			if _sock_weapon == null and marked:
 				_sock_weapon = e
 			if hand_equip == null and abone == WEAPON_BONE:
@@ -1767,10 +1767,8 @@ func _anchor_at(anim: Animation, tracks: Dictionary, t: float, anchor: Node, mot
 	var l := _fk(anim, tracks, bl, t, memo) * m.left_offset
 	var hl: HandIK = _hands[0]
 	var hr: HandIK = _hands[1]
-	var bw := m.eff_blend()
-	var wl := bw * (_hand_weight(0, motion) if hl != null and hl.anchor == m else 0.0)
-	var wr := (1.0 - bw) * (_hand_weight(1, motion) if hr != null and hr.anchor == m else 0.0)
-	return r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else bw)
+	return r.interpolate_with(l, mount_t(m, _hand_weight(0, motion) if hl != null and hl.anchor == m else 0.0,
+		_hand_weight(1, motion) if hr != null and hr.anchor == m else 0.0))
 
 
 ## 동작 파일에서 바로 그 시점의 뼈 자세(뼈대 공간). 트랙이 없는 뼈 · 성분은 레스트 — memo = 이번 시점에 계산한 뼈
@@ -2065,14 +2063,40 @@ static func find_hand_marker(e: Node, side: int) -> Node3D:
 	return by_name
 
 
-## 받침 a 아래 장비를 그 손(0 = 왼손 · 1 = 오른손)이 표지(IK)로 잡나 — 손 뼈 소켓이면 그 손은 장비를 들고(장비가 그 손을 따라가므로 IK 안 함),
-## 한 손 받침대(10-27)는 그 손만, 두 손 사이 · 고정 받침대 · 손이 아닌 뼈 소켓은 두 손
+## 받침 a 아래 장비를 그 손(0 = 왼손 · 1 = 오른손)이 **기본으로**(동작별 비중이 없는 동작에서) 표지(IK)로 잡나 — 손 뼈 소켓이면 그 손은 장비를 들고
+## (장비가 그 손을 따라가므로 IK 안 함), 한 손 받침대(10-27)는 그 손만, 두 손 사이 · 고정 받침대 · 손이 아닌 뼈 소켓은 두 손
 static func anchor_grips(a: Node, side: int) -> bool:
 	if a is BoneAttachment3D:
 		return (a as BoneAttachment3D).bone_name != String(HAND_BONES[side])
 	if a is DRGripMount3D:
 		return (a as DRGripMount3D).grips(side)
 	return true
+
+
+## 그 손이 받침 a 아래 장비에 **붙을 수 있나**(IK 를 만드나) — 손 뼈 소켓의 그 손만 못 붙는다(장비가 그 손을 따라가므로 순환).
+## 한 손 받침대의 다른 손도 IK 는 만든다(기본 비중 0 — 동작마다 잡기를 따로 주면 붙는다, 10-27)
+static func anchor_can_grip(a: Node, side: int) -> bool:
+	return not (a is BoneAttachment3D and (a as BoneAttachment3D).bone_name == String(HAND_BONES[side]))
+
+
+## 표지 mk(받침 anchor 아래 장비의 그 손 표지)의 그 동작 비중 — 동작별 비중이 있으면 그것(= 그 동작의 잡기), 없으면 기본(표지 비중 × 받침의 기본 잡기)
+static func marker_weight(mk: Node, anchor: Node, side: int, motion: String) -> float:
+	if mk == null or anchor == null or not anchor_can_grip(anchor, side):
+		return 0.0
+	var base := 1.0 if anchor_grips(anchor, side) else 0.0
+	if mk is DRHandTarget3D:
+		var t := mk as DRHandTarget3D
+		if motion != "" and t.motion_weights.has(motion):
+			return clampf(float(t.motion_weights[motion]), 0.0, 1.0)
+		return clampf(t.weight, 0.0, 1.0) * base
+	return base
+
+
+## 그 동작에서 장비 e 에 그 손이 붙는 정도(0 ~ 1) — 표지 없음 · 손 뼈 소켓의 그 손 = 0
+static func hand_weight_for(e: Node, side: int, motion: String) -> float:
+	if e == null or e.get_parent() == null:
+		return 0.0
+	return marker_weight(find_hand_marker(e, side), e.get_parent(), side, motion)
 
 
 ## 왼손 표지(예전 이름 — find_hand_marker(e, 0))
@@ -2221,10 +2245,7 @@ func _solve_mounts(sk: Skeleton3D) -> void:
 			continue
 		var r := sg * sk.get_bone_global_pose(br) * m.right_offset
 		var l := sg * sk.get_bone_global_pose(bl) * m.left_offset
-		var bw := m.eff_blend()
-		var wr := (1.0 - bw) * _holding(1, m)
-		var wl := bw * _holding(0, m)
-		var mt := r.interpolate_with(l, wl / (wl + wr) if wl + wr > 0.0001 else bw)
+		var mt := r.interpolate_with(l, mount_t(m, _holding(0, m), _holding(1, m)))
 		if _aim_arm_on and _sock_weapon != null and _sock_weapon.get_parent() == m and _muzzle.size() > 2:
 			# 조준 팔 몫(10-21) — 견착점 축으로 받침대를 돌린다(두 손은 무기 표지 IK 로 따라감)
 			var sb := sg.basis.orthonormalized()
@@ -2239,6 +2260,15 @@ func _solve_mounts(sk: Skeleton3D) -> void:
 		var mt := sg.affine_inverse() * hh.anchor.global_transform * hh.rel
 		mt.basis = mt.basis.orthonormalized()
 		hh.wrist.transform = mt * Transform3D(Basis.IDENTITY, -hh.palm)
+
+
+## 손 기준 받침대가 오른손 쪽(0) ~ 왼손 쪽(1) 어디를 따라가나 — 잡은 손(비중 wl · wr)만 따른다: 왼손만 = 1 · 오른손만 = 0 · 두 손 · 아무도 안 잡음 = 보간
+## (한 손 받침대는 그 손 쪽). 비중 사이는 겹선형(동작이 바뀌며 비중이 섞일 때 튀지 않게 — 기본 손이 놓고 다른 손만 잡는 동작, 10-27 동작마다 잡기)
+static func mount_t(m: DRGripMount3D, wl: float, wr: float) -> float:
+	var b := m.eff_blend()
+	var l := clampf(wl, 0.0, 1.0)
+	var r := clampf(wr, 0.0, 1.0)
+	return l * (1.0 - r) + b * (l * r + (1.0 - l) * (1.0 - r))
 
 
 ## 그 손이 받침대 m 을 잡고 있는 정도(그 손 IK 가 m 의 장비 표지로 가면 IK 비중, 아니면 0)
@@ -2276,9 +2306,7 @@ func _hand_weight(side: int, motion: String) -> float:
 	var h: HandIK = _hands[side]
 	if h == null or h.ik == null or motion == "":
 		return 0.0
-	if h.marker is DRHandTarget3D:
-		return (h.marker as DRHandTarget3D).weight_for(motion)
-	return 1.0
+	return marker_weight(h.marker, h.anchor, side, motion)
 
 
 ## 왼손 IK 비중(예전 이름)
