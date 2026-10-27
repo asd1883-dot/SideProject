@@ -365,6 +365,39 @@ func _go() -> void:
 	await _frames(30)
 	_expect(hub._current == "unit" and unit._prev_ch != null and unit._prev_ch.get_weapon_node() != null, "① 로 돌아와도 미리보기 그대로(소켓 무기)")
 
+	# 고친 코드 적용(10-27 사용자 "적용이 안 되었는데" — 열어 둔 창은 옛 코드라 새 화면이 안 보였다): 지금은 옛 코드 없음(헛경보 없음) ·
+	# 창보다 새 파일이 있으면 [⟳ 고친 코드 적용] 이 보이고 누르면 다시 열기 신호 · 다시 감추기
+	var stale0 := DRHubWindow.stale_scripts()
+	hub._watch_code()
+	var hidden0: bool = not hub._reload_btn.visible
+	var made0: float = hub._made_at
+	hub._made_at = 0.0
+	hub._watch_code()
+	var shown: bool = hub._reload_btn.visible and String(hub._reload_btn.tooltip_text).contains("고친 애드온 코드")
+	var asked := [false]
+	hub.reload_requested.connect(func() -> void: asked[0] = true)
+	hub._reload_btn.pressed.emit()
+	hub._made_at = made0
+	hub._watch_code()
+	_expect(stale0.is_empty() and hidden0 and shown and asked[0] and not hub._reload_btn.visible,
+		"고친 코드 감시: 옛 코드 없음(%s) · 창보다 새 파일 → [⟳ 고친 코드 적용] 보임 · 누르면 다시 열기 신호 · 아니면 숨김 (%s %s %s)" % [", ".join(stale0) if not stale0.is_empty() else "헛경보 없음", hidden0, shown, asked[0]])
+
+	# 플러그인 길: [⟳ 고친 코드 적용] → 옛 코드가 없으면 묻지 않고 창을 새로 만들어 연다
+	var plug: Node = null
+	for n in get_tree().root.find_children("*", "EditorPlugin", true, false):
+		if n.get_script() != null and (n.get_script() as Script).resource_path == "res://addons/dot_rigger/plugin.gd":
+			plug = n
+	var reopened := false
+	if plug != null:
+		var old_hub = plug._hub
+		await plug._reload_and_open()
+		await _frames(30)
+		var nh = plug._hub
+		reopened = is_instance_valid(nh) and nh != old_hub and nh.visible and nh._reload_btn != null and not nh._reload_btn.visible
+		if is_instance_valid(nh):
+			nh.close_requested.emit()
+	_expect(plug != null and reopened, "플러그인 [⟳ 고친 코드 적용] → 옛 코드 없으면 묻지 않고 새 창으로 다시 엶(%s)" % ("플러그인 찾음" if plug != null else "플러그인 못 찾음"))
+
 	# 닫기(X) → 다시 열기: 같은 탭(창이 있으면 같은 자리)
 	(hub._buttons["equip"] as Button).pressed.emit()
 	await get_tree().process_frame

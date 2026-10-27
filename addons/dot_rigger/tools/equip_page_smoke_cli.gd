@@ -20,6 +20,8 @@ extends SceneTree
 ##     [손에 맞추기] = 범위대로(모든 동작 = 기본 자리 · 이 동작만 = 그 동작 자리) · 표지 잠금(이 동작만) · 타임라인(동작 이름 · 초 · 끌면 멈춤 · Space) · 상태 줄은 가운데
 ## [12] 동작마다 잡기(10-27): 적용 범위 스위치 = 맨 위 · 이 동작만이면 2 잡기 = 그 동작의 잡기(받침 그대로) · 그 동작 오른손만 IK · 기즈모로 그 손만 따라옴 ·
 ##     공통 칸(고정 · 무기 · 소켓 · 보간 · 조준) 잠금 · 표 잡기 칸 · 게임 길(동작마다 받침대가 붙은 손 쪽 · 섞기 튐 없음) · 기본으로 · 기본 잡기 따라감 · 옛 소켓
+## [13] 기즈모 · 카메라 끌기 상태(10-27): 왼쪽 뗌을 못 받은 끌기 → 다음 움직임에서 끝냄 · 휠 · 오른쪽 바로 됨 · 오른쪽 누른 채 손잡이 끌기 뒤 단추 없이 안 돎 ·
+##     카메라 끌기 뗌을 못 받아도 풀림 · 끄는 중 오른쪽 = 취소 · 창을 바꾸면 풀림
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -156,7 +158,7 @@ func _gizmo_checks(page: DREquipPage) -> void:
 	var tc: Transform3D = gw.transform
 	p = giz.handle_point(Giz.H.AZ)
 	_drag_on(giz, p, p + Vector2(40, -25), false, false)
-	giz._gui_input(_btn_ev(p + Vector2(40, -25), true, MOUSE_BUTTON_RIGHT))
+	giz._gui_input(_mb(p + Vector2(40, -25), MOUSE_BUTTON_RIGHT, true, MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT))   # 왼쪽은 아직 누른 채
 	_check(not giz.is_dragging() and gw.transform.is_equal_approx(tc) and pn.transform.is_equal_approx(tc), "끄는 중 오른쪽 누름 = 취소(사본 · 유닛 그대로)")
 
 	# 회전 — Z 고리를 접선으로 40 px(= 40/84 rad), Ctrl 이면 15° 눈금
@@ -437,6 +439,85 @@ func _motion_grip_checks(page: DREquipPage) -> void:
 	_check(left_dis and rejected and DREquipPage.motion_grip(w, "Firing_Rifle") == 0 and page._prev.get_ik_weight(0) <= 0.001,
 		"옛 오른손 뼈 소켓: 이 동작만 [왼손] 잠김(고르면 안내) · [오른손] = 그 동작에서 왼손 놓음")
 	page.set_per_motion(false)
+	page._playing = true
+
+
+## 마우스 단추 이벤트(누른 단추들 = mask)
+func _mb(pos: Vector2, button: int, pressed: bool, mask: int) -> InputEventMouseButton:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	ev.pressed = pressed
+	ev.position = pos
+	ev.button_mask = mask
+	return ev
+
+
+func _mm(pos: Vector2, rel: Vector2, mask: int) -> InputEventMouseMotion:
+	var ev := InputEventMouseMotion.new()
+	ev.position = pos
+	ev.relative = rel
+	ev.button_mask = mask
+	return ev
+
+
+## [13] 기즈모 · 카메라 끌기 상태(10-27) — 사용자: "가끔 qwer 기능 기즈모 작업을 하다가 전체 프리뷰 카메라 조작이 안 돼".
+## 왼쪽 뗌을 못 받은 기즈모 끌기(창 밖 · 다른 창에서 뗌)가 남으면 휠 · 가운데 · 오른쪽을 다 삼켰고, 오른쪽을 누른 채 손잡이를 끌면 오른쪽 뗌을 삼켜 단추 없이도 카메라가 돌았다
+func _cam_checks(page: DREquipPage) -> void:
+	print("[13] 기즈모 · 카메라 끌기 상태 — 뗌을 못 받아도 카메라가 다시 됨 · 단추 없이 안 돎")
+	page.select_unit(BASE)
+	await _frames(3)
+	page._playing = false
+	var w := page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	page.set_tool(Giz.Tool.MOVE)
+	await _frames(2)
+	var giz = page._giz
+	var empty := Vector2(24, 24)
+	var p: Vector2 = giz.handle_point(_long_axis(giz))
+	var x0 := w.transform
+	giz._gui_input(_mb(p, MOUSE_BUTTON_LEFT, true, MOUSE_BUTTON_MASK_LEFT))
+	giz._gui_input(_mm(p + Vector2(20, 0), Vector2(20, 0), MOUSE_BUTTON_MASK_LEFT))
+	var mid: bool = giz.is_dragging()
+	giz._gui_input(_mm(p + Vector2(40, 0), Vector2(20, 0), 0))            # 뗌 없이 단추 없는 움직임
+	var ended: bool = not giz.is_dragging() and not w.transform.is_equal_approx(x0)
+	var d0: float = page._dist
+	giz._gui_input(_mb(empty, MOUSE_BUTTON_WHEEL_UP, true, 0))
+	var y0: float = page._yaw
+	giz._gui_input(_mb(empty, MOUSE_BUTTON_RIGHT, true, MOUSE_BUTTON_MASK_RIGHT))
+	giz._gui_input(_mm(empty + Vector2(40, 0), Vector2(40, 0), MOUSE_BUTTON_MASK_RIGHT))
+	giz._gui_input(_mb(empty + Vector2(40, 0), MOUSE_BUTTON_RIGHT, false, 0))
+	_check(mid and ended and page._dist < d0 and absf(page._yaw - y0) > 1.0,
+		"왼쪽 뗌을 못 받은 손잡이 끌기 → 다음 움직임에서 끝냄(자리 저장) · 휠 확대 %.2f → %.2f · 오른쪽 끌기 돌림 %+.0f°" % [d0, page._dist, page._yaw - y0])
+	# 오른쪽을 누른 채 손잡이 왼쪽 끌기 → 오른쪽 먼저 뗌 → 왼쪽 뗌 → 단추 없이 움직이면 카메라가 안 돎
+	p = giz.handle_point(_long_axis(giz))
+	giz._gui_input(_mb(empty, MOUSE_BUTTON_RIGHT, true, MOUSE_BUTTON_MASK_RIGHT))
+	giz._gui_input(_mb(p, MOUSE_BUTTON_LEFT, true, MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_LEFT))
+	giz._gui_input(_mm(p + Vector2(15, 0), Vector2(15, 0), MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_LEFT))
+	var both: bool = giz.is_dragging()
+	giz._gui_input(_mb(p + Vector2(15, 0), MOUSE_BUTTON_RIGHT, false, MOUSE_BUTTON_MASK_LEFT))
+	giz._gui_input(_mb(p + Vector2(15, 0), MOUSE_BUTTON_LEFT, false, 0))
+	var y1: float = page._yaw
+	giz._gui_input(_mm(p + Vector2(60, 0), Vector2(45, 0), 0))
+	_check(both and not giz.is_dragging() and page._drag == 0 and absf(page._yaw - y1) < 0.01,
+		"오른쪽을 누른 채 손잡이 끌기 → 오른쪽 · 왼쪽 뗌 → 단추 없이 움직여도 카메라 그대로(%+.1f° — 전에는 오른쪽 뗌을 삼켜 계속 돎)" % (page._yaw - y1))
+	# 카메라 끌기 뗌을 못 받음 → 단추 없는 움직임에서 풀림 · 창을 바꾸면 기즈모 · 카메라 끌기 풀림
+	giz._gui_input(_mb(empty, MOUSE_BUTTON_MIDDLE, true, MOUSE_BUTTON_MASK_MIDDLE))
+	var t0: Vector3 = page._target
+	giz._gui_input(_mm(empty + Vector2(30, 0), Vector2(30, 0), 0))
+	var cam_free: bool = page._drag == 0 and page._target.is_equal_approx(t0)
+	p = giz.handle_point(_long_axis(giz))
+	giz._gui_input(_mb(p, MOUSE_BUTTON_LEFT, true, MOUSE_BUTTON_MASK_LEFT))
+	giz._gui_input(_mm(p + Vector2(10, 0), Vector2(10, 0), MOUSE_BUTTON_MASK_LEFT))
+	giz._gui_input(_mb(empty, MOUSE_BUTTON_RIGHT, true, MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_LEFT))   # 끄는 중 오른쪽 = 취소(그대로)
+	var cancelled: bool = not giz.is_dragging()
+	giz._gui_input(_mb(p, MOUSE_BUTTON_LEFT, true, MOUSE_BUTTON_MASK_LEFT))
+	page._on_view_input(_mb(empty, MOUSE_BUTTON_RIGHT, true, MOUSE_BUTTON_MASK_RIGHT))
+	giz.notification(Node.NOTIFICATION_WM_WINDOW_FOCUS_OUT)
+	page.notification(Node.NOTIFICATION_WM_WINDOW_FOCUS_OUT)
+	_check(cam_free and cancelled and not giz.is_dragging() and page._drag == 0,
+		"카메라 끌기 뗌을 못 받음 → 단추 없는 움직임에서 풀림 · 끄는 중 오른쪽 = 취소 · 창을 바꾸면 기즈모 · 카메라 끌기 풀림")
 	page._playing = true
 
 
@@ -1281,6 +1362,7 @@ func _run() -> void:
 	await _aim_checks(page)
 	await _ui_checks(page)
 	await _motion_grip_checks(page)
+	await _cam_checks(page)
 
 	# 치우기
 	page._drop_root()
