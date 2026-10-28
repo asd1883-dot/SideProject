@@ -29,6 +29,8 @@ extends SceneTree
 ## [16] 손: 이 프레임 손 그대로 쥐기(10-27): 옛 [표지 ← 지금 손] 없음 · 손 줄일 때만 · 이 동작만 = 그 동작 손 자리 · 모든 동작 = 기본 손 자리 · 3 = 총을 손에 맞추기
 ## [17] 잡기 단추 끄기 = 안 붙음 · 손은 그대로 두고 총만 옮기기(10-27): 모든 동작 · 이 동작만 끄기 / 다시 켜기 · 끄는 중 · 놓은 뒤 · 다른 동작 · 숫자 칸 ·
 ##     총을 동작마다 따로 둔 동작도 손 제자리 · 끄면 손이 따라옴(그대로)
+## [18] 동작마다 잡기를 바꿔도 지금 프레임 총 · 손 그대로(10-28): 기본 왼손 + 그 동작 무기 자리를 왼손 기준으로 둔 뒤 이 동작만 [오른손] → 총 안 튐 ·
+##     그 동작 내내 오른손 = 동작 그대로 · 동작 표의 다른 줄 · [안 붙음] · [양손](따라가는 손만 지금 손) · 도트 보기 도트 크기
 ## 마지막 줄이 "EQUIP PAGE SMOKE OK" 면 통과.
 
 const BASE := "res://game/units/soldier_base.tscn"
@@ -1847,6 +1849,7 @@ func _run() -> void:
 	await _sync_audit(page)
 	await _hand_snap_checks(page)
 	await _unglue_keep_checks(page)
+	await _grip_keep_checks(page)
 
 	# 치우기
 	page._drop_root()
@@ -1860,3 +1863,107 @@ func _run() -> void:
 	else:
 		print("EQUIP PAGE SMOKE FAIL ", ", ".join(_fails))
 	quit(0 if _fails.is_empty() else 1)
+
+
+## 두 변환의 차이 [mm, °]
+func _xf_diff(a: Transform3D, b: Transform3D) -> Array:
+	return [a.origin.distance_to(b.origin) * 1000.0, rad_to_deg(a.basis.orthonormalized().get_rotation_quaternion().angle_to(b.basis.orthonormalized().get_rotation_quaternion()))]
+
+
+## 미리보기에서 그 동작 · 시점의 무기 자리(세상)
+func _gun_at(page: DREquipPage, w: Node3D, motion: String, at: float) -> Transform3D:
+	if page.current_motion() != motion:
+		page.play_motion(motion)
+	page._seek(at)
+	page._force_pose()
+	return (page._prev_node(w) as Node3D).global_transform
+
+
+## 그 동작 여러 시점에서 그 손이 동작 손에서 IK 로 끌려가는 거리(m, 가장 큰 것) — 0 이면 손이 동작 그대로
+func _pull(page: DREquipPage, motion: String, side: int) -> float:
+	page.play_motion(motion)
+	var worst := 0.0
+	for f in [0.05, 0.35, 0.65, 0.9]:
+		page._seek(f)
+		page._force_pose()
+		worst = maxf(worst, float(page._prev.support_now(side).get("dist", 1.0)))
+	return worst
+
+
+## [18] 동작마다 잡기를 바꿔도 지금 프레임 총 · 손 그대로(10-28) — 사용자: "오른손으로 갑자기 붙여 놓으면 팔이 존나 꺾이거나 무기가 이상한 위치에 튀어서
+## 팔목 이런 게 돌아가 … 그래서 그런 애니메이션은 잡기에 기반(안 붙음) 처리로 해 놓고 총기를 맞춰 놓았어". 사용자 씬(기본 왼손 받침대 · 동작마다 무기 자리)에서
+## 이 동작만 오른손이면 총이 따라가는 손이 바뀌어 총이 최대 87 cm 튀고 오른손이 팔이 다 펴질 만큼 끌려갔다(02 U57)
+func _grip_keep_checks(page: DREquipPage) -> void:
+	print("[18] 동작마다 잡기를 바꿔도 지금 프레임 총 · 손 그대로 · 도트 크기")
+	page.select_unit(BASE)
+	await _frames(3)
+	page._playing = false
+	page.set_per_motion(false)
+	var w := page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.3)
+	page.set_grip(1)                                   # 기본 잡기 = 왼손(한 손 받침대 — 총이 왼손을 따라감)
+	await _frames(2)
+	w = page._weapon_equip()
+	page._select_node(page._root.get_path_to(w))
+	if DRCharacter3D.find_hand_marker(w, 1) == null:
+		page.snap_hand(1)                              # 오른손 표지(모든 동작 — 지금 손)
+		await _frames(1)
+	var rmk := DRCharacter3D.find_hand_marker(w, 1)
+	var mo := "Walk_With_Rifle"
+	page.set_motion_offset(w, mo, Transform3D(Basis(Vector3.UP, 0.35), Vector3(0.04, 0.03, -0.05)))   # 왼손 기준으로 맞춘 그 동작 자리(사용자처럼)
+	await _frames(1)
+	var off0 := DRCharacter3D.offset_for(w, mo)
+	page.set_per_motion(true)
+	var g0 := _gun_at(page, w, mo, 0.35)
+	page.set_motion_grip(mo, 0)                        # 이 동작만 오른손
+	await _frames(2)
+	var g1 := _gun_at(page, w, mo, 0.35)
+	var d1 := _xf_diff(g0, g1)
+	var moved := DRCharacter3D.offset_size(w.transform, off0.affine_inverse() * DRCharacter3D.offset_for(w, mo))
+	var pull_r := _pull(page, mo, 1)
+	_check(DREquipPage.motion_grip(w, mo) == 0 and rmk != null and d1[0] < 1.0 and d1[1] < 0.1 and moved.x > 0.01 and pull_r < 0.002
+		and page._status.text.contains("총 자리 그대로"),
+		"이 동작만 [오른손](기본 왼손 · 그 동작 자리 왼손 기준): 총 %.2f mm · %.2f° (그대로 — 오른손 기준으로 다시 잡은 차이 %.1f cm) · 그 동작 내내 오른손 끌림 %.1f mm「%s」" % [
+			d1[0], d1[1], moved.x * 100.0, pull_r * 1000.0, page._status.text.left(70)])
+	# 동작 표의 다른 줄 — 그 동작을 지금 시점으로 틀어 그 프레임을 지킨다
+	var gf0 := _gun_at(page, w, "Firing_Rifle", 0.4)
+	page.play_motion("Rifle_Aiming_Idle")
+	page._seek(0.4)
+	page.set_motion_grip("Firing_Rifle", 0)
+	await _frames(2)
+	var on_row := page.current_motion() == "Firing_Rifle"
+	var df := _xf_diff(gf0, _gun_at(page, w, "Firing_Rifle", 0.4))
+	_check(on_row and df[0] < 1.0 and df[1] < 0.1 and _pull(page, "Firing_Rifle", 1) < 0.002,
+		"동작 표 다른 줄(Firing_Rifle → 오른손): 그 동작을 틈 · 총 %.2f mm · %.2f° · 오른손 동작 그대로" % [df[0], df[1]])
+	# 안 붙음 — 총이 다시 왼손을 따라가도 그 프레임 그대로
+	var g2 := _gun_at(page, w, mo, 0.35)
+	page.set_motion_grip(mo, -2)
+	await _frames(2)
+	var d2 := _xf_diff(g2, _gun_at(page, w, mo, 0.35))
+	_check(DREquipPage.motion_grip(w, mo) == -2 and d2[0] < 1.0 and d2[1] < 0.1 and page._prev.get_ik_weight(0) <= 0.001 and page._prev.get_ik_weight(1) <= 0.001,
+		"[안 붙음](총이 왼손을 따라감): 총 %.2f mm · %.2f° 그대로 · 두 손 IK 0" % [d2[0], d2[1]])
+	# 양손 — 따라가는 왼손은 지금 손 그대로 쥠, 오른손은 쥐는 곳(표지)으로
+	var g3 := _gun_at(page, w, mo, 0.35)
+	page.set_motion_grip(mo, 2)
+	await _frames(2)
+	var d3 := _xf_diff(g3, _gun_at(page, w, mo, 0.35))
+	var pull_l := _pull(page, mo, 0)
+	_check(DREquipPage.motion_grip(w, mo) == 2 and d3[0] < 1.0 and d3[1] < 0.1 and pull_l < 0.002 and page._prev.get_ik_weight(1) > 0.99,
+		"[양손]: 총 %.2f mm 그대로 · 따라가는 왼손 끌림 %.1f mm(지금 손 그대로) · 오른손은 쥐는 곳으로「%s」" % [d3[0], pull_l * 1000.0, page._status.text.left(90)])
+	page.set_per_motion(false)
+	# 도트 보기 도트 크기(10-28 사용자 "2 장비 탭에도 도트 보기에 1px 2px 고르는 게 있었으면")
+	var st := DRDotStyle.load_default()
+	var first: bool = page._dots.dot_px == st.dot_px and page._dot_ob.get_selected_id() == st.dot_px
+	page.set_dot_px(1)
+	await _frames(1)
+	var one: bool = page._dots.dot_px == 1 and page._dot_mode and page._dot_ob.get_selected_id() == 1
+	page._dot_ob.select(2)
+	page._dot_ob.item_selected.emit(2)
+	await _frames(1)
+	_check(first and one and page._dots.dot_px == 3 and st.dot_px == DRDotStyle.load_default().dot_px and page._dot_ob.tooltip_text.contains("게임 값 = %d px" % st.dot_px),
+		"도트 크기 칸: 처음 = 게임 값 %d px · 1 px 고르면 도트 보기로 · 칸에서 3 px · 게임 값(dot_style.tres)은 그대로" % st.dot_px)
+	page.set_dot_px(st.dot_px)
+	page.set_dot_mode(false)
+	page._playing = true

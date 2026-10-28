@@ -329,6 +329,37 @@ func _go() -> void:
 		var keep_undo: bool = ew.transform.is_equal_approx(kw0) and lm3.transform.is_equal_approx(kl0)
 		eqp._keep_hands_chk.button_pressed = false
 		_expect(keep_set and keep_undo, "② 손은 그대로 두고 총만 옮기기: 무기 끌기 → 열린 씬 무기 · 왼손 표지 둘 다 바뀜 → Ctrl+Z 한 번에 둘 다 처음대로 (%s %s)" % [keep_set, keep_undo])
+		# 동작마다 잡기 — 총 · 손 그대로(10-28): 기본 왼손 → 이 동작만 [오른손] → 미리보기 총 그대로 · 열린 씬 무기(그리고 오른손 표지) 그 동작 자리 →
+		#   Ctrl+Z 한 번에 비중 · 자리 다 처음대로 → Ctrl+Z 옛 소켓으로
+		eqp._select_node(er.get_path_to(ew))
+		eqp.set_grip(1)
+		await _frames(30)
+		eqp.set_per_motion(true)
+		eqp.play_motion("Walk_With_Rifle")
+		eqp._seek(0.35)
+		await _frames(5)
+		var rk0 := DRCharacter3D.find_hand_marker(ew, 1)
+		var go0 := str(DRCharacter3D.motion_offsets(ew))
+		var ro0 := str(DRCharacter3D.motion_offsets(rk0)) if rk0 != null else ""
+		var rw0 := str((rk0 as DRHandTarget3D).motion_weights) if rk0 is DRHandTarget3D else ""
+		eqp._force_pose()
+		var pg0: Transform3D = (eqp._prev_node(ew) as Node3D).global_transform
+		eqp.set_motion_grip("Walk_With_Rifle", 0)
+		await _frames(20)
+		eqp._seek(0.35)
+		eqp._force_pose()
+		var pg1: Transform3D = (eqp._prev_node(ew) as Node3D).global_transform
+		var gk_set: bool = DREquipPage.motion_grip(ew, "Walk_With_Rifle") == 0 and str(DRCharacter3D.motion_offsets(ew)) != go0 and pg0.origin.distance_to(pg1.origin) < 0.001
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(30)
+		var rk1 := DRCharacter3D.find_hand_marker(ew, 1)
+		var gk_undo: bool = str(DRCharacter3D.motion_offsets(ew)) == go0 and DREquipPage.motion_grip(ew, "Walk_With_Rifle") == 1 and \
+			(rk1 == null if rk0 == null else (rk1 == rk0 and str(DRCharacter3D.motion_offsets(rk0)) == ro0 and str((rk0 as DRHandTarget3D).motion_weights) == rw0))
+		eqp.set_per_motion(false)
+		eqp._unhandled_key_input(_ctrl_key(KEY_Z))
+		await _frames(40)
+		_expect(gk_set and gk_undo and ew.get_parent() == sock0, "② 동작마다 잡기 총 · 손 그대로: 기본 왼손 → Walk_With_Rifle 만 [오른손] → 미리보기 총 %.2f mm · 열린 씬 그 동작 자리 → Ctrl+Z 한 번에 처음대로 → Ctrl+Z 옛 소켓 (%s %s)" % [
+			pg0.origin.distance_to(pg1.origin) * 1000.0, gk_set, gk_undo])
 		# 동작별 무기 자리(10-19): 이 동작만 → 기즈모 끌기 → 열린 씬 장비의 메타(그 동작만) · 기본 자리 그대로(편집 중인 씬엔 안 얹음) · 미리보기 = 기본 × 차이
 		#   · 저장(pack)에 메타가 담김 → 탭 창 Ctrl+Z 메타 빠짐(set_meta null) → Ctrl+Y → Ctrl+Z
 		eqp._select_node(er.get_path_to(ew))
