@@ -3,7 +3,8 @@ extends SceneTree
 ## 화면 없이 논리만 돌려 보는 검사 — 양쪽 끝에서 분대를 투입해 정해진 시간만큼 전투를 돌리고, 일어난 일을 글로 찍는다.
 ##   Godot --headless --path <프로젝트> --script res://game/tools/sim_smoke.gd [-- --seconds=120 --squads=2 --seed=1941]
 ## 보는 것: 분대가 엄폐물로 가는가 · 쏘는가 · 맞는가 · 벽에 막히는가 · 제압/사기/패주/패닉이 생기는가 · 한 걸음 계산이 얼마나 드는가
-##   + 참호 버전(10-28): 시뮬이 모래주머니 판과 같음(칸 · 벽 · 자세 · 총알 판정) · 그리는 도랑 깊이 · 구간(뒤 1.5 m · 깊이 전체) · 전투에서 참호 버전에 든다
+##   + 참호 버전(10-28): 시뮬이 모래주머니 판과 같음(칸 수 · 벽 · 자세 · 총알 판정) · 칸은 도랑 가운데 한 줄로 앞뒤 · 그리는 도랑(벽 쪽 1.2 m · 깊이 전체) ·
+##     전투에서 참호 버전에 든다
 ## 마지막 줄이 "SIM SMOKE OK" 면 통과(기대한 일이 다 일어남), 아니면 무엇이 안 일어났는지 적는다.
 
 const TYPE_PATH := "res://game/units/rifleman.tres"
@@ -136,8 +137,8 @@ func _report(bf: Battlefield) -> void:
 	print("\n".join(lines))
 
 
-## 참호 버전(10-28) — 시뮬은 모래주머니 판과 같고(칸 · 벽 · 자세 · 총알 판정) 모습만 땅을 판 것: 도랑 깊이 = 벽 − 모래주머니 0.3 m,
-## 도랑 = 칸 구간 + 뒤 1.5 m · 깊이 전체(그 안을 화면이 내려 그린다 — Battlefield.draw_ground_h). 실패한 것의 이름들을 돌려준다
+## 참호 버전(10-28) — 시뮬은 모래주머니 판과 같고(칸 수 · 벽 · 자세 · 총알 판정) 모습만 땅을 판 것(워페어 참호): 도랑 깊이 = 벽 − 모래주머니 0.3 m,
+## 도랑 = 벽 쪽 끝 TRENCH_W · 깊이 전체(그 안을 화면이 내려 그린다 — Battlefield.draw_ground_h), 칸 = 도랑 가운데 한 줄로 앞뒤. 실패한 것의 이름들을 돌려준다
 func _trench_checks(type: SoldierType) -> PackedStringArray:
 	var fails := PackedStringArray()
 	var bf := Battlefield.new()
@@ -147,16 +148,20 @@ func _trench_checks(type: SoldierType) -> PackedStringArray:
 	var dug := bf.add_cover(60.0, 62.5, BattleCover.Kind.LOW, 1, 0, true)
 	var high := bf.add_cover(90.0, 92.5, BattleCover.Kind.HIGH, -1, 0, true)
 	var same := plain.slot_x.size() == dug.slot_x.size() and plain.fire_stance() == dug.fire_stance() and plain.hide_stance() == dug.hide_stance() 		and plain.wall_side == dug.wall_side and plain.wall_height() == dug.wall_height()
-	for i in plain.slot_x.size():
-		same = same and is_equal_approx(plain.slot_x[i] - plain.x0, dug.slot_x[i] - dug.x0) and is_equal_approx(plain.slot_depth[i], dug.slot_depth[i])
-	_trench_line(fails, same, "같은 형식: 칸 %d개 · 자리 · 깊이 · 벽 쪽 · 벽 높이 %.1f m · 쏘는 / 숨는 자세가 모래주머니 판과 같음" % [dug.slot_x.size(), dug.wall_height()])
+	_trench_line(fails, same, "같은 형식: 칸 %d개 · 벽 쪽 · 벽 높이 %.1f m · 쏘는 / 숨는 자세가 모래주머니 판과 같음" % [dug.slot_x.size(), dug.wall_height()])
+	var mid := (dug.pit_x0() + dug.pit_x1()) * 0.5
+	var file := is_equal_approx(dug.pit_x1(), dug.x1) and is_equal_approx(dug.pit_x1() - dug.pit_x0(), BattleCover.TRENCH_W)
+	for i in dug.slot_x.size():
+		file = file and is_equal_approx(dug.slot_x[i], mid) and (i == 0 or dug.slot_depth[i] > dug.slot_depth[i - 1])
+	_trench_line(fails, file, "칸이 도랑 가운데(%.2f m) 한 줄로 앞뒤로(깊이 %.2f ~ %.2f) — 도랑 = 벽 쪽 끝 %.1f m" % [mid, dug.slot_depth[0],
+		dug.slot_depth[dug.slot_depth.size() - 1], BattleCover.TRENCH_W])
 	var pit := dug.pit_depth()
 	_trench_line(fails, is_equal_approx(pit, 0.7) and is_equal_approx(high.pit_depth(), 1.2) and is_equal_approx(pit + dug.sandbag_h(), dug.wall_height())
-		and bf.draw_ground_h(61.0, 0.1) == -pit and bf.draw_ground_h(61.0, 0.9) == -pit and bf.draw_ground_h(59.0, 0.5) == -pit
-		and bf.draw_ground_h(57.5, 0.5) == 0.0 and bf.draw_ground_h(63.0, 0.5) == 0.0 and bf.draw_ground_h(31.0, 0.5) == 0.0
-		and bf.draw_ground_h(93.5, 0.5) == -1.2 and bf.draw_ground_h(89.5, 0.5) == 0.0,
-		"그리는 도랑: 낮음 %.1f m · 높음 %.1f m · 모래주머니 %.1f m · 칸 구간 + 벽 반대쪽 %.1f m · 깊이 어디든 · 그 밖 · 벽 너머 · 모래주머니 판 0" % [
-			pit, high.pit_depth(), dug.sandbag_h(), BattleCover.PIT_REAR])
+		and bf.draw_ground_h(61.9, 0.1) == -pit and bf.draw_ground_h(61.9, 0.9) == -pit
+		and bf.draw_ground_h(61.0, 0.5) == 0.0 and bf.draw_ground_h(63.0, 0.5) == 0.0 and bf.draw_ground_h(31.0, 0.5) == 0.0
+		and bf.draw_ground_h(90.5, 0.5) == -1.2 and bf.draw_ground_h(91.5, 0.5) == 0.0,
+		"그리는 도랑: 낮음 %.1f m · 높음 %.1f m · 모래주머니 %.1f m · 도랑 안(깊이 어디든) · 도랑 밖 구간 · 벽 너머 · 모래주머니 판 0" % [
+			pit, high.pit_depth(), dug.sandbag_h()])
 	# 같은 자리 관계(적 쪽 18.6 m 에서 앉아 쏘기 표적의 머리 · 벽 높이 · 그 아래)로 쏘면 두 엄폐물의 총알 판정이 같다
 	var tgt_sq := bf.deploy_squad(0, type)
 	var sh_sq := bf.deploy_squad(1, type)
