@@ -87,6 +87,9 @@ var _play_btn: Button
 var _time_sl: HSlider
 var _time_lbl: Label                      # 타임라인의 초(지금 / 길이)
 var _view_btn: Button
+var _dot_ob: OptionButton                 # 도트 보기의 도트 크기(이 미리보기만)
+var _game_dot_px := 2                     # 게임 도트 크기(game/dot_style.tres — 안내용)
+const DOT_PX_META := ["dot_rigger_hub", "equip_dot_px"]   # 고른 도트 크기(에디터 프로젝트 메타 — 허브 창 자리 · 배경색과 같은 칸, DRHubWindow.META_SECTION)
 var _playing := true
 var _acc := 0.0
 var _info: Label
@@ -745,6 +748,12 @@ func _build_gizmo_bar(parent: Control) -> void:
 		_snap_sp.append(sp)
 	bar.add_child(VSeparator.new())
 	_view_btn = _btn(bar, "도트 보기", "돌려 보기(가까이 · 기즈모) ↔ 도트 보기(게임 화면과 같은 저해상도 · 외곽선)", func() -> void: set_dot_mode(not _dot_mode))
+	_dot_ob = OptionButton.new()                          # 도트 크기(10-28 사용자 "2 장비 탭에도 도트 보기에 1px 2px 고르는 게 있었으면")
+	for i in range(1, 9):
+		_dot_ob.add_item("%d px" % i, i)
+	_dot_ob.focus_mode = Control.FOCUS_NONE               # Q W E R 단축키를 안 가로채게
+	_dot_ob.item_selected.connect(func(i: int) -> void: set_dot_px(_dot_ob.get_item_id(i)))
+	bar.add_child(_dot_ob)
 	_btn(bar, "손", "두 손 · 무기를 가까이", func() -> void: focus_hands())
 	_btn(bar, "전신", "몸 전체", func() -> void: focus_body())
 
@@ -1031,7 +1040,33 @@ func _editor_undo(undo: bool) -> void:
 
 ## 도트 보기에 게임과 같은 도트 · 외곽선 값(DRDotStyle.load_default().apply_to). 명암(재질 공통)은 게임 화면 · ① 탭이 넣으므로 건드리지 않는다
 func _apply_dot_style() -> void:
-	DRDotStyle.load_default().apply_to(_dots)    # 게임 · ① ③ 탭과 같은 도트 느낌(game/dot_style.tres)
+	var st := DRDotStyle.load_default()
+	st.apply_to(_dots)                           # 게임 · ① ③ 탭과 같은 도트 느낌(game/dot_style.tres)
+	_game_dot_px = st.dot_px
+	var px := int(EditorInterface.get_editor_settings().get_project_metadata(DOT_PX_META[0], DOT_PX_META[1], 0)) if Engine.is_editor_hint() else 0
+	if px >= 1:
+		_dots.dot_px = px                         # 도트 크기만 이 미리보기에서 고른 것(고른 적이 있으면)
+	_sync_dot_ob()
+
+
+## 도트 보기의 도트 크기(도트 하나 = 화면 몇 픽셀, 1 = 도트화 끔) — 이 미리보기만(게임 값은 ① 탭 도트 느낌). 에디터면 다음에 열 때도 그대로.
+## 돌려 보기 중에 고르면 도트 보기로
+func set_dot_px(px: int) -> void:
+	_dots.dot_px = clampi(px, 1, 8)
+	if Engine.is_editor_hint():
+		EditorInterface.get_editor_settings().set_project_metadata(DOT_PX_META[0], DOT_PX_META[1], _dots.dot_px)
+	_sync_dot_ob()
+	if not _dot_mode:
+		set_dot_mode(true)
+
+
+func _sync_dot_ob() -> void:
+	if _dot_ob == null or _dots == null:
+		return
+	for i in _dot_ob.item_count:
+		if _dot_ob.get_item_id(i) == _dots.dot_px:
+			_dot_ob.select(i)
+	_dot_ob.tooltip_text = "도트 보기의 도트 크기 — 도트 하나 = 화면 몇 픽셀(1 = 도트화 끔). 이 미리보기만 바뀐다(게임 값 = %d px, ① 유닛 탭 도트 느낌에서 바꿈)" % _game_dot_px
 
 
 func _btn(parent: Control, text: String, tip: String, cb: Callable) -> Button:
@@ -1753,7 +1788,7 @@ static func _grip_hands(kind: int) -> Array:
 ## 그 동작의 잡기(10-27) — 사용자: "각 동작마다 어느 손이 기준 잡기 기준인가 이런 것도 조작하고 싶은데 전역으로 설정됨. 이 동작만 버튼 눌러도".
 ## kind 0 = 오른손 · 1 = 왼손 · 2 = 양손 · -2 = 안 붙음 · -1 = 기본(받침의 잡기)대로. 두 손 표지의 동작별 비중(motion_weights)에 1 · 0 으로 둘 다 쓴다
 ## (기본 잡기를 나중에 바꿔도 이 동작은 그대로 — 기본대로 = 둘 다 지움). 받침(총이 무엇을 따라가나)은 그대로 — 한 손만 붙는 동작은 받침대가 그 손 쪽을 따라간다(DRCharacter3D.mount_t).
-## 붙을 손의 표지가 없으면 지금 손 자리로 만든다(표지는 모든 동작 공통 — 상태 줄에 알림). 되돌리기 한 칸
+## 바꿀 때 지금 프레임의 총 · 손은 그 자리 그대로(_grip_keep — 10-28). 붙을 손의 표지가 없으면 지금 손 자리로 만든다(표지는 모든 동작 공통 — 상태 줄에 알림). 되돌리기 한 칸
 func set_motion_grip(motion: String, kind: int) -> void:
 	var e := _offset_equip()
 	if e == null or motion == "" or _root == null:
@@ -1770,6 +1805,7 @@ func set_motion_grip(motion: String, kind: int) -> void:
 	var want: Array = _grip_hands(kind)
 	var ops := []                                          # [표지, 새 motion_weights]
 	var new_marks := {}
+	var w_new := [DRCharacter3D.hand_weight_for(e, 0, motion), DRCharacter3D.hand_weight_for(e, 1, motion)]   # 바꾼 뒤 그 동작에서 붙는 정도
 	for side in 2:
 		if not DRCharacter3D.anchor_can_grip(anchor, side):
 			continue
@@ -1779,6 +1815,7 @@ func set_motion_grip(motion: String, kind: int) -> void:
 				var hx: Variant = _hand_xform_on(e, side)
 				if hx != null:
 					new_marks[side] = [hx, {motion: 1.0}]
+					w_new[side] = 1.0
 			continue
 		if not (mk is DRHandTarget3D):
 			continue                                       # 이름만 표지(Marker3D) — 동작별 비중이 없다(늘 기본)
@@ -1788,6 +1825,8 @@ func set_motion_grip(motion: String, kind: int) -> void:
 			mw.erase(motion)
 		else:
 			mw[motion] = 1.0 if want[side] else 0.0          # 두 손 다 적는다 — 기본과 같은 손을 지우면 기본 잡기를 바꿀 때 이 동작도 바뀐다
+		w_new[side] = clampf(float(mw[motion]), 0.0, 1.0) if mw.has(motion) else \
+			clampf(t.weight, 0.0, 1.0) * (1.0 if DRCharacter3D.anchor_grips(anchor, side) else 0.0)
 		if mw != t.motion_weights:
 			ops.append([t, mw])
 	if ops.is_empty() and new_marks.is_empty():
@@ -1795,22 +1834,83 @@ func set_motion_grip(motion: String, kind: int) -> void:
 		_fill_motion_table.call_deferred()
 		return
 	var was_stale := _rep_stale
+	if _aim_preview:
+		_prev.clear_aim_target(true)                       # 지금 프레임 자리를 조준으로 돌리기 전 자세로 잰다(끝에 다시 켬)
+	var keep := _grip_keep(e, motion, w_new)
 	_begin("장비: %s %s 잡기 = %s" % [e.name, motion, "기본대로" if kind == -1 else _grip_name(kind)])
 	for o in ops:
 		_op_prop(o[0], "motion_weights", o[1])
 	for side in new_marks.keys():
 		var mk := _new_marker(new_marks[side][0], new_marks[side][1], int(side))
 		_op_add(e, mk, [mk])
+	for o in keep["metas"]:
+		_op_meta(o[0], DRCharacter3D.MOTION_OFFSETS_META, o[1], o[2])
 	_end(not new_marks.is_empty())
-	_rep_stale = was_stale                                 # 잡기는 자리를 안 바꾼다 — 그 동작만 다시 잰다
+	_rep_stale = was_stale                                 # 잡기는 다른 동작의 자리를 안 바꾼다 — 그 동작만 다시 잰다
 	_remeasure(motion)
+	if _aim_preview:
+		_apply_aim_preview()
 	_update_grip_ui()
 	_fill_tree.call_deferred()                             # 손 기준 나무(장비가 쥔 손 아래로)
 	_fill_motion_table.call_deferred()                     # 미뤄서 — 동작 표의 칸 고치기 신호에서도 불린다
 	var g := motion_grip(e, motion)
-	_set_status("%s — %s 잡기 = %s%s · 기본(모든 동작) = %s%s" % [e.name, motion, _grip_name(g), "(기본대로)" if kind == -1 else "",
+	var notes: PackedStringArray = keep["notes"]
+	_set_status("%s — %s 잡기 = %s%s · 기본(모든 동작) = %s%s%s" % [e.name, motion, _grip_name(g), "(기본대로)" if kind == -1 else "",
 		_grip_name(motion_grip(e, "")), " · 새 표지 %s(모든 동작 공통 — 지금 손 자리)" % ", ".join(new_marks.keys().map(func(s): return String(DRCharacter3D.SIDE_NAMES[s])))
-		if not new_marks.is_empty() else ""])
+		if not new_marks.is_empty() else "", " · " + " · ".join(notes) if not notes.is_empty() else ""])
+
+
+## 동작마다 잡기를 바꿀 때 지금 프레임의 총 · 손을 그 자리 그대로(10-28 사용자 "오른손으로 갑자기 붙여 놓으면 팔이 꺾이거나 무기가 이상한 위치에 튀어서
+## 팔목 이런 게 돌아가") — 기본 왼손 받침대에서 그 동작만 오른손이면 총이 따라가는 손이 왼손 → 오른손으로 바뀌는데 무기 자리 차이는 왼손 기준으로 맞춘 것이라
+## 총이 튀고(사용자 씬 사본 최대 87 cm), 오른손은 왼손 기준 총 위의 오른손 표지로 끌려갔다(최대 82 cm · 팔이 다 펴짐).
+##   ① 총이 따라가는 손(DRCharacter3D.mount_t)이 바뀌면 그 동작의 무기 자리를 새 손 기준으로 다시 잡아 보이는 자리 그대로
+##   ② 새로 붙는 손이 총이 따라가는 손이면 그 동작의 손 자리를 지금 손(동작 그대로)으로 — 그 동작 내내 손이 동작 그대로(총이 그 손을 따라가므로 IK 가 끌 것이 없다)
+##   새로 붙는 다른 손(양손의 따라가지 않는 손)은 손 표지(쥐는 곳)로 간다 — 떨어져 있으면 알림만. 손 받침대만(소켓 · 고정 받침대는 총이 손을 안 따라가 그대로)
+## w_new = 바꾼 뒤 그 동작의 [왼손, 오른손] 붙는 정도. 돌려주는 값 {metas: [[노드, 새 동작별 자리(null = 지움), 옛 값]], notes: 상태 줄 알림}
+func _grip_keep(e: Node3D, motion: String, w_new: Array) -> Dictionary:
+	var out := {"metas": [], "notes": PackedStringArray()}
+	var m := e.get_parent() as DRGripMount3D
+	if m == null or m.mode != DRGripMount3D.Mode.HANDS or _prev == null or _prev_node(e) == null:
+		return out
+	if current_motion() != motion:                         # 동작 표의 다른 줄 — 그 동작을 지금 시점으로 틀어 그 프레임을 지킨다
+		var at := _time_sl.value
+		play_motion(motion)
+		_seek(at)
+	var w_old := [DRCharacter3D.hand_weight_for(e, 0, motion), DRCharacter3D.hand_weight_for(e, 1, motion)]
+	var t_old := DRCharacter3D.mount_t(m, w_old[0], w_old[1])
+	var t_new := DRCharacter3D.mount_t(m, w_new[0], w_new[1])
+	var nm := DRCharacter3D.MOTION_OFFSETS_META
+	_force_pose()
+	if absf(t_new - t_old) > 0.001:
+		var sk := _prev.get_skeleton()                     # 갱신 밖 = 동작 자세(IK 전) — 받침대 자리를 푸는 자세
+		var r := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(String(DRCharacter3D.HAND_BONES[1]))) * m.right_offset
+		var l := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(String(DRCharacter3D.HAND_BONES[0]))) * m.left_offset
+		var go := DRCharacter3D.offset_for(e, motion)
+		var gn := _rigid(e.transform.affine_inverse() * r.interpolate_with(l, t_new).affine_inverse() * r.interpolate_with(l, t_old) * e.transform * go)
+		var gd := DRCharacter3D.motion_offsets(e).duplicate()
+		_put_offset(gd, motion, gn)
+		out["metas"].append([e, gd if not gd.is_empty() else null, DRCharacter3D.motion_offsets(e).duplicate() if e.has_meta(nm) else null])
+		out["notes"].append("총 자리 그대로(총이 %s을 따라감 — 이 동작 무기 자리를 그 손 기준으로)" % ("오른손" if t_new < 0.5 else "왼손"))
+	for side in 2:
+		if w_old[side] > 0.001 or w_new[side] <= 0.001:
+			continue                                       # 새로 붙는 손만
+		var mk := DRCharacter3D.find_hand_marker(e, side)
+		var hx: Variant = _hand_xform_on(e, side)          # 지금 손바닥(총 기준 — 총은 ① 로 보이는 자리 그대로)
+		if not (mk is DRHandTarget3D) or hx == null:
+			continue                                       # 표지가 없으면 지금 손으로 새로 만든다(set_motion_grip) · 이름만 표지는 동작별 자리가 없다
+		var cur := _between(e, mk) * mk.transform * DRCharacter3D.offset_for(mk, motion)
+		var d := (cur.origin - (hx as Transform3D).origin).length() * e.scale.x
+		var deg := rad_to_deg(cur.basis.orthonormalized().get_rotation_quaternion().angle_to((hx as Transform3D).basis.orthonormalized().get_rotation_quaternion()))
+		var sn := String(DRCharacter3D.SIDE_NAMES[side])
+		if (side == 1 and t_new <= 0.001) or (side == 0 and t_new >= 0.999):
+			var md := DRCharacter3D.motion_offsets(mk).duplicate()
+			_put_offset(md, motion, _rigid(mk.transform.affine_inverse() * _in_parent_of(mk, e, hx)))
+			out["metas"].append([mk, md if not md.is_empty() else null, DRCharacter3D.motion_offsets(mk).duplicate() if mk.has_meta(nm) else null])
+			if d > 0.01 or deg > 5.0:
+				out["notes"].append("%s = 지금 손 그대로 쥠(이 동작 손 자리 — %s 표지에서 %.1f cm · %.0f°)" % [sn, sn, d * 100.0, deg])
+		elif d > 0.01 or deg > 5.0:
+			out["notes"].append("%s이 %s 표지(쥐는 곳)로 %.1f cm · %.0f° 옮겨감(지금 손 자리로 쥐려면 나무의 %s → [이 프레임 손 그대로 쥐기])" % [sn, sn, d * 100.0, deg, sn])
+	return out
 
 
 ## 그 손이 장비에 안 붙는 까닭 — 손 뼈 소켓이면 "총을 듦(소켓)", 한 손 잡기의 다른 손이면 "동작 그대로"
@@ -3430,7 +3530,7 @@ func _fill_grip_cell(it: TreeItem, motion: String, e: Node3D, base: int) -> void
 			frac.append("%s %d%%" % [DRCharacter3D.SIDE_NAMES[side], roundi(w * 100.0)])
 	if own:
 		it.set_custom_color(2, Color(1.0, 0.68, 0.32))
-	it.set_tooltip_text(2, "%s — %s%s\n눌러서 고름 — 기본(2 잡기의 기본 잡기대로) · 오른손 · 왼손 · 양손. 받침(총이 무엇을 따라가나)은 그대로 — 한 손만 붙는 동작은 총이 그 손 쪽을 따라간다" % [
+	it.set_tooltip_text(2, "%s — %s%s\n눌러서 고름 — 기본(2 잡기의 기본 잡기대로) · 오른손 · 왼손 · 양손. 받침(총이 무엇을 따라가나)은 그대로 — 한 손만 붙는 동작은 총이 그 손 쪽을 따라간다.\n바꿀 때 지금 프레임의 총 · 손은 그 자리 그대로(총이 따라가는 손이 새로 붙으면 그 손은 동작 그대로 쥠)" % [
 		motion, ("이 동작만 %s 잡기" % _grip_name(g)) if own else ("기본 잡기대로(%s)" % _grip_name(base)), " · 붙는 정도 " + ", ".join(frac) if not frac.is_empty() else ""])
 
 
