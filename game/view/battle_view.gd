@@ -662,17 +662,25 @@ func _draw_wall_cover(c: BattleCover, y0: float, y1: float) -> void:
 		_bg.draw_line(Vector2(px - 6.0, y1 - hpx), Vector2(px + 6.0, y1 - hpx), Color(0.66, 0.57, 0.4), 1.0)
 
 
-## 참호 버전 엄폐물(10-28) — 도랑을 잘라 낸 단면처럼(사용자 "참호 안이 다 보여야지" — 워페어 참호): 도랑 구간 · 깊이 전체가 어두운 흙이고,
-## 병사가 도랑 바닥(땅 아래 pit_depth)에 서므로 맨 앞 깊이 병사의 발까지 담기게 띠 아래로 도랑 깊이만큼 더 그린다(앞쪽 단면 흙).
-## 병사는 그 안에 몸 전체가 보인다. 2D 퍼펫 화면은 벽 쪽 모래주머니도 여기서, 3D 화면은 모래주머니를 깊이마다 세운다(BattleView3D.build_trench_cards)
+## 참호 버전 엄폐물(10-28) — 워페어 참호처럼(사용자가 보여 준 화면 · "참호 안이 다 보여야지"): 벽 쪽 끝의 좁은 도랑(TRENCH_W)이 깊이 방향으로 길게,
+## 바닥 판자 · 양옆 말뚝. 병사가 도랑 바닥(땅 아래 pit_depth)에 서므로 맨 앞 깊이 병사의 발까지 담기게 띠 아래로 도랑 깊이만큼 더 그린다.
+## 병사는 그 안에 한 줄로 늘어서 몸 전체가 보인다. 2D 퍼펫 화면은 벽 쪽 모래주머니도 여기서, 3D 화면은 모래주머니를 깊이마다 세운다(BattleView3D.build_trench_cards)
 func _draw_dug_cover(c: BattleCover, y0: float, y1: float) -> void:
 	var cx0 := c.pit_x0() * ppm
 	var cx1 := c.pit_x1() * ppm
 	var floor_px := c.pit_depth() * ppm
-	_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, y1 - y0 + floor_px), Color(0.2, 0.17, 0.13))           # 도랑 안(깊이 전체 + 맨 앞 바닥까지)
-	_bg.draw_rect(Rect2(cx0, y1, cx1 - cx0, floor_px), Color(0.33, 0.26, 0.18))                        # 앞쪽 단면(잘라 낸 흙벽)
-	_bg.draw_line(Vector2(cx0, y1), Vector2(cx1, y1), Color(0.45, 0.37, 0.25), 1.0)
-	_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, y1 - y0 + floor_px), Color(0.13, 0.11, 0.08), false, 1.0)
+	var yb := y1 + floor_px                                                                              # 맨 앞 깊이 병사의 발(도랑 바닥)까지
+	_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, yb - y0), Color(0.17, 0.14, 0.11))                         # 도랑 안
+	var y := y0 + 3.0
+	while y < yb - 1.0:                                                                                  # 바닥 판자(워페어 참호)
+		_bg.draw_line(Vector2(cx0 + 3.0, y), Vector2(cx1 - 3.0, y), Color(0.27, 0.22, 0.16), 1.0)
+		y += 4.0
+	for ex in [cx0, cx1]:                                                                                # 양옆 말뚝 · 판자 벽
+		_bg.draw_line(Vector2(ex, y0), Vector2(ex, yb), Color(0.36, 0.29, 0.2), 2.0)
+		var py := y0
+		while py < yb:
+			_bg.draw_rect(Rect2(ex - 2.0, py, 4.0, 3.0), Color(0.42, 0.34, 0.23))
+			py += 14.0
 	if _trench_cards_3d():
 		return
 	var hpx := c.sandbag_h() * ppm

@@ -12,13 +12,13 @@ class_name BattleCover
 ##   도랑(pit_x0 ~ pit_x1, 깊이 전체) 안에 있는 것은 도랑 깊이(pit_depth)만큼 내려 그리고(Battlefield.draw_ground_h — 병사 · 총알 자국 · 맞은 점 · 조준점),
 ##   벽은 땅 위 모래주머니(sandbag_h)만 보인다. 도랑 깊이 + 모래주머니 = 벽 높이.
 ##   (처음엔 시뮬에서 몸을 내렸는데 총구도 땅 가까이 내려가 퍼진 총알이 땅에 박혀 쏘는 쪽이 불리해졌다 — 씨앗 7 MG42 48발 0 맞음)
+##   모양은 워페어 참호(사용자가 보여 준 Warfare 화면): 벽 쪽 끝에 폭 TRENCH_W 의 좁은 도랑이 깊이 방향으로 길게 · 칸은 그 가운데 한 줄로 앞뒤로 늘어선다.
 
 enum Kind { LOW, HIGH }
 const KIND_NAMES := ["낮음", "높음"]
 const WALL_HEIGHTS := [1.0, 1.5]        # m
 const SANDBAG_H := 0.3                  # 참호 버전의 땅 위 모래주머니 높이(m — 보이는 높이)
-## 참호 버전 도랑이 벽 반대쪽(뒤)으로 더 나간 길이(m) — 칸을 못 얻은 병사 · 운용 장비 좌석이 바로 뒤에 선다(구간 2.5 m + 1.5 m ≈ 분대 하나)
-const PIT_REAR := 1.5
+const TRENCH_W := 1.2                   # 참호 버전 도랑 폭(m) — 벽 쪽 끝에(워페어 참호처럼 병사 한 명 폭)
 
 var id := 0
 var x0 := 0.0
@@ -44,6 +44,13 @@ func build_slots(count: int = 0) -> void:
 	slot_x.resize(count)
 	slot_depth.resize(count)
 	slot_owner.resize(count)
+	if dug:
+		# 참호 버전 — 도랑 가운데 한 줄로 앞뒤로 늘어선다(워페어 참호)
+		for i in count:
+			slot_x[i] = (pit_x0() + pit_x1()) * 0.5
+			slot_depth[i] = clampf((float(i) + 0.5) / float(count), 0.05, 0.95)
+			slot_owner[i] = null
+		return
 	for i in count:
 		var r := i % rows
 		var c := i / rows
@@ -70,13 +77,15 @@ func pit_depth() -> float:
 	return WALL_HEIGHTS[kind] - SANDBAG_H if dug else 0.0
 
 
-## 참호 버전 도랑의 x 구간 — 칸 구간 + 벽 반대쪽(뒤)으로 PIT_REAR(양쪽 벽이면 칸 구간만)
+## 참호 버전 도랑의 x 구간 — 벽 쪽 끝에서 TRENCH_W(양쪽 벽이면 가운데)
 func pit_x0() -> float:
-	return x0 - (PIT_REAR if wall_side > 0 else 0.0)
+	if wall_side > 0:
+		return x1 - TRENCH_W
+	return x0 if wall_side < 0 else center_x() - TRENCH_W * 0.5
 
 
 func pit_x1() -> float:
-	return x1 + (PIT_REAR if wall_side < 0 else 0.0)
+	return pit_x0() + TRENCH_W
 
 
 ## (x, 깊이)가 참호 도랑 안인가(참호 버전 · 도랑 구간 · 깊이 전체) — 그 자리의 것은 도랑 깊이만큼 내려 그린다

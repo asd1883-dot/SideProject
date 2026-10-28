@@ -63,7 +63,9 @@ static func step(s: BattleSoldier, bf: Battlefield, dt: float) -> void:
 		# 제압 = 숨는 자세로 강제(§2-9). 못 쏘고 못 움직인다 — AI 든 플레이어든 같다
 		_halt(s)
 		s.in_cover = at_slot(s)
-		s.stance = s.cover.hide_stance() if s.in_cover else Stance.PRONE
+		# 좌석 병사의 엄폐 도착은 장비의 엄폐물로 본다(at_slot) — 숨는 자세도 같은 것에서(병사 자신의 cover 는 비어 있을 수 있다, 10-28 null 오류)
+		var cv := s.seat_eq.cover if s.seat_eq != null else s.cover
+		s.stance = cv.hide_stance() if s.in_cover and cv != null else Stance.PRONE
 		s.move_state = Move.COVER if s.in_cover else Move.IDLE
 		return
 
