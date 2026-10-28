@@ -34,6 +34,7 @@ var time := 0.0
 var soldiers: Array[BattleSoldier] = []
 var squads: Array[BattleSquad] = []
 var covers: Array[BattleCover] = []
+var _has_pits := false          # 참호 버전 엄폐물(땅을 판 도랑)이 있나 — 없으면 그리는 땅 높이를 안 훑는다
 var equipments: Array[BattleEquipment] = []
 var rng := RandomNumberGenerator.new()
 ## 디버그 통계
@@ -123,6 +124,7 @@ func clear() -> void:
 	soldiers.clear()
 	squads.clear()
 	covers.clear()
+	_has_pits = false
 	equipments.clear()
 
 
@@ -143,17 +145,32 @@ func home_x(team: int) -> float:
 	return 0.0 if team == 0 else length_m
 
 
-## 엄폐물 놓기. wall_side: +1 = +x 쪽 끝에 벽 · −1 = −x 쪽 끝 · 0 = 양쪽(참호). slots = 0 이면 길이로 정한다
-func add_cover(x0: float, x1: float, kind: int, wall_side: int, slots: int = 0) -> BattleCover:
+## 엄폐물 놓기. wall_side: +1 = +x 쪽 끝에 벽 · −1 = −x 쪽 끝 · 0 = 양쪽(참호). slots = 0 이면 길이로 정한다.
+## dug = 참호 버전(땅을 판 것 — 같은 형식, BattleCover 설명)
+func add_cover(x0: float, x1: float, kind: int, wall_side: int, slots: int = 0, dug: bool = false) -> BattleCover:
 	var c := BattleCover.new()
 	c.id = covers.size() + 1
 	c.x0 = minf(x0, x1)
 	c.x1 = maxf(x0, x1)
 	c.kind = kind
 	c.wall_side = wall_side
+	c.dug = dug
 	c.build_slots(slots)
 	covers.append(c)
+	if dug:
+		_has_pits = true
 	return c
+
+
+## 그리는 땅 높이(m) — 참호 버전 엄폐물의 도랑 안이면 −도랑 깊이, 아니면 0. 화면이 병사 · 총알 자국 · 맞은 점을 이만큼 내려 그린다.
+## 시뮬 판정에는 안 쓴다(참호 버전 = 시뮬은 모래주머니 판과 같음 — BattleCover 설명)
+func draw_ground_h(x: float, d: float) -> float:
+	if not _has_pits:
+		return 0.0
+	for c in covers:
+		if c.in_pit(x, d):
+			return -c.pit_depth()
+	return 0.0
 
 
 ## 분대 투입 — 그 편의 맵 끝에서 분대째로 나온다(§2-7 고정 분대 · 안건 E). 병종 하나 × 그 병종의 분대 인원

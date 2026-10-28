@@ -38,6 +38,7 @@ const REORDER_SEC := 0.1           # z 띠를 다시 매기는 주기
 const TRACER_MIN_SEC := 0.06       # 총알 자국이 보이는 최소 시간(실제 비행은 너무 짧아 안 보인다)
 const TRACER_TAIL := 0.35          # 자국 꼬리 길이(경로의 비율)
 const IMPACT_SEC := 0.1            # 도착 뒤 점이 남는 시간
+const FOOT_SPEED := 2.4            # 그리는 발 높이가 참호 버전 도랑 바닥을 따라가는 빠르기(m/초)
 const CORPSE_FADE_SEC := 1.5       # 사라지기 직전 흐려지는 시간
 const LABEL_W := 140.0
 const OFFSCREEN_MARGIN_PX := 150.0 # 화면 밖으로 이만큼까지는 애니를 계속 돌린다(들어올 때 튀지 않게)
@@ -64,6 +65,7 @@ class Entry:
 	var label := ""
 	var last_intent := ""
 	var dead_t := -1.0                       # 쓰러진 뒤 지난 시간(−1 = 살아 있음)
+	var vis_h := 0.0                         # 그리는 발 높이(m) — 그 자리 그리는 땅 높이(참호 버전 도랑 바닥)를 FOOT_SPEED 로 따라간다(들어가고 나올 때 안 튀게)
 
 
 var _bf: Battlefield = null
@@ -154,7 +156,7 @@ func soldier_near(canvas_pos: Vector2, team: int = -1, radius_px: float = 40.0) 
 	for s in _bf.soldiers:
 		if not s.can_fight() or (team >= 0 and s.team != team):
 			continue
-		var d := to_canvas(s.x, s.type.box(s.stance).y * 0.5, s.depth).distance_to(canvas_pos)
+		var d := to_canvas(s.x, vis_ground(s.x, s.depth) + s.type.box(s.stance).y * 0.5, s.depth).distance_to(canvas_pos)
 		if d <= best_d:
 			best_d = d
 			best = s
@@ -170,12 +172,18 @@ func aim_from_canvas(canvas_pos: Vector2, shooter: BattleSoldier) -> Vector3:
 		for s in _bf.soldiers:
 			if s.team == shooter.team or not s.can_fight():
 				continue
-			var d := to_canvas(s.x, s.type.box(s.stance).y * 0.5, s.depth).distance_squared_to(canvas_pos)
+			var d := to_canvas(s.x, vis_ground(s.x, s.depth) + s.type.box(s.stance).y * 0.5, s.depth).distance_squared_to(canvas_pos)
 			if d < best_d:
 				best_d = d
 				depth = s.depth
-	var h := maxf(0.0, (ground_at(depth) - canvas_pos.y) / maxf(ppm, 0.001))
-	return Vector3(x_from_canvas(canvas_pos.x), h, depth)
+	var x := x_from_canvas(canvas_pos.x)
+	var h := maxf(0.0, (ground_at(depth) - canvas_pos.y) / maxf(ppm, 0.001) - vis_ground(x, depth))    # 그린 높이 → 시뮬 높이(참호 버전 도랑 안은 내려 그렸다)
+	return Vector3(x, h, depth)
+
+
+## 그리는 땅 높이(m) — 참호 버전 엄폐물의 도랑 안이면 −도랑 깊이(Battlefield.draw_ground_h). 시뮬 높이 + 이것 = 그리는 높이
+func vis_ground(x: float, depth: float) -> float:
+	return _bf.draw_ground_h(x, depth) if _bf != null and is_instance_valid(_bf) else 0.0
 
 
 ## 지금 쓰는 z 띠 수(53 을 넘기면 띠가 모자란다 — 부하시험_결과.md §4)
@@ -358,8 +366,8 @@ func _on_shot(shot: Dictionary) -> void:
 	var a: Vector3 = shot.get("from", Vector3.ZERO)
 	var b: Vector3 = shot.get("to", Vector3.ZERO)
 	_tracers.append({
-		"a": to_canvas(a.x, a.y, a.z),
-		"b": to_canvas(b.x, b.y, b.z),
+		"a": to_canvas(a.x, a.y + vis_ground(a.x, a.z), a.z),               # 참호 버전 도랑 안 끝은 내려 그린다(병사와 같이)
+		"b": to_canvas(b.x, b.y + vis_ground(b.x, b.z), b.z),
 		"t0": _clock,
 		"dur": maxf(float(shot.get("flight", 0.0)), TRACER_MIN_SEC),
 		"hit": shot.get("hit", null) != null,
@@ -420,7 +428,8 @@ func _update_soldier(e: Entry, delta: float, step: float) -> void:
 		return
 	var t := s.type
 	var sc := t.height_m * ppm / maxf(t.puppet_body_px, 1.0)
-	p.position = to_canvas(s.x, 0.0, s.depth)                       # 자리는 매 프레임(값이 거의 안 든다)
+	e.vis_h = move_toward(e.vis_h, vis_ground(s.x, s.depth), FOOT_SPEED * delta)
+	p.position = to_canvas(s.x, e.vis_h, s.depth)                   # 자리는 매 프레임(값이 거의 안 든다)
 	p.scale = Vector2(sc * float(s.facing if s.facing != 0 else 1), sc)   # 퍼펫은 오른쪽을 보게 구워져 있다
 	if e.motion != "" and p.position.x > _vis_x0 and p.position.x < _vis_x1:   # 맞는 동작이 없거나 화면 밖이면 진행시키지 않는다
 		e.acc += delta
@@ -621,14 +630,11 @@ func _draw_ground() -> void:
 	for c in _bf.covers:
 		var cx0 := c.x0 * ppm
 		var cx1 := c.x1 * ppm
-		_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, y1 - y0), Color(0.25, 0.3, 0.23))          # 병사가 서는 구간
-		var hpx := c.wall_height() * ppm
-		for wx in c.wall_xs():
-			# 벽은 깊이 전체를 덮는다 — 옆에서 보면 깊이 0 ~ 1 에 걸친 세로 막대, 높이만큼 위로 솟는다
-			var px := wx * ppm
-			_bg.draw_rect(Rect2(px - 2.5, y0 - hpx, 5.0, (y1 - y0) + hpx), Color(0.45, 0.38, 0.26))
-			_bg.draw_rect(Rect2(px - 2.5, y0 - hpx, 5.0, 3.0), Color(0.66, 0.57, 0.4))
-			_bg.draw_line(Vector2(px - 6.0, y1 - hpx), Vector2(px + 6.0, y1 - hpx), Color(0.66, 0.57, 0.4), 1.0)
+		var label_y := y0 - c.wall_height() * ppm - 6.0
+		if c.dug:
+			_draw_dug_cover(c, y0, y1)
+		else:
+			_draw_wall_cover(c, y0, y1)
 		for i in c.slot_x.size():
 			var owner_s := c.slot_owner[i]
 			var col := Color(1.0, 1.0, 1.0, 0.22)
@@ -636,10 +642,49 @@ func _draw_ground() -> void:
 				col = TEAM_LINE[clampi(owner_s.team, 0, 1)]
 			_bg.draw_circle(to_canvas(c.slot_x[i], 0.0, c.slot_depth[i]), 3.0, col)
 		if font != null:
-			_bg.draw_string(font, Vector2(cx0, y0 - hpx - 6.0), "%s #%d  칸 %d/%d" % [BattleCover.KIND_NAMES[c.kind], c.id,
+			_bg.draw_string(font, Vector2(cx0, label_y), "%s #%d  칸 %d/%d" % [BattleCover.KIND_NAMES[c.kind], c.id,
 				c.slot_owner.size() - c.free_count(), c.slot_owner.size()], HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11, Color(1.0, 1.0, 1.0, 0.55))
 	if not _bf.equipments.is_empty():
 		EquipMarks.draw_ground(self, _bg, _bf)                  # 운용 장비 · 좌석 자리(§2-13 — 모델 없이 자리 표시만)
+
+
+## 낮음 · 높음 엄폐물 — 병사가 서는 구간(깊이 전체) + 벽
+func _draw_wall_cover(c: BattleCover, y0: float, y1: float) -> void:
+	var cx0 := c.x0 * ppm
+	var cx1 := c.x1 * ppm
+	_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, y1 - y0), Color(0.25, 0.3, 0.23))          # 병사가 서는 구간
+	var hpx := c.wall_height() * ppm
+	for wx in c.wall_xs():
+		# 벽은 깊이 전체를 덮는다 — 옆에서 보면 깊이 0 ~ 1 에 걸친 세로 막대, 높이만큼 위로 솟는다
+		var px := wx * ppm
+		_bg.draw_rect(Rect2(px - 2.5, y0 - hpx, 5.0, (y1 - y0) + hpx), Color(0.45, 0.38, 0.26))
+		_bg.draw_rect(Rect2(px - 2.5, y0 - hpx, 5.0, 3.0), Color(0.66, 0.57, 0.4))
+		_bg.draw_line(Vector2(px - 6.0, y1 - hpx), Vector2(px + 6.0, y1 - hpx), Color(0.66, 0.57, 0.4), 1.0)
+
+
+## 참호 버전 엄폐물(10-28) — 도랑을 잘라 낸 단면처럼(사용자 "참호 안이 다 보여야지" — 워페어 참호): 도랑 구간 · 깊이 전체가 어두운 흙이고,
+## 병사가 도랑 바닥(땅 아래 pit_depth)에 서므로 맨 앞 깊이 병사의 발까지 담기게 띠 아래로 도랑 깊이만큼 더 그린다(앞쪽 단면 흙).
+## 병사는 그 안에 몸 전체가 보인다. 2D 퍼펫 화면은 벽 쪽 모래주머니도 여기서, 3D 화면은 모래주머니를 깊이마다 세운다(BattleView3D.build_trench_cards)
+func _draw_dug_cover(c: BattleCover, y0: float, y1: float) -> void:
+	var cx0 := c.pit_x0() * ppm
+	var cx1 := c.pit_x1() * ppm
+	var floor_px := c.pit_depth() * ppm
+	_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, y1 - y0 + floor_px), Color(0.2, 0.17, 0.13))           # 도랑 안(깊이 전체 + 맨 앞 바닥까지)
+	_bg.draw_rect(Rect2(cx0, y1, cx1 - cx0, floor_px), Color(0.33, 0.26, 0.18))                        # 앞쪽 단면(잘라 낸 흙벽)
+	_bg.draw_line(Vector2(cx0, y1), Vector2(cx1, y1), Color(0.45, 0.37, 0.25), 1.0)
+	_bg.draw_rect(Rect2(cx0, y0, cx1 - cx0, y1 - y0 + floor_px), Color(0.13, 0.11, 0.08), false, 1.0)
+	if _trench_cards_3d():
+		return
+	var hpx := c.sandbag_h() * ppm
+	for wx in c.wall_xs():
+		var px := wx * ppm
+		_bg.draw_rect(Rect2(px - 5.0, y0 - hpx, 10.0, (y1 - y0) + hpx), Color(0.66, 0.57, 0.4))
+		_bg.draw_rect(Rect2(px - 5.0, y0 - hpx, 10.0, (y1 - y0) + hpx), Color(0.4, 0.34, 0.24), false, 1.0)
+
+
+## 참호 버전의 모래주머니를 3D 로 세우나(BattleView3D 는 true — 2D 모래주머니를 안 그린다)
+func _trench_cards_3d() -> bool:
+	return false
 
 
 # ───────────── 그리기: 퍼펫 위(상자 · 글자 · 총알 자국) ─────────────
@@ -657,7 +702,7 @@ func _draw_overlay() -> void:
 			var box := s.type.box(s.stance)
 			var wpx := box.x * ppm
 			var hpx := box.y * ppm
-			var gy := ground_at(s.depth)
+			var gy := ground_at(s.depth) - e.vis_h * ppm               # 발 = 그리는 발 높이(참호 도랑 안이면 땅 아래)
 			var cx := s.x * ppm
 			if show_boxes:
 				var r := Rect2(cx - wpx * 0.5, gy - hpx, wpx, hpx)

@@ -77,6 +77,9 @@ var wear_mode: int = Wear.TYPE:
 		_redress_all()
 
 var _dot: DRDotView3D = null
+var _trench_cards: Array = []        # 참호 버전 모래주머니 판(MeshInstance3D — 3D 창 안, build_trench_cards)
+const SANDBAG_W_M := 0.5                     # 참호 버전 벽 쪽 모래주머니 가로(m)
+const SANDBAG_STEP_PX := 6.0                 # 모래주머니 판을 깊이 따라 세우는 간격(화면 px — 판 높이보다 작아 이어져 보인다)
 var _pool3d: Dictionary = {}         # 프리팹 경로 -> Array[DRCharacter3D] (쉬는 캐릭터)
 var _avail3d: Dictionary = {}        # 프리팹 경로 -> 동작 이름들(같은 프리팹 캐릭터는 같은 동작 묶음을 같이 쓴다)
 var _warned: Dictionary = {}         # 이미 경고한 것(같은 경고를 병사마다 되풀이하지 않게)
@@ -208,12 +211,76 @@ func _face_yaw(facing: int) -> float:
 
 # ───────────── BattleView 의 퍼펫 자리를 3D 로 바꿔 끼운다 ─────────────
 
-## 전장을 붙인다(BattleView) + 피격 신호(10-21 — 맞은 점 · 총알 방향)
+## 전장을 붙인다(BattleView) + 피격 신호(10-21 — 맞은 점 · 총알 방향) + 참호 판(10-28)
 func setup(bf: Battlefield) -> void:
 	super(bf)
 	_hit_rng.randomize()
 	if bf != null and not bf.soldier_hit.is_connected(_on_hit):
 		bf.soldier_hit.connect(_on_hit)
+	_ensure_dot()
+	build_trench_cards()
+
+
+func _trench_cards_3d() -> bool:
+	return true
+
+
+## 참호 버전 엄폐물의 모래주머니(10-28, 02 U58) — 벽 쪽(wall_xs)에 깊이를 따라 모래주머니 판을 촘촘히 세운다(병사와 같은 3D 창 · 제 깊이).
+## 도랑 안은 잘라 낸 단면처럼 다 보인다(사용자 "참호 안이 다 보여야지" — 워페어 참호): 병사는 도랑 바닥에 선 채 몸 전체가 보이고,
+## 도랑 안쪽(어두운 흙)은 2D 땅 층이 바닥 깊이만큼 아래로 그린다(BattleView._draw_dug_cover). 앞을 가리는 판은 없다.
+## 판은 세로로 선 평면이라 1 m = ppm px(도트 2 px 면 20 도트) — 그림 1 텍셀 = 도트 1 개. 그림은 아직 코드로 그린 임시(아스트라 리소스가 오면 PNG)
+func build_trench_cards() -> void:
+	for n in _trench_cards:
+		if is_instance_valid(n):
+			(n as Node).queue_free()
+	_trench_cards.clear()
+	if _bf == null or _dot == null:
+		return
+	var th := deg_to_rad(_dot.pitch_deg)
+	var step := SANDBAG_STEP_PX / maxf(depth_px, 1.0)                  # 깊이 간격(판끼리 화면에서 SANDBAG_STEP_PX 씩 겹쳐 이어진다)
+	for c in _bf.covers:
+		if not c.dug:
+			continue
+		var h := c.sandbag_h()
+		var q := QuadMesh.new()
+		q.size = Vector2(SANDBAG_W_M * cos(th), h + 0.05)                  # 2D 의 x 1 m = 3D 로 cos θ m(좌표 계약)
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_texture = _sandbag_tex(SANDBAG_W_M, h + 0.05)
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		m.alpha_scissor_threshold = 0.5
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		for wx in c.wall_xs():
+			var out := 1.0 if wx >= c.center_x() else -1.0                  # 벽은 구간 바깥쪽으로 반쯤 걸친다(안쪽 칸 병사를 덮지 않게)
+			var d := 0.0
+			while d <= 1.0001:
+				var mi := MeshInstance3D.new()
+				mi.name = "Sandbag%d" % c.id
+				mi.mesh = q
+				mi.material_override = m
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mi.position = _dot.ground_to_world(to_canvas(wx + out * SANDBAG_W_M * 0.25, 0.0, d)) + Vector3(0.0, (h - 0.05) * 0.5, 0.0)
+				_dot.world.add_child(mi)
+				_trench_cards.append(mi)
+				d += step
+
+
+## 모래주머니 판 임시 그림(1 m = 20 텍셀, 위 = 높은 쪽) — 모래주머니 두 단 + 아래 흙 한 줄
+func _sandbag_tex(w_m: float, h_m: float) -> ImageTexture:
+	const TPM := 20.0
+	var w := maxi(int(round(w_m * TPM)), 3)
+	var h := maxi(int(round(h_m * TPM)), 3)
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var mid := (h - 1) / 2
+	for y in h:
+		for x in w:
+			var col := Color(0.69, 0.63, 0.47) if y < h - 1 else Color(0.45, 0.38, 0.27)
+			if y < h - 1 and (y == 0 or y == mid or (x + (y / maxi(mid, 1)) * 4) % 8 == 0):
+				col = Color(0.47, 0.41, 0.29)                                       # 모래주머니 이음 · 단
+			img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
 
 
 func _attach(s: BattleSoldier) -> void:
@@ -319,7 +386,8 @@ func _update_soldier(e: Entry, delta: float, _step: float) -> void:
 	if not show_puppets:
 		return
 	var foot := to_canvas(s.x, 0.0, s.depth)
-	var p := _dot.ground_to_world(foot)                                 # 깊이 → 3D 앞뒤
+	e3.vis_h = move_toward(e3.vis_h, vis_ground(s.x, s.depth), FOOT_SPEED * delta)
+	var p := _dot.ground_to_world(foot) + Vector3(0.0, e3.vis_h, 0.0)   # 깊이 → 3D 앞뒤 · 참호 도랑 안이면 바닥으로
 	if p != e3.pos:
 		e3.pos = p
 		ch.position = p
@@ -377,7 +445,7 @@ func _aim(e: Entry3D) -> void:
 		if e.ch.has_aim_target():
 			e.ch.clear_aim_target()
 		return
-	e.ch.set_aim_target(_dot.ground_to_world(to_canvas(a.x, 0.0, s.depth)) + Vector3(0.0, a.y, 0.0))
+	e.ch.set_aim_target(_dot.ground_to_world(to_canvas(a.x, 0.0, s.depth)) + Vector3(0.0, a.y + vis_ground(a.x, a.z), 0.0))   # 참호 버전 도랑 안 표적은 내려 그렸다
 
 
 func _pick_motion(e: Entry) -> void:
@@ -444,8 +512,8 @@ func _on_hit(s: BattleSoldier, info: Dictionary) -> void:
 		return
 	var d: Vector3 = info.get("dir", Vector3.ZERO)      # x 1 m 마다 (x · 높이 · 깊이 m)
 	var back := Vector3(pt.x - d.x, pt.y - d.y, pt.z - d.z / maxf(_bf.depth_width_m, 0.001))    # 총알이 x 1 m 앞에 있던 점(시뮬 좌표)
-	var wp := _dot.ground_to_world(to_canvas(pt.x, 0.0, pt.z)) + Vector3(0.0, pt.y, 0.0)
-	var wb := _dot.ground_to_world(to_canvas(back.x, 0.0, back.z)) + Vector3(0.0, back.y, 0.0)
+	var wp := _dot.ground_to_world(to_canvas(pt.x, 0.0, pt.z)) + Vector3(0.0, pt.y + vis_ground(pt.x, pt.z), 0.0)      # 참호 버전 도랑 안은 내려 그렸다
+	var wb := _dot.ground_to_world(to_canvas(back.x, 0.0, back.z)) + Vector3(0.0, back.y + vis_ground(pt.x, pt.z), 0.0)
 	if e.ch.hit_react(wp, wp - wb) != "":
 		hit_stats["ik"] += 1
 
@@ -478,6 +546,6 @@ func _draw_ground() -> void:
 		# 쓰러진 병사는 그림자를 안 그린다 — 사망 동작이 몸을 1.2 m 쯤 뒤로 밀어(Stand_Rifle_Hit_To_Back) 기록 자리와 어긋난다
 		if e.ch == null or e.dead_t >= 0.0:
 			continue
-		_bg.draw_set_transform(to_canvas(e.s.x, 0.0, e.s.depth), 0.0, Vector2(1.0, SHADOW_FLAT))
+		_bg.draw_set_transform(to_canvas(e.s.x, e.vis_h, e.s.depth), 0.0, Vector2(1.0, SHADOW_FLAT))     # 참호 도랑 안이면 바닥에
 		_bg.draw_circle(Vector2.ZERO, r, col)
 	_bg.draw_set_transform(Vector2.ZERO)

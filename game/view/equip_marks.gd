@@ -25,24 +25,25 @@ static func draw_ground(v: BattleView, ci: Node2D, bf: Battlefield) -> void:
 		var col := _color(eq)
 		var f := float(eq.facing)
 		var d := eq.depth
+		var g := v.vis_ground(eq.x, d)                  # 참호 버전 도랑 안이면 내려 그린다(병사와 같이)
 		var mh := eq.type.muzzle_height
 		var up := eq.state == BattleEquipment.State.READY or eq.state == BattleEquipment.State.TEARDOWN
 		if eq.state == BattleEquipment.State.DROPPED:
 			mh = 0.15                                   # 놓인 채(접힌 장비) — 땅에 눕힌다
-		var hub := v.to_canvas(eq.x, mh - 0.1, d)
+		var hub := v.to_canvas(eq.x, g + mh - 0.1, d)
 		if up or eq.state == BattleEquipment.State.SETUP:
 			var leg := col.darkened(0.25)
-			ci.draw_line(hub, v.to_canvas(eq.x + f * LEG_SPREAD_M, 0.0, d), leg, 2.0)
-			ci.draw_line(hub, v.to_canvas(eq.x - f * LEG_SPREAD_M * 1.2, 0.0, d), leg, 2.0)
-		var breech := v.to_canvas(eq.x - f * 0.4, mh - 0.04, d)
-		var muzzle := v.to_canvas(eq.x + f * eq.type.muzzle_ahead_m, mh, d)
+			ci.draw_line(hub, v.to_canvas(eq.x + f * LEG_SPREAD_M, g, d), leg, 2.0)
+			ci.draw_line(hub, v.to_canvas(eq.x - f * LEG_SPREAD_M * 1.2, g, d), leg, 2.0)
+		var breech := v.to_canvas(eq.x - f * 0.4, g + mh - 0.04, d)
+		var muzzle := v.to_canvas(eq.x + f * eq.type.muzzle_ahead_m, g + mh, d)
 		ci.draw_line(breech, muzzle, col, 4.0 if up else 3.0)
 		if eq.state == BattleEquipment.State.SETUP:
 			# 설치가 얼마나 됐나 — 총몸 아래 가는 막대
 			var t := 1.0 - clampf(eq.timer / maxf(eq.type.setup_time, 0.01), 0.0, 1.0)
 			ci.draw_line(breech + Vector2(0, 5), breech.lerp(muzzle, t) + Vector2(0, 5), Color(1.0, 0.9, 0.3, 0.9), 2.0)
 		for i in eq.seats.size():
-			var p := v.to_canvas(eq.seat_x(i), 0.0, eq.seat_depth(i))
+			var p := v.to_canvas(eq.seat_x(i), v.vis_ground(eq.seat_x(i), eq.seat_depth(i)), eq.seat_depth(i))
 			var r := 5.0 if i == 0 else 4.0
 			if eq.seats[i] != null:
 				ci.draw_circle(p, r, Color(col, 0.55))
