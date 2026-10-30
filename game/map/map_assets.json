@@ -1,0 +1,827 @@
+{
+	"title": "맵 리소스 — 아스트라(Codex 내장 image_gen) 2026-10-30",
+	"note": "그림은 80 px = 1 m(게임 화면 BattleView.ppm 40 = 0.5 배). anchor = 그림 안의 기준점(땅에 닿는 점). 땅은 assembly 대로 겹쳐 잇는다. 철조망 상태 그림은 서로 좌표가 맞는 애니 프레임이 아니다.",
+	"units": {
+		"pixelsPerMeter": 80,
+		"characterReferenceHeight": 144,
+		"environmentPixelStep": 1,
+		"originalCharacterPixelStep": 4,
+		"playableGroundHeight": 300
+	},
+	"assembly": {
+		"chunkWidth": 1536,
+		"overlap": 128,
+		"stride": 1408,
+		"method": "opaque first ground + left-faded following grounds, independent scenery anchors",
+		"notSeamlessByItself": true,
+		"shader": "res://game/map/shaders/ground_blend.gdshader"
+	},
+	"flags": {
+		"files": [
+			{
+				"id": "france",
+				"file": "res://game/map/art/flags/france.svg"
+			},
+			{
+				"id": "neutral",
+				"file": "res://game/map/art/flags/neutral.svg"
+			},
+			{
+				"id": "usa_48_stars",
+				"file": "res://game/map/art/flags/usa_48_stars.svg"
+			}
+		],
+		"pole": "flagpole",
+		"shader": "res://game/map/shaders/flag_wave.gdshader",
+		"method": "Polygon2D 를 가로 28 × 세로 4 칸으로 나눠 문양을 입히고 셰이더 cloth_size = 깃발 크기, wind_time 을 매 프레임 넘김. 깃대 그림 위에서 16 px 아래에 붙임"
+	},
+	"generation": {
+		"generator": "built-in image_gen",
+		"mode": "independent_text_to_image",
+		"priorGeneratedImageInputs": 0,
+		"aiRepaints": 0,
+		"acceptedMasterGenerations": 18,
+		"latestGrayCoils": 5,
+		"sourceExportSteps": [
+			"shared crop",
+			"size normalization",
+			"alpha below8 cleanup",
+			"transparent padding"
+		]
+	},
+	"assets": [
+		{
+			"id": "sky_overcast",
+			"file": "res://game/map/art/backgrounds/sky_overcast.png",
+			"width": 1536,
+			"height": 1024,
+			"category": "backgrounds",
+			"anchor": {
+				"x": 0,
+				"y": 0
+			},
+			"artPixelStep": 1,
+			"repeat": "overlap128"
+		},
+		{
+			"id": "ground_plain",
+			"file": "res://game/map/art/ground/ground_plain.png",
+			"width": 1536,
+			"height": 300,
+			"category": "ground",
+			"anchor": {
+				"x": 0,
+				"y": 0
+			},
+			"artPixelStep": 1,
+			"repeat": "overlap128",
+			"playableDepthMeters": 14
+		},
+		{
+			"id": "ground_ruts",
+			"file": "res://game/map/art/ground/ground_ruts.png",
+			"width": 1536,
+			"height": 300,
+			"category": "ground",
+			"anchor": {
+				"x": 0,
+				"y": 0
+			},
+			"artPixelStep": 1,
+			"repeat": "overlap128",
+			"playableDepthMeters": 14
+		},
+		{
+			"id": "ground_wet",
+			"file": "res://game/map/art/ground/ground_wet.png",
+			"width": 1536,
+			"height": 300,
+			"category": "ground",
+			"anchor": {
+				"x": 0,
+				"y": 0
+			},
+			"artPixelStep": 1,
+			"repeat": "overlap128",
+			"playableDepthMeters": 14
+		},
+		{
+			"id": "farmhouse",
+			"file": "res://game/map/art/landmarks/farmhouse.png",
+			"width": 560,
+			"height": 432,
+			"category": "landmarks",
+			"anchor": {
+				"x": 280,
+				"y": 430
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "shed",
+			"file": "res://game/map/art/landmarks/shed.png",
+			"width": 400,
+			"height": 216,
+			"category": "landmarks",
+			"anchor": {
+				"x": 200,
+				"y": 214
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "ruin_gable",
+			"file": "res://game/map/art/landmarks/ruin_gable.png",
+			"width": 320,
+			"height": 336,
+			"category": "landmarks",
+			"anchor": {
+				"x": 160,
+				"y": 334
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "trench_vertical",
+			"file": "res://game/map/art/trenches/trench_vertical.png",
+			"width": 96,
+			"height": 300,
+			"category": "trenches",
+			"anchor": {
+				"x": 0,
+				"y": 0
+			},
+			"artPixelStep": 1,
+			"repeat": "vertical-overlap12",
+			"widthMeters": 1.2
+		},
+		{
+			"id": "trench_end_low",
+			"file": "res://game/map/art/trenches/trench_end_low.png",
+			"width": 96,
+			"height": 56,
+			"category": "trenches",
+			"anchor": {
+				"x": 48,
+				"y": 54
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "trench_end_high",
+			"file": "res://game/map/art/trenches/trench_end_high.png",
+			"width": 96,
+			"height": 96,
+			"category": "trenches",
+			"anchor": {
+				"x": 48,
+				"y": 94
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "bag_end_a",
+			"file": "res://game/map/art/cover/bag_end_a.png",
+			"width": 40,
+			"height": 24,
+			"category": "cover",
+			"anchor": {
+				"x": 20,
+				"y": 22
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "bag_end_b",
+			"file": "res://game/map/art/cover/bag_end_b.png",
+			"width": 40,
+			"height": 24,
+			"category": "cover",
+			"anchor": {
+				"x": 20,
+				"y": 22
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "bag_end_c",
+			"file": "res://game/map/art/cover/bag_end_c.png",
+			"width": 40,
+			"height": 24,
+			"category": "cover",
+			"anchor": {
+				"x": 20,
+				"y": 22
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "sandbags_low",
+			"file": "res://game/map/art/cover/sandbags_low.png",
+			"width": 120,
+			"height": 80,
+			"category": "cover",
+			"anchor": {
+				"x": 60,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"widthMeters": 1.5,
+			"heightMeters": 1
+		},
+		{
+			"id": "sandbags_high",
+			"file": "res://game/map/art/cover/sandbags_high.png",
+			"width": 120,
+			"height": 120,
+			"category": "cover",
+			"anchor": {
+				"x": 60,
+				"y": 118
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"widthMeters": 1.5,
+			"heightMeters": 1.5
+		},
+		{
+			"id": "hedge_a",
+			"file": "res://game/map/art/scenery/hedge_a.png",
+			"width": 320,
+			"height": 120,
+			"category": "scenery",
+			"anchor": {
+				"x": 160,
+				"y": 118
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "hedge_b",
+			"file": "res://game/map/art/scenery/hedge_b.png",
+			"width": 320,
+			"height": 132,
+			"category": "scenery",
+			"anchor": {
+				"x": 160,
+				"y": 130
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "hedge_c",
+			"file": "res://game/map/art/scenery/hedge_c.png",
+			"width": 240,
+			"height": 176,
+			"category": "scenery",
+			"anchor": {
+				"x": 120,
+				"y": 174
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "hedge_d",
+			"file": "res://game/map/art/scenery/hedge_d.png",
+			"width": 320,
+			"height": 128,
+			"category": "scenery",
+			"anchor": {
+				"x": 160,
+				"y": 126
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "bare_tree_a",
+			"file": "res://game/map/art/scenery/bare_tree_a.png",
+			"width": 192,
+			"height": 320,
+			"category": "scenery",
+			"anchor": {
+				"x": 96,
+				"y": 318
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "bare_tree_b",
+			"file": "res://game/map/art/scenery/bare_tree_b.png",
+			"width": 152,
+			"height": 296,
+			"category": "scenery",
+			"anchor": {
+				"x": 76,
+				"y": 294
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "broken_tree",
+			"file": "res://game/map/art/scenery/broken_tree.png",
+			"width": 144,
+			"height": 224,
+			"category": "scenery",
+			"anchor": {
+				"x": 72,
+				"y": 222
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "stump",
+			"file": "res://game/map/art/scenery/stump.png",
+			"width": 96,
+			"height": 80,
+			"category": "scenery",
+			"anchor": {
+				"x": 48,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wall_low",
+			"file": "res://game/map/art/scenery/wall_low.png",
+			"width": 240,
+			"height": 80,
+			"category": "scenery",
+			"anchor": {
+				"x": 120,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wall_high",
+			"file": "res://game/map/art/scenery/wall_high.png",
+			"width": 240,
+			"height": 120,
+			"category": "scenery",
+			"anchor": {
+				"x": 120,
+				"y": 118
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "farm_gate",
+			"file": "res://game/map/art/scenery/farm_gate.png",
+			"width": 240,
+			"height": 120,
+			"category": "scenery",
+			"anchor": {
+				"x": 120,
+				"y": 118
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "grass_tuft",
+			"file": "res://game/map/art/scenery/grass_tuft.png",
+			"width": 120,
+			"height": 48,
+			"category": "scenery",
+			"anchor": {
+				"x": 60,
+				"y": 46
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "hedgehog_a",
+			"file": "res://game/map/art/obstacles/hedgehog_a.png",
+			"width": 144,
+			"height": 144,
+			"category": "obstacles",
+			"anchor": {
+				"x": 72,
+				"y": 142
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "hedgehog_b",
+			"file": "res://game/map/art/obstacles/hedgehog_b.png",
+			"width": 144,
+			"height": 144,
+			"category": "obstacles",
+			"anchor": {
+				"x": 72,
+				"y": 142
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "dragons_tooth",
+			"file": "res://game/map/art/obstacles/dragons_tooth.png",
+			"width": 120,
+			"height": 104,
+			"category": "obstacles",
+			"anchor": {
+				"x": 60,
+				"y": 102
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "barbed_wire",
+			"file": "res://game/map/art/obstacles/barbed_wire.png",
+			"width": 320,
+			"height": 104,
+			"category": "obstacles",
+			"anchor": {
+				"x": 160,
+				"y": 102
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "log_barricade",
+			"file": "res://game/map/art/obstacles/log_barricade.png",
+			"width": 240,
+			"height": 96,
+			"category": "obstacles",
+			"anchor": {
+				"x": 120,
+				"y": 94
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "concrete_block",
+			"file": "res://game/map/art/obstacles/concrete_block.png",
+			"width": 200,
+			"height": 80,
+			"category": "obstacles",
+			"anchor": {
+				"x": 100,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "shell_crater",
+			"file": "res://game/map/art/obstacles/shell_crater.png",
+			"width": 224,
+			"height": 56,
+			"category": "obstacles",
+			"anchor": {
+				"x": 112,
+				"y": 54
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "broken_wire",
+			"file": "res://game/map/art/obstacles/broken_wire.png",
+			"width": 240,
+			"height": 104,
+			"category": "obstacles",
+			"anchor": {
+				"x": 120,
+				"y": 102
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "sandbag_corner",
+			"file": "res://game/map/art/obstacles/sandbag_corner.png",
+			"width": 160,
+			"height": 80,
+			"category": "obstacles",
+			"anchor": {
+				"x": 80,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "ammo_crate",
+			"file": "res://game/map/art/supplies/ammo_crate.png",
+			"width": 64,
+			"height": 40,
+			"category": "supplies",
+			"anchor": {
+				"x": 32,
+				"y": 38
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "supply_crates",
+			"file": "res://game/map/art/supplies/supply_crates.png",
+			"width": 96,
+			"height": 80,
+			"category": "supplies",
+			"anchor": {
+				"x": 48,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "fuel_drum",
+			"file": "res://game/map/art/supplies/fuel_drum.png",
+			"width": 48,
+			"height": 80,
+			"category": "supplies",
+			"anchor": {
+				"x": 24,
+				"y": 78
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "jerrycan",
+			"file": "res://game/map/art/supplies/jerrycan.png",
+			"width": 32,
+			"height": 48,
+			"category": "supplies",
+			"anchor": {
+				"x": 16,
+				"y": 46
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "rolled_tarp",
+			"file": "res://game/map/art/supplies/rolled_tarp.png",
+			"width": 96,
+			"height": 48,
+			"category": "supplies",
+			"anchor": {
+				"x": 48,
+				"y": 46
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "timber_pile",
+			"file": "res://game/map/art/supplies/timber_pile.png",
+			"width": 160,
+			"height": 64,
+			"category": "supplies",
+			"anchor": {
+				"x": 80,
+				"y": 62
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "rubble",
+			"file": "res://game/map/art/supplies/rubble.png",
+			"width": 160,
+			"height": 64,
+			"category": "supplies",
+			"anchor": {
+				"x": 80,
+				"y": 62
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "blank_sign",
+			"file": "res://game/map/art/supplies/blank_sign.png",
+			"width": 80,
+			"height": 120,
+			"category": "supplies",
+			"anchor": {
+				"x": 40,
+				"y": 118
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "flagpole",
+			"file": "res://game/map/art/supplies/flagpole.png",
+			"width": 36,
+			"height": 240,
+			"category": "supplies",
+			"anchor": {
+				"x": 18,
+				"y": 238
+			},
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wire_vertical_intact",
+			"label": "정상",
+			"cause": "undamaged",
+			"file": "res://game/map/art/wire_posts/wire_vertical_intact.png",
+			"width": 96,
+			"height": 300,
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"gameplayHint": "standing_barrier",
+			"note": "Independent fresh artwork. Shared canvas/anchor; exact stake positions do not form a pixel-registered destruction animation.",
+			"family": "posts",
+			"category": "wire_posts",
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wire_vertical_light",
+			"label": "경미 — 보병 절단",
+			"cause": "infantry_cut_open",
+			"file": "res://game/map/art/wire_posts/wire_vertical_light.png",
+			"width": 96,
+			"height": 300,
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"gameplayHint": "disabled_passage_or_debris",
+			"note": "Independent fresh artwork. Shared canvas/anchor; exact stake positions do not form a pixel-registered destruction animation.",
+			"family": "posts",
+			"category": "wire_posts",
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wire_vertical_medium",
+			"label": "중간 — 전차 압착",
+			"cause": "tank_crushed",
+			"file": "res://game/map/art/wire_posts/wire_vertical_medium.png",
+			"width": 96,
+			"height": 300,
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"gameplayHint": "disabled_passage_or_debris",
+			"note": "Independent fresh artwork. Shared canvas/anchor; exact stake positions do not form a pixel-registered destruction animation.",
+			"family": "posts",
+			"category": "wire_posts",
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wire_vertical_severe",
+			"label": "심각 — 큰 포격",
+			"cause": "heavy_artillery_blast",
+			"file": "res://game/map/art/wire_posts/wire_vertical_severe.png",
+			"width": 96,
+			"height": 300,
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"gameplayHint": "disabled_passage_or_debris",
+			"note": "Independent fresh artwork. Shared canvas/anchor; exact stake positions do not form a pixel-registered destruction animation.",
+			"family": "posts",
+			"category": "wire_posts",
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wire_vertical_destroyed",
+			"label": "완파 — 최소 잔해",
+			"cause": "minimal_blast_remains",
+			"file": "res://game/map/art/wire_posts/wire_vertical_destroyed.png",
+			"width": 96,
+			"height": 300,
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"gameplayHint": "disabled_passage_or_debris",
+			"note": "Independent fresh artwork. Shared canvas/anchor; exact stake positions do not form a pixel-registered destruction animation.",
+			"family": "posts",
+			"category": "wire_posts",
+			"artPixelStep": 1,
+			"repeat": "none"
+		},
+		{
+			"id": "wire_coil_vertical_intact",
+			"file": "res://game/map/art/wire_coils/wire_coil_vertical_intact.png",
+			"width": 96,
+			"height": 300,
+			"category": "wire_coils",
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"state": "intact",
+			"label": "정상",
+			"cause": "undamaged",
+			"material": "cool-neutral gray galvanized steel, light field wear",
+			"gameplayHint": "standing_barrier"
+		},
+		{
+			"id": "wire_coil_vertical_light",
+			"file": "res://game/map/art/wire_coils/wire_coil_vertical_light.png",
+			"width": 96,
+			"height": 300,
+			"category": "wire_coils",
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"state": "light",
+			"label": "경미 — 보병 절단",
+			"cause": "infantry_cut_open",
+			"material": "cool-neutral gray galvanized steel, light field wear",
+			"gameplayHint": "disabled_passage_or_debris"
+		},
+		{
+			"id": "wire_coil_vertical_medium",
+			"file": "res://game/map/art/wire_coils/wire_coil_vertical_medium.png",
+			"width": 96,
+			"height": 300,
+			"category": "wire_coils",
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"state": "medium",
+			"label": "중간 — 전차 압착",
+			"cause": "tank_crushed",
+			"material": "cool-neutral gray galvanized steel, light field wear",
+			"gameplayHint": "disabled_passage_or_debris"
+		},
+		{
+			"id": "wire_coil_vertical_severe",
+			"file": "res://game/map/art/wire_coils/wire_coil_vertical_severe.png",
+			"width": 96,
+			"height": 300,
+			"category": "wire_coils",
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"state": "severe",
+			"label": "심각 — 포격 파손",
+			"cause": "heavy_artillery_blast",
+			"material": "cool-neutral gray galvanized steel, light field wear",
+			"gameplayHint": "disabled_passage_or_debris"
+		},
+		{
+			"id": "wire_coil_vertical_destroyed",
+			"file": "res://game/map/art/wire_coils/wire_coil_vertical_destroyed.png",
+			"width": 96,
+			"height": 300,
+			"category": "wire_coils",
+			"anchor": {
+				"x": 48,
+				"y": 298
+			},
+			"artPixelStep": 1,
+			"repeat": "none",
+			"state": "destroyed",
+			"label": "완파 — 최소 잔해",
+			"cause": "minimal_blast_remains",
+			"material": "cool-neutral gray galvanized steel, light field wear",
+			"gameplayHint": "disabled_passage_or_debris"
+		}
+	]
+}
