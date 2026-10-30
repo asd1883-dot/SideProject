@@ -188,6 +188,7 @@ yaw **−55°**, pitch 0 · 자동 맞춤 **끔** · 여백 0 · 해상도 **184
 7. **사용자 파일은 커밋하지 않는다** — `game/units/soldier_base.tscn` · `game/units/rifleman_motions.tres` · `game/dot_style.tres` · `UAL1_preset.tres` · `human.tres` ·
    `puppet/*` · `outfits/*` · `source3d/weapons/kar98k/asset.json`(사용자가 에디터에서 저장). 사용자가 올리라고 할 때만.
 8. **맵(10-28)** — 맵은 2D 그림(아스트라). 요청서 · 레이어 · 크기 · 참호 버전은 `Docs/게임설계/맵_리소스.md`. 받으면 도트 격자로 줄여 판으로(할 일 목록 같은 문서).
+   **10-30 받음** → `game/map/`(그림 55 · 깃발 SVG 3 · `map_assets.json` 기준점 · 땅 잇기 · 깃발 셰이더). 1 화소 세밀한 그림이라 도트로 줄일지 사용자 확인 · 아직 화면에 안 붙임.
    참호 버전 엄폐물(02 U58) — 시뮬은 모래주머니 판과 같고 모습만. 시험장 낮음 48 · 69.5 m. 사용자 확인 대기(모습).
 
 ### 그 전 목록(10-02 까지)

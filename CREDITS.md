@@ -23,3 +23,4 @@
 |---|---|---|
 | 사람 몸 · M36 군복 | ComfyUI + Tripo(사용자 구독) 로 만든 3D · 기준 뼈대에 붙임 | `source3d/characters/human_base/` · `source3d/characters/uniform_m36/` |
 | MP40 | ComfyUI 로 만든 3D | `source3d/weapons/mp40/` |
+| 맵 그림 · 깃발 문양 | 아스트라(Codex 내장 image_gen) 로 생성(10-30, 이미지 입력 없이 글로만 · 프롬프트 `Docs/게임설계/아스트라_프롬프트.txt`) | `game/map/` |
